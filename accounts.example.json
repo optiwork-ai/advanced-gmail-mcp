@@ -1,0 +1,13 @@
+{
+  "accounts": [
+    {
+      "email": "you@gmail.com",
+      "alias": "personal"
+    },
+    {
+      "email": "you@company.com",
+      "alias": "work"
+    }
+  ],
+  "default": "personal"
+}

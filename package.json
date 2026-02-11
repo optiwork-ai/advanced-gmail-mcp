@@ -1,0 +1,22 @@
+{
+  "name": "gmail-mcp",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Gmail MCP server for Claude Code — multi-account email management",
+  "scripts": {
+    "auth": "tsx src/auth.ts",
+    "auth:check": "tsx src/auth.ts --check",
+    "start": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "googleapis": "^144.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
