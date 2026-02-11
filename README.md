@@ -1,5 +1,7 @@
 # Gmail MCP Server
 
+![Advanced Gmail MCP](social-preview.png)
+
 A Gmail [MCP server](https://modelcontextprotocol.io) for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) that provides full email management across multiple Gmail accounts.
 
 ## Features
