@@ -16,8 +16,8 @@ A Gmail [MCP server](https://modelcontextprotocol.io) for [Claude Code](https://
 ### 1. Clone & Install
 
 ```bash
-git clone https://github.com/coreyepstein/gmail-mcp.git
-cd gmail-mcp
+git clone https://github.com/coreyepstein/advanced-gmail-mcp.git
+cd advanced-gmail-mcp
 npm install
 ```
 
