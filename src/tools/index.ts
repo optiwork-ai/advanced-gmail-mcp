@@ -7,6 +7,8 @@ import { registerGetLabels } from './labels.js';
 import { registerSendEmail } from './send.js';
 import { registerDraftEmail } from './draft.js';
 import { registerReplyEmail } from './reply.js';
+import { registerDraftReply } from './draft-reply.js';
+import { registerSendDraft } from './send-draft.js';
 import { registerArchiveEmail } from './archive.js';
 import { registerLabelEmail } from './label.js';
 import { registerTrashEmail } from './trash.js';
@@ -27,6 +29,8 @@ export function registerAllTools(server: McpServer): void {
   registerSendEmail(server);
   registerDraftEmail(server);
   registerReplyEmail(server);
+  registerDraftReply(server);
+  registerSendDraft(server);
 
   // Modify tools
   registerArchiveEmail(server);

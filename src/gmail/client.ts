@@ -682,3 +682,137 @@ export async function replyToMessage(opts: {
     labelIds: response.data.labelIds || [],
   };
 }
+
+/**
+ * Create a draft reply to an existing message.
+ * Same threading logic as replyToMessage, but creates a draft instead of sending.
+ * The draft appears in Gmail for user review before sending.
+ */
+export async function createDraftReply(opts: {
+  messageId: string;
+  body: string;
+  account?: string;
+  is_html?: boolean;
+  reply_all?: boolean;
+  cc?: string;
+  bcc?: string;
+}): Promise<DraftResult> {
+  const resolved = resolveAccount(opts.account);
+  const gmail = await getGmailClient(resolved);
+
+  // Fetch the original message to get threading headers
+  const original = await withRetry(() =>
+    gmail.users.messages.get({
+      userId: 'me',
+      id: opts.messageId,
+      format: 'metadata',
+      metadataHeaders: ['From', 'To', 'Cc', 'Subject', 'Message-ID', 'References'],
+    })
+  );
+
+  const headers = original.data.payload?.headers || [];
+  const originalFrom = extractHeader(headers, 'From');
+  const originalTo = extractHeader(headers, 'To');
+  const originalCc = extractHeader(headers, 'Cc');
+  const originalSubject = extractHeader(headers, 'Subject');
+  const originalMessageId = extractHeader(headers, 'Message-ID');
+  const originalReferences = extractHeader(headers, 'References');
+
+  const subject = originalSubject.startsWith('Re:')
+    ? originalSubject
+    : `Re: ${originalSubject}`;
+
+  const to = originalFrom;
+
+  const extractEmail = (addr: string): string => {
+    const match = addr.match(/<([^>]+)>/);
+    return (match ? match[1] : addr).trim().toLowerCase();
+  };
+
+  const ccParts: string[] = [];
+  const seen = new Set<string>();
+  seen.add(resolved.email.toLowerCase());
+
+  if (opts.reply_all) {
+    for (const addr of [originalTo, originalCc].filter(Boolean).join(', ').split(',').map(a => a.trim()).filter(a => a.length > 0)) {
+      const email = extractEmail(addr);
+      if (!seen.has(email)) {
+        seen.add(email);
+        ccParts.push(addr);
+      }
+    }
+  }
+
+  if (opts.cc) {
+    for (const addr of opts.cc.split(',').map(a => a.trim()).filter(a => a.length > 0)) {
+      const email = extractEmail(addr);
+      if (!seen.has(email)) {
+        seen.add(email);
+        ccParts.push(addr);
+      }
+    }
+  }
+
+  const cc = ccParts.length > 0 ? ccParts.join(', ') : undefined;
+
+  const references = originalReferences
+    ? `${originalReferences} ${originalMessageId}`
+    : originalMessageId;
+
+  const raw = buildRawMessage({
+    from: resolved.email,
+    to,
+    cc,
+    bcc: opts.bcc,
+    subject,
+    body: opts.body,
+    is_html: opts.is_html,
+    in_reply_to: originalMessageId,
+    references,
+  });
+
+  const response = await withRetry(() =>
+    gmail.users.drafts.create({
+      userId: 'me',
+      requestBody: {
+        message: {
+          raw,
+          threadId: original.data.threadId || undefined,
+        },
+      },
+    })
+  );
+
+  return {
+    draft_id: response.data.id || '',
+    message: {
+      id: response.data.message?.id || '',
+      threadId: response.data.message?.threadId || '',
+    },
+  };
+}
+
+/**
+ * Send an existing draft by its draft ID.
+ */
+export async function sendDraft(opts: {
+  draftId: string;
+  account?: string;
+}): Promise<SendResult> {
+  const gmail = await getGmailClient(opts.account);
+
+  const response = await withRetry(() =>
+    gmail.users.drafts.send({
+      userId: 'me',
+      requestBody: {
+        id: opts.draftId,
+      },
+    })
+  );
+
+  return {
+    id: response.data.id || '',
+    threadId: response.data.threadId || '',
+    labelIds: response.data.labelIds || [],
+  };
+}
