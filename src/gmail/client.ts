@@ -265,6 +265,7 @@ function buildRawMessage(opts: MimeOptions): string {
 
 /**
  * List messages in a mailbox.
+ * Paginates through all results up to maxResults (default 500, hard cap 1000).
  */
 export async function listMessages(opts: {
   account?: string;
@@ -274,26 +275,42 @@ export async function listMessages(opts: {
 }): Promise<EmailSummary[]> {
   const gmail = await getGmailClient(opts.account);
   const labelIds = opts.label ? [opts.label] : ['INBOX'];
-  const maxResults = opts.maxResults ?? 20;
+  const maxResults = Math.min(opts.maxResults ?? 500, 1000);
 
-  const response = await withRetry(() =>
-    gmail.users.messages.list({
-      userId: 'me',
-      labelIds,
-      maxResults,
-      q: opts.query || undefined,
-    })
-  );
+  // Paginate through messages.list to collect all message IDs
+  const allMessageRefs: Array<{ id: string }> = [];
+  let pageToken: string | undefined;
 
-  const messages = response.data.messages || [];
-  if (messages.length === 0) return [];
+  while (allMessageRefs.length < maxResults) {
+    const pageSize = Math.min(maxResults - allMessageRefs.length, 500);
+    const response = await withRetry(() =>
+      gmail.users.messages.list({
+        userId: 'me',
+        labelIds,
+        maxResults: pageSize,
+        q: opts.query || undefined,
+        pageToken,
+      })
+    );
 
+    const messages = response.data.messages || [];
+    for (const msg of messages) {
+      if (msg.id) allMessageRefs.push({ id: msg.id });
+    }
+
+    pageToken = response.data.nextPageToken ?? undefined;
+    if (!pageToken || messages.length === 0) break;
+  }
+
+  if (allMessageRefs.length === 0) return [];
+
+  // Fetch metadata for each message
   const results: EmailSummary[] = [];
-  for (const msg of messages) {
+  for (const msg of allMessageRefs) {
     const full = await withRetry(() =>
       gmail.users.messages.get({
         userId: 'me',
-        id: msg.id!,
+        id: msg.id,
         format: 'metadata',
         metadataHeaders: ['From', 'To', 'Subject', 'Date'],
       })
@@ -328,6 +345,7 @@ export async function getMessage(opts: {
 
 /**
  * Search messages using Gmail query syntax.
+ * Paginates through all results up to maxResults (default 500, hard cap 1000).
  */
 export async function searchMessages(opts: {
   query: string;
@@ -335,25 +353,41 @@ export async function searchMessages(opts: {
   maxResults?: number;
 }): Promise<EmailSummary[]> {
   const gmail = await getGmailClient(opts.account);
-  const maxResults = opts.maxResults ?? 20;
+  const maxResults = Math.min(opts.maxResults ?? 500, 1000);
 
-  const response = await withRetry(() =>
-    gmail.users.messages.list({
-      userId: 'me',
-      q: opts.query,
-      maxResults,
-    })
-  );
+  // Paginate through messages.list to collect all message IDs
+  const allMessageRefs: Array<{ id: string }> = [];
+  let pageToken: string | undefined;
 
-  const messages = response.data.messages || [];
-  if (messages.length === 0) return [];
+  while (allMessageRefs.length < maxResults) {
+    const pageSize = Math.min(maxResults - allMessageRefs.length, 500);
+    const response = await withRetry(() =>
+      gmail.users.messages.list({
+        userId: 'me',
+        q: opts.query,
+        maxResults: pageSize,
+        pageToken,
+      })
+    );
 
+    const messages = response.data.messages || [];
+    for (const msg of messages) {
+      if (msg.id) allMessageRefs.push({ id: msg.id });
+    }
+
+    pageToken = response.data.nextPageToken ?? undefined;
+    if (!pageToken || messages.length === 0) break;
+  }
+
+  if (allMessageRefs.length === 0) return [];
+
+  // Fetch metadata for each message
   const results: EmailSummary[] = [];
-  for (const msg of messages) {
+  for (const msg of allMessageRefs) {
     const full = await withRetry(() =>
       gmail.users.messages.get({
         userId: 'me',
-        id: msg.id!,
+        id: msg.id,
         format: 'metadata',
         metadataHeaders: ['From', 'To', 'Subject', 'Date'],
       })

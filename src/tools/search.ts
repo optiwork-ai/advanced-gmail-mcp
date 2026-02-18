@@ -5,7 +5,7 @@ import { searchMessages } from '../gmail/client.js';
 export const searchEmailsParams = {
   query: z.string().describe('Gmail search query (e.g. "from:alice subject:report after:2024/01/01")'),
   account: z.string().optional().describe('Account alias or email address. Uses default account if not specified.'),
-  max_results: z.number().optional().describe('Maximum number of results to return (default: 20)'),
+  max_results: z.number().optional().describe('Maximum number of results to return (default: 500, max: 1000). Paginates automatically.'),
 };
 
 export function registerSearchEmails(server: McpServer): void {

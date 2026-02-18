@@ -5,7 +5,7 @@ import { listMessages } from '../gmail/client.js';
 export const listEmailsParams = {
   account: z.string().optional().describe('Account alias or email address. Uses default account if not specified.'),
   label: z.string().optional().describe('Gmail label ID to filter by (default: INBOX)'),
-  max_results: z.number().optional().describe('Maximum number of emails to return (default: 20)'),
+  max_results: z.number().optional().describe('Maximum number of emails to return (default: 500, max: 1000). Paginates automatically.'),
   query: z.string().optional().describe('Gmail search query to filter results'),
 };
 
