@@ -6,7 +6,7 @@ A Gmail [MCP server](https://modelcontextprotocol.io) for [Claude Code](https://
 
 ## Features
 
-- **12 tools**: list, search, read, thread, labels, send, draft, reply, archive, label, trash, batch modify
+- **15 tools**: list, search, read, thread, labels, send, draft, reply, draft reply, send draft, archive, label, trash, batch modify, unsubscribe
 - **Multi-account** support with simple aliases
 - **OAuth2** authentication with interactive CLI flow
 - **Token auto-refresh** — re-authenticates transparently
@@ -118,10 +118,13 @@ Then use `/email` or `/checkemail` in Claude Code.
 | `send_email` | Send a new email |
 | `draft_email` | Create a draft |
 | `reply_email` | Reply with proper threading |
+| `draft_reply` | Draft a reply (review in Gmail before sending) |
+| `send_draft` | Send an existing draft by ID |
 | `archive_email` | Archive (remove INBOX label) |
 | `label_email` | Add/remove labels |
 | `trash_email` | Move to trash |
 | `batch_modify` | Batch archive/trash/label |
+| `unsubscribe_email` | Process `List-Unsubscribe` header (one-click HTTPS or mailto) |
 
 All tools accept an optional `account` parameter (alias or email). Defaults to the account set in `accounts.json`.
 
@@ -140,7 +143,7 @@ Full email management command with actions:
 Quick 3-phase inbox sweep:
 1. Fetch & classify all inbox emails (auto-archive junk)
 2. Batch archive on approval
-3. Walk through remaining emails one at a time
+3. Walk through remaining emails one at a time — per-email actions include archive, reply, and unsubscribe (offered when a `List-Unsubscribe` header is present)
 
 ## Troubleshooting
 

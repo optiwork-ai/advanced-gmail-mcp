@@ -29,6 +29,15 @@ export interface EmailFull {
   body_html: string;
   labels: string[];
   attachments: AttachmentInfo[];
+  list_unsubscribe: string;
+  list_unsubscribe_post: string;
+}
+
+/** Result from unsubscribe operations. */
+export interface UnsubscribeResult {
+  success: boolean;
+  method: 'mailto' | 'https' | 'none';
+  detail: string;
 }
 
 /** Attachment metadata (no content). */

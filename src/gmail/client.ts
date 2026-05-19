@@ -14,6 +14,7 @@ import type {
   DraftResult,
   ModifyResult,
   BatchResult,
+  UnsubscribeResult,
 } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -198,6 +199,8 @@ function toEmailFull(msg: gmail_v1.Schema$Message): EmailFull {
     body_html: html,
     labels: msg.labelIds || [],
     attachments,
+    list_unsubscribe: extractHeader(headers, 'List-Unsubscribe'),
+    list_unsubscribe_post: extractHeader(headers, 'List-Unsubscribe-Post'),
   };
 }
 
@@ -238,6 +241,16 @@ interface MimeOptions {
 }
 
 /**
+ * RFC 2047 encoded-word for header values containing non-ASCII characters.
+ * Returns the value untouched when it's pure ASCII.
+ */
+function encodeHeaderValue(value: string): string {
+  if (/^[\x00-\x7F]*$/.test(value)) return value;
+  const encoded = Buffer.from(value, 'utf-8').toString('base64');
+  return `=?UTF-8?B?${encoded}?=`;
+}
+
+/**
  * Build an RFC 2822 message and encode as base64url for the Gmail API.
  */
 function buildRawMessage(opts: MimeOptions): string {
@@ -247,7 +260,7 @@ function buildRawMessage(opts: MimeOptions): string {
   lines.push(`To: ${opts.to}`);
   if (opts.cc) lines.push(`Cc: ${opts.cc}`);
   if (opts.bcc) lines.push(`Bcc: ${opts.bcc}`);
-  lines.push(`Subject: ${opts.subject}`);
+  lines.push(`Subject: ${encodeHeaderValue(opts.subject)}`);
   if (opts.in_reply_to) lines.push(`In-Reply-To: ${opts.in_reply_to}`);
   if (opts.references) lines.push(`References: ${opts.references}`);
   lines.push(`MIME-Version: 1.0`);
@@ -824,6 +837,146 @@ export async function createDraftReply(opts: {
       threadId: response.data.message?.threadId || '',
     },
   };
+}
+
+export interface ParsedUnsubscribe {
+  httpsUrls: string[];
+  mailto: { address: string; subject: string; body: string } | null;
+  canOneClick: boolean;
+}
+
+/**
+ * Parse RFC 2369 List-Unsubscribe + RFC 8058 List-Unsubscribe-Post into actionable parts.
+ * Exported for unit testing.
+ */
+export function parseUnsubscribeHeaders(
+  listUnsub: string,
+  listUnsubPost: string,
+): ParsedUnsubscribe {
+  if (!listUnsub) {
+    return { httpsUrls: [], mailto: null, canOneClick: false };
+  }
+
+  const httpsUrls: string[] = [];
+  let mailto: ParsedUnsubscribe['mailto'] = null;
+
+  for (const match of listUnsub.matchAll(/<([^>]+)>/g)) {
+    const entry = match[1].trim();
+    if (/^https?:\/\//i.test(entry)) {
+      httpsUrls.push(entry);
+    } else if (/^mailto:/i.test(entry) && !mailto) {
+      const [address, queryString] = entry.replace(/^mailto:/i, '').split('?');
+      const params = new URLSearchParams(queryString || '');
+      mailto = {
+        address,
+        subject: params.get('subject') || 'Unsubscribe',
+        body: params.get('body') || 'Unsubscribe',
+      };
+    }
+  }
+
+  return {
+    httpsUrls,
+    mailto,
+    canOneClick: httpsUrls.length > 0 && listUnsubPost.length > 0,
+  };
+}
+
+/**
+ * Unsubscribe from a mailing list by processing the List-Unsubscribe header.
+ * Prefers RFC 8058 one-click HTTPS POST; falls back to mailto.
+ */
+export async function unsubscribeFromEmail(opts: {
+  messageId: string;
+  account?: string;
+}): Promise<UnsubscribeResult> {
+  const resolved = resolveAccount(opts.account);
+  const gmail = await getGmailClient(resolved);
+
+  const response = await withRetry(() =>
+    gmail.users.messages.get({
+      userId: 'me',
+      id: opts.messageId,
+      format: 'metadata',
+      metadataHeaders: ['List-Unsubscribe', 'List-Unsubscribe-Post'],
+    })
+  );
+
+  const headers = response.data.payload?.headers || [];
+  const listUnsub = extractHeader(headers, 'List-Unsubscribe');
+  const listUnsubPost = extractHeader(headers, 'List-Unsubscribe-Post');
+
+  if (!listUnsub) {
+    return { success: false, method: 'none', detail: 'No List-Unsubscribe header found on this email.' };
+  }
+
+  const { httpsUrls, mailto, canOneClick } = parseUnsubscribeHeaders(listUnsub, listUnsubPost);
+
+  // Try every HTTPS URL in order when one-click is available.
+  const httpsFailures: string[] = [];
+  if (canOneClick) {
+    for (const url of httpsUrls) {
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: listUnsubPost,
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (res.ok || res.status === 204) {
+          return {
+            success: true,
+            method: 'https',
+            detail: `One-click unsubscribe POST to ${url} succeeded (${res.status}).`,
+          };
+        }
+        httpsFailures.push(`${url} → HTTP ${res.status}`);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        httpsFailures.push(`${url} → ${reason}`);
+      }
+    }
+  }
+
+  // Fallback: mailto unsubscribe.
+  if (mailto) {
+    const raw = buildRawMessage({
+      from: resolved.email,
+      to: mailto.address,
+      subject: mailto.subject,
+      body: mailto.body,
+    });
+
+    await withRetry(() =>
+      gmail.users.messages.send({
+        userId: 'me',
+        requestBody: { raw },
+      })
+    );
+
+    const httpsNote = httpsFailures.length > 0
+      ? ` HTTPS attempt(s) failed first: ${httpsFailures.join('; ')}.`
+      : '';
+    return {
+      success: true,
+      method: 'mailto',
+      detail: `Unsubscribe email sent to ${mailto.address}.${httpsNote}`,
+    };
+  }
+
+  // HTTPS URL(s) present but no usable one-click path — return manual URL.
+  if (httpsUrls.length > 0) {
+    const reason = httpsFailures.length > 0
+      ? `Auto-POST failed: ${httpsFailures.join('; ')}.`
+      : 'No List-Unsubscribe-Post header for one-click.';
+    return {
+      success: false,
+      method: 'https',
+      detail: `Cannot auto-unsubscribe (${reason}) Visit manually: ${httpsUrls[0]}`,
+    };
+  }
+
+  return { success: false, method: 'none', detail: `Could not parse List-Unsubscribe header: ${listUnsub}` };
 }
 
 /**

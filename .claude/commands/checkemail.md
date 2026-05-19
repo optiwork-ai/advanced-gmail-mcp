@@ -86,6 +86,7 @@ For each email in triage queue, in priority order (unread action-needed first, t
 2. Ask user what to do via `AskUserQuestion`:
    - **Archive** — done with it
    - **Reply** — draft a reply (show draft for approval before sending)
+   - **Unsubscribe** — only offer this when `read_email` shows a non-empty `list_unsubscribe` header. Calls `unsubscribe_email`, then archives the email. Report whether it used mailto or one-click HTTPS, and whether it succeeded.
    - **Skip** — come back to it later
    - (user can always type a custom action)
 
