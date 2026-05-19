@@ -21,6 +21,9 @@ import { registerListDrafts } from './list-drafts.js';
 import { registerReadDraft } from './read-draft.js';
 import { registerForwardEmail } from './forward.js';
 import { registerStarTools } from './star.js';
+import { registerCreateLabel } from './create-label.js';
+import { registerUpdateLabel } from './update-label.js';
+import { registerDeleteLabel } from './delete-label.js';
 
 /**
  * Register all Gmail MCP tools with the server.
@@ -53,4 +56,7 @@ export function registerAllTools(server: McpServer): void {
   registerReadDraft(server);
   registerForwardEmail(server);
   registerStarTools(server);
+  registerCreateLabel(server);
+  registerUpdateLabel(server);
+  registerDeleteLabel(server);
 }

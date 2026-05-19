@@ -6,7 +6,7 @@ A Gmail [MCP server](https://modelcontextprotocol.io) for [Claude Code](https://
 
 ## Features
 
-- **25 tools** spanning read, compose, draft management, modify, attachments, and list-handling — see the [Tools](#tools) table
+- **28 tools** spanning read, compose, draft management, modify, attachments, and label management — see the [Tools](#tools) table
 - **Multi-account** support with simple aliases
 - **OAuth2** authentication with interactive CLI flow
 - **Token auto-refresh** — re-authenticates transparently
@@ -18,7 +18,7 @@ A Gmail [MCP server](https://modelcontextprotocol.io) for [Claude Code](https://
 ### 1. Clone & Install
 
 ```bash
-git clone https://github.com/coreyepstein/advanced-gmail-mcp.git
+git clone https://github.com/optiwork-ai/advanced-gmail-mcp.git
 cd advanced-gmail-mcp
 npm install
 ```
@@ -135,6 +135,9 @@ Then use `/email` or `/checkemail` in Claude Code.
 | `unstar_email` | Remove STARRED label |
 | `mark_important` | Add IMPORTANT label |
 | `mark_not_important` | Remove IMPORTANT label |
+| `create_label` | Create a new label (optionally colored) |
+| `update_label` | Rename or recolor a label |
+| `delete_label` | Delete a label (removes it from every message) |
 
 All tools accept an optional `account` parameter (alias or email). Defaults to the account set in `accounts.json`.
 
@@ -154,6 +157,45 @@ Quick 3-phase inbox sweep:
 1. Fetch & classify all inbox emails (auto-archive junk)
 2. Batch archive on approval
 3. Walk through remaining emails one at a time — per-email actions include archive, reply, and unsubscribe (offered when a `List-Unsubscribe` header is present)
+
+## Logging
+
+The server writes one JSON line per event (retries, auth errors, startup) to a log file.
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `GMAIL_MCP_LOG_PATH` | `~/.cache/gmail-mcp/server.log` | Path for the JSON-lines log |
+| `GMAIL_MCP_LOG_DISABLE` | unset | Set to `1` to disable logging entirely |
+
+Tail it with `tail -f ~/.cache/gmail-mcp/server.log | jq` to watch live activity.
+
+## Smoke testing
+
+`scripts/smoke.ts` is a CLI harness that exercises individual client functions against real Gmail. Useful for verifying changes locally without going through an MCP host.
+
+```bash
+# Read-only — safe to run any time
+tsx scripts/smoke.ts list personal 10
+tsx scripts/smoke.ts search personal "category:promotions" 
+tsx scripts/smoke.ts inspect personal <message-id>
+tsx scripts/smoke.ts listDrafts personal
+
+# Write operations — actually modify Gmail state
+tsx scripts/smoke.ts markUnread personal <message-id>
+tsx scripts/smoke.ts forward personal <message-id> you@example.com
+tsx scripts/smoke.ts trash personal <message-id>
+```
+
+Run `tsx scripts/smoke.ts` with no args to see the full command list.
+
+## Testing
+
+```bash
+npm run typecheck  # tsc --noEmit
+npm test           # vitest unit tests
+```
+
+CI runs both on every push and PR ([.github/workflows/ci.yml](.github/workflows/ci.yml)).
 
 ## Troubleshooting
 

@@ -609,6 +609,105 @@ export async function listLabels(opts?: {
 }
 
 /**
+ * Create a new Gmail label.
+ */
+export async function createLabel(opts: {
+  name: string;
+  account?: string;
+  textColor?: string;
+  backgroundColor?: string;
+}): Promise<LabelInfo> {
+  const gmail = await getGmailClient(opts.account);
+
+  const color = (opts.textColor || opts.backgroundColor)
+    ? {
+        textColor: opts.textColor || '#000000',
+        backgroundColor: opts.backgroundColor || '#ffffff',
+      }
+    : undefined;
+
+  const response = await withRetry(() =>
+    gmail.users.labels.create({
+      userId: 'me',
+      requestBody: {
+        name: opts.name,
+        labelListVisibility: 'labelShow',
+        messageListVisibility: 'show',
+        ...(color ? { color } : {}),
+      },
+    })
+  );
+
+  const label = response.data;
+  return {
+    id: label.id || '',
+    name: label.name || opts.name,
+    type: label.type || 'user',
+    messagesTotal: label.messagesTotal || 0,
+    messagesUnread: label.messagesUnread || 0,
+  };
+}
+
+/**
+ * Update an existing label (rename and/or recolor).
+ */
+export async function updateLabel(opts: {
+  labelId: string;
+  account?: string;
+  name?: string;
+  textColor?: string;
+  backgroundColor?: string;
+}): Promise<LabelInfo> {
+  const gmail = await getGmailClient(opts.account);
+
+  const color = (opts.textColor || opts.backgroundColor)
+    ? {
+        textColor: opts.textColor || '#000000',
+        backgroundColor: opts.backgroundColor || '#ffffff',
+      }
+    : undefined;
+
+  const response = await withRetry(() =>
+    gmail.users.labels.patch({
+      userId: 'me',
+      id: opts.labelId,
+      requestBody: {
+        ...(opts.name ? { name: opts.name } : {}),
+        ...(color ? { color } : {}),
+      },
+    })
+  );
+
+  const label = response.data;
+  return {
+    id: label.id || opts.labelId,
+    name: label.name || '',
+    type: label.type || 'user',
+    messagesTotal: label.messagesTotal || 0,
+    messagesUnread: label.messagesUnread || 0,
+  };
+}
+
+/**
+ * Delete a label. The label is removed from every message it was applied to.
+ */
+export async function deleteLabel(opts: {
+  labelId: string;
+  account?: string;
+}): Promise<{ success: boolean; labelId: string }> {
+  const gmail = await getGmailClient(opts.account);
+
+  await withRetry(() =>
+    gmail.users.labels.delete({
+      userId: 'me',
+      id: opts.labelId,
+    })
+  );
+
+  return { success: true, labelId: opts.labelId };
+}
+
+/**
  * Get a thread with all its messages.
  */
 export async function getThread(opts: {

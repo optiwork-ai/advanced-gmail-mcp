@@ -40,6 +40,9 @@ Before using any tool, run `ToolSearch` with query `+gmail` to load them.
 | `forward_email` | Forward an email (message_id, to, account, body?, cc?, bcc?, is_html?) |
 | `star_email` / `unstar_email` | Toggle STARRED label (message_id, account) |
 | `mark_important` / `mark_not_important` | Toggle IMPORTANT label (message_id, account) |
+| `create_label` | Create a label (name, text_color?, background_color?, account) |
+| `update_label` | Rename/recolor a label (label_id, name?, colors?, account) |
+| `delete_label` | Delete a label (label_id, account) — confirm with user first |
 
 ## Actions
 

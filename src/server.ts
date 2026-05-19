@@ -6,7 +6,7 @@ import { log } from './log.js';
 const server = new McpServer(
   {
     name: 'gmail-mcp',
-    version: '1.0.0',
+    version: '1.1.0',
   },
   {
     capabilities: {

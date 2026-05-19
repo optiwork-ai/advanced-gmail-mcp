@@ -28,9 +28,12 @@
  *   timing <account> <maxResults>               — time list_emails at given size
  */
 import {
+  createLabel,
+  deleteLabel,
   forwardMessage,
   getAttachment,
   getMessage,
+  listLabels,
   searchMessages,
   listMessages,
   listDrafts,
@@ -39,6 +42,7 @@ import {
   sendMessage,
   trashMessage,
   unsubscribeFromEmail,
+  updateLabel,
 } from '../src/gmail/client.js';
 import { resolveAccount } from '../src/config.js';
 
@@ -164,6 +168,28 @@ async function main() {
     case 'trash': {
       const result = await trashMessage({ messageId: a1, account });
       console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+    case 'createLabel': {
+      const result = await createLabel({ name: a1, account });
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+    case 'updateLabel': {
+      // updateLabel <account> <labelId> <newName>
+      const result = await updateLabel({ labelId: a1, name: a2, account });
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+    case 'deleteLabel': {
+      const result = await deleteLabel({ labelId: a1, account });
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+    case 'findLabel': {
+      const all = await listLabels({ account });
+      const match = all.filter(l => l.name.toLowerCase().includes(a1.toLowerCase()));
+      console.log(JSON.stringify(match, null, 2));
       return;
     }
     case 'sendSelf': {
