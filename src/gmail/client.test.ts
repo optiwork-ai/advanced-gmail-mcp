@@ -1,5 +1,83 @@
-import { describe, expect, it } from 'vitest';
-import { parseUnsubscribeHeaders } from './client.js';
+import { describe, expect, it, vi } from 'vitest';
+import { parseUnsubscribeHeaders, withRetry } from './client.js';
+
+function statusError(status: number, message = 'fail'): Error & { code?: number } {
+  const err = new Error(message) as Error & { code?: number };
+  err.code = status;
+  return err;
+}
+
+describe('withRetry', () => {
+  it('returns the value on the first attempt when fn succeeds', async () => {
+    const fn = vi.fn().mockResolvedValue('ok');
+    const sleep = vi.fn();
+    await expect(withRetry(fn, { sleep })).resolves.toBe('ok');
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('retries on 429 and succeeds', async () => {
+    const fn = vi.fn()
+      .mockRejectedValueOnce(statusError(429))
+      .mockResolvedValue('ok');
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    await expect(withRetry(fn, { sleep })).resolves.toBe('ok');
+    expect(fn).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([500, 502, 503, 504])('retries on %i and succeeds', async (status) => {
+    const fn = vi.fn()
+      .mockRejectedValueOnce(statusError(status))
+      .mockResolvedValue('ok');
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    await expect(withRetry(fn, { sleep })).resolves.toBe('ok');
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry on 400', async () => {
+    const fn = vi.fn().mockRejectedValue(statusError(400));
+    const sleep = vi.fn();
+    await expect(withRetry(fn, { sleep })).rejects.toMatchObject({ code: 400 });
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('rewrites 401 to a re-auth instruction', async () => {
+    const fn = vi.fn().mockRejectedValue(statusError(401, 'token bad'));
+    await expect(withRetry(fn, { sleep: vi.fn() })).rejects.toThrow(/Re-authenticate/);
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('rewrites 403 to a re-auth instruction', async () => {
+    const fn = vi.fn().mockRejectedValue(statusError(403, 'scope bad'));
+    await expect(withRetry(fn, { sleep: vi.fn() })).rejects.toThrow(/Re-authenticate/);
+  });
+
+  it('exhausts retries and re-throws the last error', async () => {
+    const fn = vi.fn().mockRejectedValue(statusError(503));
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    await expect(withRetry(fn, { sleep, maxRetries: 2 })).rejects.toMatchObject({ code: 503 });
+    expect(fn).toHaveBeenCalledTimes(3); // initial + 2 retries
+    expect(sleep).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses exponential backoff: 1s, 2s, 4s', async () => {
+    const fn = vi.fn().mockRejectedValue(statusError(503));
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    await expect(withRetry(fn, { sleep, maxRetries: 3 })).rejects.toBeDefined();
+    expect(sleep).toHaveBeenNthCalledWith(1, 1000);
+    expect(sleep).toHaveBeenNthCalledWith(2, 2000);
+    expect(sleep).toHaveBeenNthCalledWith(3, 4000);
+  });
+
+  it('reads status from response.status as well as code', async () => {
+    const err: any = new Error('fail');
+    err.response = { status: 503 };
+    const fn = vi.fn().mockRejectedValueOnce(err).mockResolvedValue('ok');
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    await expect(withRetry(fn, { sleep })).resolves.toBe('ok');
+  });
+});
 
 describe('parseUnsubscribeHeaders', () => {
   it('returns empty result when header is missing', () => {

@@ -1,21 +1,22 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { sendDraft } from '../gmail/client.js';
+import { modifyMessage } from '../gmail/client.js';
 
-export const sendDraftParams = {
-  draft_id: z.string().describe('The Gmail draft ID to send (returned by draft_email or draft_reply)'),
+export const markUnreadParams = {
+  message_id: z.string().describe('The Gmail message ID to mark as unread'),
   account: z.string().optional().describe('Account alias or email address. Uses default account if not specified.'),
 };
 
-export function registerSendDraft(server: McpServer): void {
+export function registerMarkUnread(server: McpServer): void {
   server.tool(
-    'send_draft',
-    'Send an existing draft by its draft ID. Use after reviewing a draft created by draft_email or draft_reply.',
-    sendDraftParams,
-    async ({ draft_id, account }) => {
+    'mark_unread',
+    'Mark an email as unread by adding the UNREAD label.',
+    markUnreadParams,
+    async ({ message_id, account }) => {
       try {
-        const result = await sendDraft({
-          draftId: draft_id,
+        const result = await modifyMessage({
+          messageId: message_id,
+          addLabelIds: ['UNREAD'],
           account: account ?? undefined,
         });
 
@@ -23,7 +24,7 @@ export function registerSendDraft(server: McpServer): void {
           content: [
             {
               type: 'text' as const,
-              text: JSON.stringify(result, null, 2),
+              text: JSON.stringify({ success: result.success, id: result.id }, null, 2),
             },
           ],
         };

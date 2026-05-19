@@ -25,10 +25,15 @@ Before using any tool, run `ToolSearch` with query `+gmail` to load them.
 | `send_email` | Send new email (to, subject, body, account) |
 | `draft_email` | Create draft (to, subject, body, account) |
 | `reply_email` | Reply to email (message_id, body, account) |
+| `draft_reply` | Draft a reply (review in Gmail before sending) |
+| `send_draft` | Send an existing draft by ID |
 | `archive_email` | Archive email (message_id, account) |
 | `label_email` | Add/remove labels (message_id, add_labels, remove_labels, account) |
 | `trash_email` | Trash email (message_id, account) |
 | `batch_modify` | Batch archive/trash/label (message_ids, action, account) |
+| `unsubscribe_email` | Process `List-Unsubscribe` header (one-click HTTPS or mailto) |
+| `mark_read` | Remove UNREAD label (message_id, account) |
+| `mark_unread` | Add UNREAD label (message_id, account) |
 
 ## Actions
 

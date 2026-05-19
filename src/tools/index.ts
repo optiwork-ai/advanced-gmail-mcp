@@ -14,6 +14,8 @@ import { registerLabelEmail } from './label.js';
 import { registerTrashEmail } from './trash.js';
 import { registerBatchModify } from './batch.js';
 import { registerUnsubscribe } from './unsubscribe.js';
+import { registerMarkRead } from './mark-read.js';
+import { registerMarkUnread } from './mark-unread.js';
 
 /**
  * Register all Gmail MCP tools with the server.
@@ -39,4 +41,6 @@ export function registerAllTools(server: McpServer): void {
   registerTrashEmail(server);
   registerBatchModify(server);
   registerUnsubscribe(server);
+  registerMarkRead(server);
+  registerMarkUnread(server);
 }

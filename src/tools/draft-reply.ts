@@ -5,7 +5,7 @@ import { createDraftReply } from '../gmail/client.js';
 export const draftReplyParams = {
   message_id: z.string().describe('The Gmail message ID to reply to'),
   body: z.string().describe('Reply body content'),
-  account: z.string().optional().describe('Account alias (vyg, indigo, personal, abacus) or email. Defaults to personal.'),
+  account: z.string().optional().describe('Account alias or email address. Uses default account if not specified.'),
   is_html: z.boolean().optional().describe('Whether the body is HTML (default: false, sends as plain text)'),
   reply_all: z.boolean().optional().describe('Reply to all recipients (default: false, replies only to sender)'),
   cc: z.string().optional().describe('CC recipients (comma-separated). Merged with reply-all CCs if both provided.'),

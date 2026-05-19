@@ -6,7 +6,7 @@ A Gmail [MCP server](https://modelcontextprotocol.io) for [Claude Code](https://
 
 ## Features
 
-- **15 tools**: list, search, read, thread, labels, send, draft, reply, draft reply, send draft, archive, label, trash, batch modify, unsubscribe
+- **17 tools**: list, search, read, thread, labels, send, draft, reply, draft reply, send draft, archive, label, trash, batch modify, unsubscribe, mark read, mark unread
 - **Multi-account** support with simple aliases
 - **OAuth2** authentication with interactive CLI flow
 - **Token auto-refresh** — re-authenticates transparently
@@ -125,6 +125,8 @@ Then use `/email` or `/checkemail` in Claude Code.
 | `trash_email` | Move to trash |
 | `batch_modify` | Batch archive/trash/label |
 | `unsubscribe_email` | Process `List-Unsubscribe` header (one-click HTTPS or mailto) |
+| `mark_read` | Remove UNREAD label from a message |
+| `mark_unread` | Add UNREAD label to a message |
 
 All tools accept an optional `account` parameter (alias or email). Defaults to the account set in `accounts.json`.
 

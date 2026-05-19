@@ -62,7 +62,15 @@ export async function getGmailClient(account?: string | AccountConfig): Promise<
 // Retry helper for rate limits
 // ---------------------------------------------------------------------------
 
-async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
+const defaultSleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+
+export async function withRetry<T>(
+  fn: () => Promise<T>,
+  opts: { maxRetries?: number; sleep?: (ms: number) => Promise<void> } = {},
+): Promise<T> {
+  const maxRetries = opts.maxRetries ?? 3;
+  const sleep = opts.sleep ?? defaultSleep;
   let lastError: unknown;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
@@ -71,7 +79,6 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
       lastError = err;
       const status = (err as any)?.code || (err as any)?.response?.status;
 
-      // Auth errors: give clear re-auth instructions, don't retry
       if (status === 401 || status === 403) {
         const message = err instanceof Error ? err.message : String(err);
         throw new Error(
@@ -80,17 +87,12 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
         );
       }
 
-      // Rate limit: retry with exponential backoff
-      if (status === 429 && attempt < maxRetries) {
-        const delay = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
-        await new Promise(resolve => setTimeout(resolve, delay));
+      if (RETRYABLE_STATUSES.has(status) && attempt < maxRetries) {
+        await sleep(Math.pow(2, attempt) * 1000); // 1s, 2s, 4s
         continue;
       }
 
-      // Other errors: pass through
-      if (status !== 429) {
-        throw err;
-      }
+      throw err;
     }
   }
   throw lastError;
@@ -276,6 +278,37 @@ function buildRawMessage(opts: MimeOptions): string {
 // API functions
 // ---------------------------------------------------------------------------
 
+const FETCH_CONCURRENCY = 10;
+
+/**
+ * Fetch metadata for many messages in parallel chunks, preserving input order.
+ */
+async function fetchMessageSummaries(
+  gmail: gmail_v1.Gmail,
+  messageRefs: Array<{ id: string }>,
+): Promise<EmailSummary[]> {
+  const results: EmailSummary[] = new Array(messageRefs.length);
+  for (let i = 0; i < messageRefs.length; i += FETCH_CONCURRENCY) {
+    const chunk = messageRefs.slice(i, i + FETCH_CONCURRENCY);
+    const chunkResults = await Promise.all(
+      chunk.map(msg =>
+        withRetry(() =>
+          gmail.users.messages.get({
+            userId: 'me',
+            id: msg.id,
+            format: 'metadata',
+            metadataHeaders: ['From', 'To', 'Subject', 'Date'],
+          })
+        )
+      )
+    );
+    chunkResults.forEach((full, idx) => {
+      results[i + idx] = toEmailSummary(full.data);
+    });
+  }
+  return results;
+}
+
 /**
  * List messages in a mailbox.
  * Paginates through all results up to maxResults (default 500, hard cap 1000).
@@ -290,7 +323,6 @@ export async function listMessages(opts: {
   const labelIds = opts.label ? [opts.label] : ['INBOX'];
   const maxResults = Math.min(opts.maxResults ?? 500, 1000);
 
-  // Paginate through messages.list to collect all message IDs
   const allMessageRefs: Array<{ id: string }> = [];
   let pageToken: string | undefined;
 
@@ -317,21 +349,7 @@ export async function listMessages(opts: {
 
   if (allMessageRefs.length === 0) return [];
 
-  // Fetch metadata for each message
-  const results: EmailSummary[] = [];
-  for (const msg of allMessageRefs) {
-    const full = await withRetry(() =>
-      gmail.users.messages.get({
-        userId: 'me',
-        id: msg.id,
-        format: 'metadata',
-        metadataHeaders: ['From', 'To', 'Subject', 'Date'],
-      })
-    );
-    results.push(toEmailSummary(full.data));
-  }
-
-  return results;
+  return fetchMessageSummaries(gmail, allMessageRefs);
 }
 
 /**
@@ -394,21 +412,7 @@ export async function searchMessages(opts: {
 
   if (allMessageRefs.length === 0) return [];
 
-  // Fetch metadata for each message
-  const results: EmailSummary[] = [];
-  for (const msg of allMessageRefs) {
-    const full = await withRetry(() =>
-      gmail.users.messages.get({
-        userId: 'me',
-        id: msg.id,
-        format: 'metadata',
-        metadataHeaders: ['From', 'To', 'Subject', 'Date'],
-      })
-    );
-    results.push(toEmailSummary(full.data));
-  }
-
-  return results;
+  return fetchMessageSummaries(gmail, allMessageRefs);
 }
 
 /**
