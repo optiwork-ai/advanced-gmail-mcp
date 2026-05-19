@@ -3,15 +3,19 @@ import type { gmail_v1 } from 'googleapis';
 import type { Auth } from 'googleapis';
 import { type AccountConfig, resolveAccount } from '../config.js';
 import { getAuthClient } from './auth.js';
+import { log } from '../log.js';
 import type {
   EmailSummary,
   EmailFull,
   AttachmentInfo,
+  AttachmentData,
   ThreadInfo,
   ThreadMessage,
   LabelInfo,
   SendResult,
   DraftResult,
+  DraftSummary,
+  DraftFull,
   ModifyResult,
   BatchResult,
   UnsubscribeResult,
@@ -81,6 +85,7 @@ export async function withRetry<T>(
 
       if (status === 401 || status === 403) {
         const message = err instanceof Error ? err.message : String(err);
+        log('error', 'auth_error', { status, message });
         throw new Error(
           `Authentication error (${status}): ${message}\n\n` +
           `Re-authenticate with: npx tsx src/auth.ts <account-alias>`
@@ -88,7 +93,9 @@ export async function withRetry<T>(
       }
 
       if (RETRYABLE_STATUSES.has(status) && attempt < maxRetries) {
-        await sleep(Math.pow(2, attempt) * 1000); // 1s, 2s, 4s
+        const delay = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
+        log('warn', 'retry', { status, attempt: attempt + 1, delay_ms: delay });
+        await sleep(delay);
         continue;
       }
 
@@ -147,6 +154,7 @@ function extractAttachments(payload: gmail_v1.Schema$MessagePart): AttachmentInf
 
   if (payload.filename && payload.filename.length > 0 && payload.body?.attachmentId) {
     attachments.push({
+      attachmentId: payload.body.attachmentId,
       filename: payload.filename,
       mimeType: payload.mimeType || 'application/octet-stream',
       size: payload.body.size || 0,
@@ -244,9 +252,9 @@ interface MimeOptions {
 
 /**
  * RFC 2047 encoded-word for header values containing non-ASCII characters.
- * Returns the value untouched when it's pure ASCII.
+ * Returns the value untouched when it's pure ASCII. Exported for unit testing.
  */
-function encodeHeaderValue(value: string): string {
+export function encodeHeaderValue(value: string): string {
   if (/^[\x00-\x7F]*$/.test(value)) return value;
   const encoded = Buffer.from(value, 'utf-8').toString('base64');
   return `=?UTF-8?B?${encoded}?=`;
@@ -626,10 +634,62 @@ export async function getThread(opts: {
 }
 
 /**
- * Send a reply to an existing message.
- * Fetches the original to get threadId, Message-ID, Subject, and From for proper threading.
+ * Build a "Re:" subject if not already present.
+ * Exported for unit testing.
  */
-export async function replyToMessage(opts: {
+export function buildReplySubject(originalSubject: string): string {
+  return /^re:/i.test(originalSubject) ? originalSubject : `Re: ${originalSubject}`;
+}
+
+/**
+ * Build the References chain by appending the original Message-ID to any
+ * existing References header. Exported for unit testing.
+ */
+export function buildReferences(originalReferences: string, originalMessageId: string): string {
+  return originalReferences ? `${originalReferences} ${originalMessageId}` : originalMessageId;
+}
+
+/**
+ * Build the CC list for a reply, deduplicated against self and previous-to/cc.
+ * Exported for unit testing.
+ */
+export function buildReplyCc(opts: {
+  selfEmail: string;
+  originalTo: string;
+  originalCc: string;
+  userCc?: string;
+  replyAll?: boolean;
+}): string | undefined {
+  const extractEmail = (addr: string): string => {
+    const match = addr.match(/<([^>]+)>/);
+    return (match ? match[1] : addr).trim().toLowerCase();
+  };
+
+  const ccParts: string[] = [];
+  const seen = new Set<string>();
+  seen.add(opts.selfEmail.toLowerCase());
+
+  const addAll = (raw: string) => {
+    for (const addr of raw.split(',').map(a => a.trim()).filter(a => a.length > 0)) {
+      const email = extractEmail(addr);
+      if (!seen.has(email)) {
+        seen.add(email);
+        ccParts.push(addr);
+      }
+    }
+  };
+
+  if (opts.replyAll) {
+    addAll([opts.originalTo, opts.originalCc].filter(Boolean).join(', '));
+  }
+  if (opts.userCc) {
+    addAll(opts.userCc);
+  }
+
+  return ccParts.length > 0 ? ccParts.join(', ') : undefined;
+}
+
+interface ReplyOpts {
   messageId: string;
   body: string;
   account?: string;
@@ -637,11 +697,16 @@ export async function replyToMessage(opts: {
   reply_all?: boolean;
   cc?: string;
   bcc?: string;
-}): Promise<SendResult> {
+}
+
+/**
+ * Fetch the original message and build a base64url-encoded reply with
+ * proper threading headers (In-Reply-To, References, threadId).
+ */
+async function prepareReply(opts: ReplyOpts): Promise<{ raw: string; threadId: string | undefined }> {
   const resolved = resolveAccount(opts.account);
   const gmail = await getGmailClient(resolved);
 
-  // Fetch the original message to get threading headers
   const original = await withRetry(() =>
     gmail.users.messages.get({
       userId: 'me',
@@ -659,71 +724,38 @@ export async function replyToMessage(opts: {
   const originalMessageId = extractHeader(headers, 'Message-ID');
   const originalReferences = extractHeader(headers, 'References');
 
-  // Build "Re:" subject if not already present
-  const subject = originalSubject.startsWith('Re:')
-    ? originalSubject
-    : `Re: ${originalSubject}`;
-
-  // Reply-to goes to the original sender
-  let to = originalFrom;
-
-  // Extract bare email from "Name <email>" or plain "email"
-  const extractEmail = (addr: string): string => {
-    const match = addr.match(/<([^>]+)>/);
-    return (match ? match[1] : addr).trim().toLowerCase();
-  };
-
-  // Build CC: merge reply-all recipients + user-provided cc, deduplicated
-  const ccParts: string[] = [];
-  const seen = new Set<string>();
-  seen.add(resolved.email.toLowerCase()); // exclude self
-
-  if (opts.reply_all) {
-    for (const addr of [originalTo, originalCc].filter(Boolean).join(', ').split(',').map(a => a.trim()).filter(a => a.length > 0)) {
-      const email = extractEmail(addr);
-      if (!seen.has(email)) {
-        seen.add(email);
-        ccParts.push(addr);
-      }
-    }
-  }
-
-  if (opts.cc) {
-    for (const addr of opts.cc.split(',').map(a => a.trim()).filter(a => a.length > 0)) {
-      const email = extractEmail(addr);
-      if (!seen.has(email)) {
-        seen.add(email);
-        ccParts.push(addr);
-      }
-    }
-  }
-
-  const cc = ccParts.length > 0 ? ccParts.join(', ') : undefined;
-
-  // Build References header: append original Message-ID
-  const references = originalReferences
-    ? `${originalReferences} ${originalMessageId}`
-    : originalMessageId;
-
   const raw = buildRawMessage({
     from: resolved.email,
-    to,
-    cc,
+    to: originalFrom,
+    cc: buildReplyCc({
+      selfEmail: resolved.email,
+      originalTo,
+      originalCc,
+      userCc: opts.cc,
+      replyAll: opts.reply_all,
+    }),
     bcc: opts.bcc,
-    subject,
+    subject: buildReplySubject(originalSubject),
     body: opts.body,
     is_html: opts.is_html,
     in_reply_to: originalMessageId,
-    references,
+    references: buildReferences(originalReferences, originalMessageId),
   });
+
+  return { raw, threadId: original.data.threadId || undefined };
+}
+
+/**
+ * Send a reply to an existing message with proper threading headers.
+ */
+export async function replyToMessage(opts: ReplyOpts): Promise<SendResult> {
+  const { raw, threadId } = await prepareReply(opts);
+  const gmail = await getGmailClient(opts.account);
 
   const response = await withRetry(() =>
     gmail.users.messages.send({
       userId: 'me',
-      requestBody: {
-        raw,
-        threadId: original.data.threadId || undefined,
-      },
+      requestBody: { raw, threadId },
     })
   );
 
@@ -735,101 +767,17 @@ export async function replyToMessage(opts: {
 }
 
 /**
- * Create a draft reply to an existing message.
- * Same threading logic as replyToMessage, but creates a draft instead of sending.
- * The draft appears in Gmail for user review before sending.
+ * Create a draft reply with the same threading semantics as replyToMessage.
  */
-export async function createDraftReply(opts: {
-  messageId: string;
-  body: string;
-  account?: string;
-  is_html?: boolean;
-  reply_all?: boolean;
-  cc?: string;
-  bcc?: string;
-}): Promise<DraftResult> {
-  const resolved = resolveAccount(opts.account);
-  const gmail = await getGmailClient(resolved);
-
-  // Fetch the original message to get threading headers
-  const original = await withRetry(() =>
-    gmail.users.messages.get({
-      userId: 'me',
-      id: opts.messageId,
-      format: 'metadata',
-      metadataHeaders: ['From', 'To', 'Cc', 'Subject', 'Message-ID', 'References'],
-    })
-  );
-
-  const headers = original.data.payload?.headers || [];
-  const originalFrom = extractHeader(headers, 'From');
-  const originalTo = extractHeader(headers, 'To');
-  const originalCc = extractHeader(headers, 'Cc');
-  const originalSubject = extractHeader(headers, 'Subject');
-  const originalMessageId = extractHeader(headers, 'Message-ID');
-  const originalReferences = extractHeader(headers, 'References');
-
-  const subject = originalSubject.startsWith('Re:')
-    ? originalSubject
-    : `Re: ${originalSubject}`;
-
-  const to = originalFrom;
-
-  const extractEmail = (addr: string): string => {
-    const match = addr.match(/<([^>]+)>/);
-    return (match ? match[1] : addr).trim().toLowerCase();
-  };
-
-  const ccParts: string[] = [];
-  const seen = new Set<string>();
-  seen.add(resolved.email.toLowerCase());
-
-  if (opts.reply_all) {
-    for (const addr of [originalTo, originalCc].filter(Boolean).join(', ').split(',').map(a => a.trim()).filter(a => a.length > 0)) {
-      const email = extractEmail(addr);
-      if (!seen.has(email)) {
-        seen.add(email);
-        ccParts.push(addr);
-      }
-    }
-  }
-
-  if (opts.cc) {
-    for (const addr of opts.cc.split(',').map(a => a.trim()).filter(a => a.length > 0)) {
-      const email = extractEmail(addr);
-      if (!seen.has(email)) {
-        seen.add(email);
-        ccParts.push(addr);
-      }
-    }
-  }
-
-  const cc = ccParts.length > 0 ? ccParts.join(', ') : undefined;
-
-  const references = originalReferences
-    ? `${originalReferences} ${originalMessageId}`
-    : originalMessageId;
-
-  const raw = buildRawMessage({
-    from: resolved.email,
-    to,
-    cc,
-    bcc: opts.bcc,
-    subject,
-    body: opts.body,
-    is_html: opts.is_html,
-    in_reply_to: originalMessageId,
-    references,
-  });
+export async function createDraftReply(opts: ReplyOpts): Promise<DraftResult> {
+  const { raw, threadId } = await prepareReply(opts);
+  const gmail = await getGmailClient(opts.account);
 
   const response = await withRetry(() =>
     gmail.users.drafts.create({
       userId: 'me',
       requestBody: {
-        message: {
-          raw,
-          threadId: original.data.threadId || undefined,
-        },
+        message: { raw, threadId },
       },
     })
   );
@@ -981,6 +929,202 @@ export async function unsubscribeFromEmail(opts: {
   }
 
   return { success: false, method: 'none', detail: `Could not parse List-Unsubscribe header: ${listUnsub}` };
+}
+
+/**
+ * Build a "Fwd:" subject if not already prefixed.
+ * Exported for unit testing.
+ */
+export function buildForwardSubject(originalSubject: string): string {
+  return /^fwd?:/i.test(originalSubject) ? originalSubject : `Fwd: ${originalSubject}`;
+}
+
+/**
+ * Build the body of a forwarded message — optional intro followed by a
+ * Gmail-style forwarded-message block. Exported for unit testing.
+ */
+export function buildForwardBody(opts: {
+  intro?: string;
+  originalFrom: string;
+  originalDate: string;
+  originalSubject: string;
+  originalTo: string;
+  originalCc?: string;
+  originalBody: string;
+}): string {
+  const intro = opts.intro ? `${opts.intro}\n\n` : '';
+  const lines = [
+    '---------- Forwarded message ----------',
+    `From: ${opts.originalFrom}`,
+    `Date: ${opts.originalDate}`,
+    `Subject: ${opts.originalSubject}`,
+    `To: ${opts.originalTo}`,
+  ];
+  if (opts.originalCc) lines.push(`Cc: ${opts.originalCc}`);
+  return `${intro}${lines.join('\n')}\n\n${opts.originalBody}`;
+}
+
+/**
+ * Forward an existing message to new recipients.
+ * Text/HTML body is forwarded; original attachments are NOT re-attached.
+ */
+export async function forwardMessage(opts: {
+  messageId: string;
+  to: string;
+  account?: string;
+  body?: string;
+  cc?: string;
+  bcc?: string;
+  is_html?: boolean;
+}): Promise<SendResult> {
+  const resolved = resolveAccount(opts.account);
+  const gmail = await getGmailClient(resolved);
+
+  const original = await getMessage({ messageId: opts.messageId, account: resolved.email, format: 'full' });
+
+  const originalBody = opts.is_html
+    ? (original.body_html || original.body_text)
+    : (original.body_text || original.body_html);
+
+  const body = buildForwardBody({
+    intro: opts.body,
+    originalFrom: original.from,
+    originalDate: original.date,
+    originalSubject: original.subject,
+    originalTo: original.to,
+    originalCc: original.cc || undefined,
+    originalBody,
+  });
+
+  const raw = buildRawMessage({
+    from: resolved.email,
+    to: opts.to,
+    cc: opts.cc,
+    bcc: opts.bcc,
+    subject: buildForwardSubject(original.subject),
+    body,
+    is_html: opts.is_html,
+  });
+
+  const response = await withRetry(() =>
+    gmail.users.messages.send({
+      userId: 'me',
+      requestBody: { raw },
+    })
+  );
+
+  return {
+    id: response.data.id || '',
+    threadId: response.data.threadId || '',
+    labelIds: response.data.labelIds || [],
+  };
+}
+
+/**
+ * Fetch the raw bytes of an attachment.
+ * Returns data as standard base64 (not base64url), suitable for direct decoding.
+ */
+export async function getAttachment(opts: {
+  messageId: string;
+  attachmentId: string;
+  account?: string;
+}): Promise<AttachmentData> {
+  const gmail = await getGmailClient(opts.account);
+
+  const response = await withRetry(() =>
+    gmail.users.messages.attachments.get({
+      userId: 'me',
+      messageId: opts.messageId,
+      id: opts.attachmentId,
+    })
+  );
+
+  // Gmail returns base64url; convert to standard base64 for downstream consumers.
+  const data = (response.data.data || '').replace(/-/g, '+').replace(/_/g, '/');
+  return {
+    attachmentId: opts.attachmentId,
+    size: response.data.size || 0,
+    data_base64: data,
+  };
+}
+
+/**
+ * List drafts in the user's mailbox. Returns summaries with id + headers.
+ */
+export async function listDrafts(opts: {
+  account?: string;
+  maxResults?: number;
+}): Promise<DraftSummary[]> {
+  const gmail = await getGmailClient(opts.account);
+  const maxResults = Math.min(opts.maxResults ?? 100, 500);
+
+  const response = await withRetry(() =>
+    gmail.users.drafts.list({ userId: 'me', maxResults })
+  );
+
+  const drafts = (response.data.drafts || []).filter(d => d.id && d.message?.id);
+  if (drafts.length === 0) return [];
+
+  // Fetch each draft's underlying message metadata in parallel.
+  const results: DraftSummary[] = new Array(drafts.length);
+  for (let i = 0; i < drafts.length; i += FETCH_CONCURRENCY) {
+    const chunk = drafts.slice(i, i + FETCH_CONCURRENCY);
+    const chunkResults = await Promise.all(
+      chunk.map(d =>
+        withRetry(() =>
+          gmail.users.messages.get({
+            userId: 'me',
+            id: d.message!.id!,
+            format: 'metadata',
+            metadataHeaders: ['From', 'To', 'Subject', 'Date'],
+          })
+        )
+      )
+    );
+    chunkResults.forEach((msg, idx) => {
+      const headers = msg.data.payload?.headers || [];
+      results[i + idx] = {
+        draft_id: drafts[i + idx].id!,
+        message_id: msg.data.id || '',
+        threadId: msg.data.threadId || '',
+        from: extractHeader(headers, 'From'),
+        to: extractHeader(headers, 'To'),
+        subject: extractHeader(headers, 'Subject'),
+        date: extractHeader(headers, 'Date'),
+        snippet: msg.data.snippet || '',
+      };
+    });
+  }
+
+  return results;
+}
+
+/**
+ * Read a single draft by its draft ID. Returns the full underlying message.
+ */
+export async function readDraft(opts: {
+  draftId: string;
+  account?: string;
+}): Promise<DraftFull> {
+  const gmail = await getGmailClient(opts.account);
+
+  const response = await withRetry(() =>
+    gmail.users.drafts.get({
+      userId: 'me',
+      id: opts.draftId,
+      format: 'full',
+    })
+  );
+
+  const msg = response.data.message;
+  if (!msg) {
+    throw new Error(`Draft ${opts.draftId} has no underlying message.`);
+  }
+
+  return {
+    draft_id: response.data.id || '',
+    message: toEmailFull(msg),
+  };
 }
 
 /**

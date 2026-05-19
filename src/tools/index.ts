@@ -16,6 +16,11 @@ import { registerBatchModify } from './batch.js';
 import { registerUnsubscribe } from './unsubscribe.js';
 import { registerMarkRead } from './mark-read.js';
 import { registerMarkUnread } from './mark-unread.js';
+import { registerGetAttachment } from './get-attachment.js';
+import { registerListDrafts } from './list-drafts.js';
+import { registerReadDraft } from './read-draft.js';
+import { registerForwardEmail } from './forward.js';
+import { registerStarTools } from './star.js';
 
 /**
  * Register all Gmail MCP tools with the server.
@@ -43,4 +48,9 @@ export function registerAllTools(server: McpServer): void {
   registerUnsubscribe(server);
   registerMarkRead(server);
   registerMarkUnread(server);
+  registerGetAttachment(server);
+  registerListDrafts(server);
+  registerReadDraft(server);
+  registerForwardEmail(server);
+  registerStarTools(server);
 }

@@ -6,7 +6,7 @@ A Gmail [MCP server](https://modelcontextprotocol.io) for [Claude Code](https://
 
 ## Features
 
-- **17 tools**: list, search, read, thread, labels, send, draft, reply, draft reply, send draft, archive, label, trash, batch modify, unsubscribe, mark read, mark unread
+- **25 tools** spanning read, compose, draft management, modify, attachments, and list-handling — see the [Tools](#tools) table
 - **Multi-account** support with simple aliases
 - **OAuth2** authentication with interactive CLI flow
 - **Token auto-refresh** — re-authenticates transparently
@@ -115,11 +115,15 @@ Then use `/email` or `/checkemail` in Claude Code.
 | `read_email` | Read full email by ID |
 | `get_thread` | Get full thread with all messages |
 | `get_labels` | List all labels |
+| `get_attachment` | Fetch an attachment's bytes (base64) by attachmentId |
 | `send_email` | Send a new email |
 | `draft_email` | Create a draft |
 | `reply_email` | Reply with proper threading |
 | `draft_reply` | Draft a reply (review in Gmail before sending) |
 | `send_draft` | Send an existing draft by ID |
+| `list_drafts` | List drafts with id + headers |
+| `read_draft` | Read a draft's full content by ID |
+| `forward_email` | Forward an email to new recipients (text/HTML body, no attachments) |
 | `archive_email` | Archive (remove INBOX label) |
 | `label_email` | Add/remove labels |
 | `trash_email` | Move to trash |
@@ -127,6 +131,10 @@ Then use `/email` or `/checkemail` in Claude Code.
 | `unsubscribe_email` | Process `List-Unsubscribe` header (one-click HTTPS or mailto) |
 | `mark_read` | Remove UNREAD label from a message |
 | `mark_unread` | Add UNREAD label to a message |
+| `star_email` | Add STARRED label |
+| `unstar_email` | Remove STARRED label |
+| `mark_important` | Add IMPORTANT label |
+| `mark_not_important` | Remove IMPORTANT label |
 
 All tools accept an optional `account` parameter (alias or email). Defaults to the account set in `accounts.json`.
 

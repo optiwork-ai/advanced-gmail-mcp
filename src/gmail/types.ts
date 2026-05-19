@@ -42,9 +42,17 @@ export interface UnsubscribeResult {
 
 /** Attachment metadata (no content). */
 export interface AttachmentInfo {
+  attachmentId: string;
   filename: string;
   mimeType: string;
   size: number;
+}
+
+/** Result from fetching attachment bytes. */
+export interface AttachmentData {
+  attachmentId: string;
+  size: number;
+  data_base64: string;
 }
 
 /** Thread with its messages. */
@@ -109,6 +117,24 @@ export interface DraftResult {
     id: string;
     threadId: string;
   };
+}
+
+/** Summary of a draft for listing. */
+export interface DraftSummary {
+  draft_id: string;
+  message_id: string;
+  threadId: string;
+  from: string;
+  to: string;
+  subject: string;
+  date: string;
+  snippet: string;
+}
+
+/** Full content of a draft. */
+export interface DraftFull {
+  draft_id: string;
+  message: EmailFull;
 }
 
 /** Result from modify operations. */

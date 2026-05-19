@@ -34,6 +34,12 @@ Before using any tool, run `ToolSearch` with query `+gmail` to load them.
 | `unsubscribe_email` | Process `List-Unsubscribe` header (one-click HTTPS or mailto) |
 | `mark_read` | Remove UNREAD label (message_id, account) |
 | `mark_unread` | Add UNREAD label (message_id, account) |
+| `get_attachment` | Fetch attachment bytes (message_id, attachment_id, account) |
+| `list_drafts` | List drafts with id + headers (account, max_results) |
+| `read_draft` | Read a draft's content by ID (draft_id, account) |
+| `forward_email` | Forward an email (message_id, to, account, body?, cc?, bcc?, is_html?) |
+| `star_email` / `unstar_email` | Toggle STARRED label (message_id, account) |
+| `mark_important` / `mark_not_important` | Toggle IMPORTANT label (message_id, account) |
 
 ## Actions
 
