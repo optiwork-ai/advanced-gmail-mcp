@@ -13,8 +13,15 @@ import {
 import type { StoredToken } from './types.js';
 
 /**
- * Scopes: Gmail (read, modify, send, compose) + Calendar (events, free/busy)
- * for the demo-booking flow in appraisalhost-website.
+ * Scopes: Gmail (read, modify, send, compose) + Calendar (events, free/busy,
+ * calendarlist.readonly) for the demo-booking flow in appraisalhost-website.
+ *
+ * calendarlist.readonly is required by the CRM's
+ * `google_calendar._calendars_for_freebusy()` enumeration, which calls
+ * `calendarList.list()` to discover every visible calendar (primary +
+ * shared) before issuing a single `freeBusy.query` across them. Without
+ * it, calendarList.list 403s with "Insufficient Permission" even when
+ * calendar.events + calendar.freebusy are granted.
  *
  * Adding scopes is additive at the constant level — existing tokens keep
  * working until each alias is re-consented with `npm run auth {alias}`.
@@ -26,6 +33,7 @@ const SCOPES = [
   'https://www.googleapis.com/auth/gmail.compose',
   'https://www.googleapis.com/auth/calendar.events',
   'https://www.googleapis.com/auth/calendar.freebusy',
+  'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
 ];
 
 const REDIRECT_URI = 'http://localhost:3000/oauth2callback';
