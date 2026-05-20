@@ -115,6 +115,8 @@ export async function authenticateAccount(account: AccountConfig): Promise<void>
   console.log(`\nOpen this URL in your browser:\n${authUrl}\n`);
 
   return new Promise((resolve, reject) => {
+    let timeoutHandle: NodeJS.Timeout | undefined;
+
     const server = http.createServer(async (req, res) => {
       try {
         const url = new URL(req.url || '', 'http://localhost:3000');
@@ -136,6 +138,7 @@ export async function authenticateAccount(account: AccountConfig): Promise<void>
             `<h1>Success!</h1><p>Authenticated ${account.email} (${account.alias})</p><p>You can close this window.</p>`
           );
 
+          if (timeoutHandle) clearTimeout(timeoutHandle);
           server.close();
           console.log(`Token saved for ${account.email}`);
           resolve();
@@ -143,6 +146,7 @@ export async function authenticateAccount(account: AccountConfig): Promise<void>
       } catch (err) {
         res.writeHead(500);
         res.end('Authentication failed');
+        if (timeoutHandle) clearTimeout(timeoutHandle);
         server.close();
         reject(err);
       }
@@ -152,8 +156,10 @@ export async function authenticateAccount(account: AccountConfig): Promise<void>
       console.log('Waiting for OAuth callback on http://localhost:3000...');
     });
 
-    // Timeout after 5 minutes
-    setTimeout(() => {
+    // 5-minute timeout — abort if user never completes consent. Handle is
+    // cleared on success/error above so the script exits promptly instead of
+    // hanging for the full 5 minutes.
+    timeoutHandle = setTimeout(() => {
       server.close();
       reject(new Error('Authentication timed out after 5 minutes'));
     }, 5 * 60 * 1000);
