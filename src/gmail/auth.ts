@@ -13,13 +13,19 @@ import {
 import type { StoredToken } from './types.js';
 
 /**
- * Expanded scopes: read, modify, send, compose.
+ * Scopes: Gmail (read, modify, send, compose) + Calendar (events, free/busy)
+ * for the demo-booking flow in appraisalhost-website.
+ *
+ * Adding scopes is additive at the constant level — existing tokens keep
+ * working until each alias is re-consented with `npm run auth {alias}`.
  */
 const SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/gmail.modify',
   'https://www.googleapis.com/auth/gmail.send',
   'https://www.googleapis.com/auth/gmail.compose',
+  'https://www.googleapis.com/auth/calendar.events',
+  'https://www.googleapis.com/auth/calendar.freebusy',
 ];
 
 const REDIRECT_URI = 'http://localhost:3000/oauth2callback';
