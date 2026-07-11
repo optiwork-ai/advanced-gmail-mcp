@@ -24,6 +24,11 @@ import { registerStarTools } from './star.js';
 import { registerCreateLabel } from './create-label.js';
 import { registerUpdateLabel } from './update-label.js';
 import { registerDeleteLabel } from './delete-label.js';
+// Read-only Chat / Drive / Docs tools
+import { registerListChatSpaces } from './chat-list-spaces.js';
+import { registerListChatMessages } from './chat-list-messages.js';
+import { registerGetChatMessage } from './chat-get-message.js';
+import { registerListChatMembers } from './chat-list-members.js';
 
 /**
  * Register all Gmail MCP tools with the server.
@@ -59,4 +64,10 @@ export function registerAllTools(server: McpServer): void {
   registerCreateLabel(server);
   registerUpdateLabel(server);
   registerDeleteLabel(server);
+
+  // Read-only Chat / Drive / Docs tools (no send/post/create/update/delete)
+  registerListChatSpaces(server);
+  registerListChatMessages(server);
+  registerGetChatMessage(server);
+  registerListChatMembers(server);
 }
