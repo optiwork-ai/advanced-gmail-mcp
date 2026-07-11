@@ -93,10 +93,19 @@ export function registerReadDriveFile(server: McpServer): void {
             if (truncated) result.contentNote = `Content truncated to ~${MAX_CONTENT_BYTES} bytes.`;
           }
         } else if (isTextMime(mimeType)) {
+          // Bound the transfer with a Range header so an arbitrarily large
+          // text-MIME file (e.g. a multi-hundred-MB .csv/.ndjson) can't be
+          // buffered fully into the shared MCP process memory. We request one
+          // byte past the cap so capContent can detect that the file was
+          // actually larger and flag truncation. Google Drive honors Range on
+          // alt=media downloads (responds 206 Partial Content).
           const resp = await withRetry(() =>
             drive.files.get(
               { fileId: file_id, alt: 'media' },
-              { responseType: 'text' }
+              {
+                responseType: 'text',
+                headers: { Range: `bytes=0-${MAX_CONTENT_BYTES}` },
+              }
             )
           );
           const { content, truncated } = capContent(String(resp.data ?? ''));
