@@ -28,7 +28,6 @@ import { registerDeleteLabel } from './delete-label.js';
 import { registerListChatSpaces } from './chat-list-spaces.js';
 import { registerListChatMessages } from './chat-list-messages.js';
 import { registerGetChatMessage } from './chat-get-message.js';
-import { registerListChatMembers } from './chat-list-members.js';
 import { registerSearchDriveFiles } from './drive-search-files.js';
 import { registerReadDriveFile } from './drive-read-file.js';
 import { registerGetGoogleDoc } from './docs-get-document.js';
@@ -72,7 +71,6 @@ export function registerAllTools(server: McpServer): void {
   registerListChatSpaces(server);
   registerListChatMessages(server);
   registerGetChatMessage(server);
-  registerListChatMembers(server);
   registerSearchDriveFiles(server);
   registerReadDriveFile(server);
   registerGetGoogleDoc(server);

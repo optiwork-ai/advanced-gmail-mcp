@@ -150,7 +150,6 @@ These tools are **strictly read-only** — nothing is sent, posted, created, upd
 | `list_chat_spaces` | List the Chat spaces/DMs the account belongs to |
 | `list_chat_messages` | List messages in a Chat space (requires a space name/id) |
 | `get_chat_message` | Read a single Chat message by resource name |
-| `list_chat_members` | List the members of a Chat space |
 | `search_drive_files` | Search Drive files with Drive `q` query syntax |
 | `read_drive_file` | Read a Drive file's metadata + text (Docs/Sheets/Slides exported to text; binary types return metadata only; ~1MB cap) |
 | `get_google_doc` | Read a Google Doc as title + flattened plain text |
