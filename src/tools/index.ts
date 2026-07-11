@@ -31,6 +31,7 @@ import { registerGetChatMessage } from './chat-get-message.js';
 import { registerListChatMembers } from './chat-list-members.js';
 import { registerSearchDriveFiles } from './drive-search-files.js';
 import { registerReadDriveFile } from './drive-read-file.js';
+import { registerGetGoogleDoc } from './docs-get-document.js';
 
 /**
  * Register all Gmail MCP tools with the server.
@@ -74,4 +75,5 @@ export function registerAllTools(server: McpServer): void {
   registerListChatMembers(server);
   registerSearchDriveFiles(server);
   registerReadDriveFile(server);
+  registerGetGoogleDoc(server);
 }
