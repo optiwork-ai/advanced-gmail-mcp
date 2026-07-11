@@ -6,7 +6,7 @@ A Gmail [MCP server](https://modelcontextprotocol.io) for [Claude Code](https://
 
 ## Features
 
-- **28 tools** spanning read, compose, draft management, modify, attachments, and label management — see the [Tools](#tools) table
+- **35 tools** spanning Gmail (read, compose, draft management, modify, attachments, label management) plus read-only Google Chat, Drive, and Docs — see the [Tools](#tools) table
 - **Multi-account** support with simple aliases
 - **OAuth2** authentication with interactive CLI flow
 - **Token auto-refresh** — re-authenticates transparently
@@ -27,13 +27,15 @@ npm install
 
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
 2. Create a new project (or select an existing one)
-3. Enable the **Gmail API**:
+3. Enable the APIs:
    - APIs & Services → Enable APIs → search "Gmail API" → Enable
+   - For the read-only Chat/Drive/Docs tools, also enable the **Google Chat API**, **Google Drive API**, and **Google Docs API**
 4. Configure the **OAuth consent screen**:
    - APIs & Services → OAuth consent screen
    - User type: External (or Internal if using Google Workspace)
    - Add your email address(es) as test users
    - Add scopes: `gmail.readonly`, `gmail.modify`, `gmail.send`, `gmail.compose`
+   - For read-only Chat/Drive/Docs, also add: `chat.spaces.readonly`, `chat.messages.readonly`, `drive.readonly`, `documents.readonly`, then re-run the auth flow for each alias (`npm run auth -- <alias>`) so the new scopes are granted
 5. Create **OAuth credentials**:
    - APIs & Services → Credentials → Create Credentials → OAuth client ID
    - Application type: **Desktop app**
@@ -138,6 +140,20 @@ Then use `/email` or `/checkemail` in Claude Code.
 | `create_label` | Create a new label (optionally colored) |
 | `update_label` | Rename or recolor a label |
 | `delete_label` | Delete a label (removes it from every message) |
+
+### Read-only Chat / Drive / Docs
+
+These tools are **strictly read-only** — nothing is sent, posted, created, updated, or deleted. They require the extra scopes above; re-run the auth flow per alias after adding them.
+
+| Tool | Description |
+|------|-------------|
+| `list_chat_spaces` | List the Chat spaces/DMs the account belongs to |
+| `list_chat_messages` | List messages in a Chat space (requires a space name/id) |
+| `get_chat_message` | Read a single Chat message by resource name |
+| `list_chat_members` | List the members of a Chat space |
+| `search_drive_files` | Search Drive files with Drive `q` query syntax |
+| `read_drive_file` | Read a Drive file's metadata + text (Docs/Sheets/Slides exported to text; binary types return metadata only; ~1MB cap) |
+| `get_google_doc` | Read a Google Doc as title + flattened plain text |
 
 All tools accept an optional `account` parameter (alias or email). Defaults to the account set in `accounts.json`.
 

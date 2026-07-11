@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Read-only Google Chat tools** — `list_chat_spaces`, `list_chat_messages` (per-space, paginated), `get_chat_message`, `list_chat_members`.
+- **Read-only Google Drive tools** — `search_drive_files` (Drive `q` query syntax, paginated) and `read_drive_file` (metadata + text; Google Docs/Sheets/Slides exported to text/plain|text/csv, other text files read via `alt=media`, binary/unknown types return metadata only, ~1MB content cap with truncation flag).
+- **Read-only Google Docs tool** — `get_google_doc` flattens a document's paragraphs and tables into plain text.
+- **4 new OAuth scopes** (additive, read-only): `chat.spaces.readonly`, `chat.messages.readonly`, `drive.readonly`, `documents.readonly`. Existing tokens keep working; each alias must be re-consented via the auth flow to gain the new scopes, and the Chat/Drive/Docs APIs must be enabled in Google Cloud.
+- **Service-client factories** — `src/chat/client.ts`, `src/drive/client.ts`, `src/docs/client.ts`, each reusing the shared OAuth client + per-account token store, mirroring the Gmail client cache.
+
 ## [1.1.0] — 2026-05-19
 
 ### Added
