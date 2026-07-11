@@ -14,7 +14,9 @@ import type { StoredToken } from './types.js';
 
 /**
  * Scopes: Gmail (read, modify, send, compose) + Calendar (events, free/busy,
- * calendarlist.readonly) for the demo-booking flow in appraisalhost-website.
+ * calendarlist.readonly) for the demo-booking flow in appraisalhost-website,
+ * plus read-only Chat / Drive / Docs (added 2026-07-11) for the
+ * advanced-gmail-mcp read tools.
  *
  * calendarlist.readonly is required by the CRM's
  * `google_calendar._calendars_for_freebusy()` enumeration, which calls
@@ -23,8 +25,17 @@ import type { StoredToken } from './types.js';
  * it, calendarList.list 403s with "Insufficient Permission" even when
  * calendar.events + calendar.freebusy are granted.
  *
+ * Chat/Drive/Docs read-only scopes (chat.spaces.readonly,
+ * chat.messages.readonly, drive.readonly, documents.readonly) back the
+ * read-only Chat/Drive/Docs MCP tools. They are strictly read scopes — the
+ * server never sends, posts, creates, updates, or deletes anything in those
+ * services.
+ *
  * Adding scopes is additive at the constant level — existing tokens keep
- * working until each alias is re-consented with `npm run auth {alias}`.
+ * working with their current grants until each alias is RE-CONSENTED with
+ * `npm run auth {alias}`. A token issued before a scope was added will NOT
+ * carry that scope, so the new Chat/Drive/Docs tools 403 until every alias
+ * that needs them is re-run through the auth flow.
  */
 const SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
@@ -34,6 +45,11 @@ const SCOPES = [
   'https://www.googleapis.com/auth/calendar.events',
   'https://www.googleapis.com/auth/calendar.freebusy',
   'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
+  // Read-only Chat / Drive / Docs (added 2026-07-11)
+  'https://www.googleapis.com/auth/chat.spaces.readonly',
+  'https://www.googleapis.com/auth/chat.messages.readonly',
+  'https://www.googleapis.com/auth/drive.readonly',
+  'https://www.googleapis.com/auth/documents.readonly',
 ];
 
 const REDIRECT_URI = 'http://localhost:3000/oauth2callback';

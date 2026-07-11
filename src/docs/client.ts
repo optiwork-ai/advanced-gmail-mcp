@@ -1,0 +1,49 @@
+import { google } from 'googleapis';
+import type { docs_v1 } from 'googleapis';
+import type { Auth } from 'googleapis';
+import { type AccountConfig, resolveAccount } from '../config.js';
+import { getAuthClient } from '../gmail/auth.js';
+
+// ---------------------------------------------------------------------------
+// Client cache: Google Docs API client per account with 50-min TTL.
+// Mirrors the caching idiom in src/gmail/client.ts. READ-ONLY use only —
+// callers must never invoke a mutating Docs method (create/batchUpdate).
+// ---------------------------------------------------------------------------
+
+interface CachedClient {
+  client: Auth.OAuth2Client;
+  docs: docs_v1.Docs;
+  expiresAt: number;
+}
+
+const CLIENT_CACHE = new Map<string, CachedClient>();
+const CLIENT_TTL_MS = 50 * 60 * 1000; // 50 minutes
+
+/**
+ * Get an authenticated Google Docs API client for an account.
+ * Reuses the shared OAuth client + per-account token store via getAuthClient.
+ * Caches the built client per account with a 50-min TTL.
+ */
+export async function getDocsClient(account?: string | AccountConfig): Promise<docs_v1.Docs> {
+  const resolved = typeof account === 'string' || account === undefined
+    ? resolveAccount(account)
+    : account;
+
+  const cacheKey = resolved.email;
+  const cached = CLIENT_CACHE.get(cacheKey);
+
+  if (cached && Date.now() < cached.expiresAt) {
+    return cached.docs;
+  }
+
+  const authClient = await getAuthClient(resolved);
+  const docs = google.docs({ version: 'v1', auth: authClient });
+
+  CLIENT_CACHE.set(cacheKey, {
+    client: authClient,
+    docs,
+    expiresAt: Date.now() + CLIENT_TTL_MS,
+  });
+
+  return docs;
+}
