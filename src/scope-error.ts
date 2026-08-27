@@ -35,10 +35,65 @@ export function errorStatus(err: unknown): number | undefined {
   return undefined;
 }
 
-/** True for the 401/403 shape that a missing grant produces. */
+/**
+ * Collect the `reason` strings a Google API error carries, lowercased.
+ *
+ * Google puts them in two places depending on the API and the client version —
+ * a flat `errors[]` on the error itself and a nested one under
+ * `response.data.error` — plus a `status` enum on the nested body. This lives
+ * here rather than in the Gmail client because it is the shared vocabulary for
+ * reading a Google failure, and this module imports nothing.
+ */
+export function googleErrorReasons(err: unknown): string[] {
+  const e = err as {
+    errors?: Array<{ reason?: string }>;
+    response?: { data?: { error?: { errors?: Array<{ reason?: string }>; status?: string } } };
+  };
+  const reasons: string[] = [];
+  const push = (value: unknown): void => {
+    if (typeof value === 'string' && value.length > 0) reasons.push(value.toLowerCase());
+  };
+
+  if (Array.isArray(e?.errors)) {
+    for (const item of e.errors) push(item?.reason);
+  }
+  const nested = e?.response?.data?.error;
+  if (Array.isArray(nested?.errors)) {
+    for (const item of nested.errors) push(item?.reason);
+  }
+  push(nested?.status);
+
+  return reasons;
+}
+
+/** The reasons and phrasings Google uses when a token lacks a required scope. */
+const SCOPE_REASONS = new Set([
+  'insufficientpermissions',
+  'access_token_scope_insufficient',
+  'insufficientscopes',
+]);
+const SCOPE_PHRASES = /insufficient (authentication )?(scopes?|permissions?)|ACCESS_TOKEN_SCOPE_INSUFFICIENT/i;
+
+/**
+ * True for the 401/403 shape that a MISSING GRANT produces — and only that.
+ *
+ * The status alone is not enough. Google answers 403 for a full Drive, for a
+ * rate limit that outlived the retries, and for a Workspace policy block, and
+ * rewriting those into "the token does not carry this scope, run npm run auth"
+ * sends the reader to fix something that is not broken while the real cause
+ * survives only in the tail after "Original error:". Today that mistake is
+ * almost always harmless, because no token carries either new scope; it turns
+ * wrong for every genuine 403 the moment the accounts re-consent, which is
+ * exactly when someone will act on it.
+ */
 export function isMissingScopeError(err: unknown): boolean {
   const status = errorStatus(err);
-  return status === 401 || status === 403;
+  if (status !== 401 && status !== 403) return false;
+
+  if (googleErrorReasons(err).some(reason => SCOPE_REASONS.has(reason))) return true;
+
+  const message = err instanceof Error ? err.message : String(err);
+  return SCOPE_PHRASES.test(message);
 }
 
 /**

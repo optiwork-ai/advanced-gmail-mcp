@@ -7,6 +7,7 @@ import type { Auth } from 'googleapis';
 import { type AccountConfig, resolveAccount } from '../config.js';
 import { getAuthClient } from './auth.js';
 import { log } from '../log.js';
+import { googleErrorReasons } from '../scope-error.js';
 import {
   MEDIA_UPLOAD_THRESHOLD_BYTES,
   type BuiltMessage,
@@ -107,29 +108,6 @@ const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
  * These reasons are the rate-limit ones, and they retry like a 429.
  */
 const RETRYABLE_403_REASONS = new Set(['ratelimitexceeded', 'userratelimitexceeded']);
-
-/** Collect the `reason` strings a Google API error carries, lowercased. */
-function googleErrorReasons(err: unknown): string[] {
-  const e = err as {
-    errors?: Array<{ reason?: string }>;
-    response?: { data?: { error?: { errors?: Array<{ reason?: string }>; status?: string } } };
-  };
-  const reasons: string[] = [];
-  const push = (value: unknown): void => {
-    if (typeof value === 'string' && value.length > 0) reasons.push(value.toLowerCase());
-  };
-
-  if (Array.isArray(e?.errors)) {
-    for (const item of e.errors) push(item?.reason);
-  }
-  const nested = e?.response?.data?.error;
-  if (Array.isArray(nested?.errors)) {
-    for (const item of nested.errors) push(item?.reason);
-  }
-  push(nested?.status);
-
-  return reasons;
-}
 
 /** True for a 403 that is really a rate limit rather than an authorization failure. */
 function isRateLimit403(status: unknown, err: unknown): boolean {
