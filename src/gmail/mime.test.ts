@@ -246,6 +246,30 @@ describe('htmlToText', () => {
     expect(htmlToText('a<br><br><br><br>b')).toBe('a\n\nb');
   });
 
+  it('does not end the anchor tag at a > inside an attribute value', () => {
+    // `[^>]*` for the attribute run ended the match at the first `>` anywhere in
+    // the tag, so `a>b">label` leaked raw attribute text into the plain text.
+    expect(htmlToText(`<a href='http://q.com' title="a>b">label</a>`)).toBe(
+      'label <http://q.com>',
+    );
+    expect(htmlToText(`<a data-x="p>q" href="http://r.com">label</a>`)).toBe(
+      'label <http://r.com>',
+    );
+  });
+
+  it('cannot have its anchor placeholder forged by the source document', () => {
+    // The placeholder used to be a fixed `\0ANCHOR<n>\0`, so source HTML
+    // containing that sequence duplicated or deleted content. (The NULs are
+    // written as escapes so git still reads this file as text.)
+    const forged = `${'\u0000'}ANCHOR0${'\u0000'}`;
+    expect(htmlToText(`<a href="http://real.com">real</a> ${forged} tail`)).toBe(
+      'real <http://real.com> ANCHOR0 tail',
+    );
+    expect(htmlToText(`${forged} <a href="http://a.com">a</a>`)).toBe(
+      'ANCHOR0 a <http://a.com>',
+    );
+  });
+
   it('round-trips a textToHtml body', () => {
     expect(htmlToText(textToHtml('Hello there.\n\nSecond paragraph.'))).toBe(
       'Hello there.\n\nSecond paragraph.',

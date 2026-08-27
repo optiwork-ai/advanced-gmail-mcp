@@ -361,10 +361,23 @@ function safeCodePoint(code: number): string {
 }
 
 /**
+ * An attribute run inside a start tag. `[^>]*` is wrong here: a `>` inside a
+ * quoted attribute value (`title="a>b"`) ended the match early and leaked raw
+ * attribute text into the output. Quoted values are consumed whole instead.
+ */
+const TAG_ATTRS = `(?:"[^"]*"|'[^']*'|[^>"'])`;
+const ANCHOR_RE = new RegExp(
+  `<a\\b${TAG_ATTRS}*?\\bhref\\s*=\\s*["']([^"']*)["']${TAG_ATTRS}*>([\\s\\S]*?)<\\/a>`,
+  'gi',
+);
+
+/**
  * Convert HTML to a readable plain-text alternative. Deterministic, no DOM.
  */
 export function htmlToText(html: string): string {
-  let s = normalizeNewlines(html);
+  // NUL is not legal in HTML text and is the delimiter of the anchor
+  // placeholder below, so it goes before anything else looks at the document.
+  let s = normalizeNewlines(html).replace(/\u0000/g, '');
   s = s.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
   s = s.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '');
   s = s.replace(/<br\s*\/?>/gi, '\n');
@@ -374,21 +387,25 @@ export function htmlToText(html: string): string {
   s = s.replace(/<\/(p|div|tr|li)\s*>/gi, '\n');
 
   // Anchors resolve to `TEXT <URL>`, which itself looks like a tag. Park them
-  // behind sentinels so the tag-stripping pass below cannot eat the URL.
+  // behind a placeholder so the tag-stripping pass below cannot eat the URL.
+  // The token is random per call: a fixed one is forgeable by the document, and
+  // this input is attacker-supplied — HTML carrying the literal placeholder
+  // used to duplicate or delete the content around it.
+  const token = randomBytes(8).toString('hex');
   const anchors: string[] = [];
-  s = s.replace(
-    /<a\b[^>]*\bhref\s*=\s*["']([^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi,
-    (_match, href: string, inner: string) => {
-      const url = decodeEntities(href).trim();
-      const label = decodeEntities(inner.replace(/<[^>]*>/g, '')).trim();
-      const rendered = !label || label === url ? url : `${label} <${url}>`;
-      anchors.push(rendered);
-      return `\u0000ANCHOR${anchors.length - 1}\u0000`;
-    },
-  );
+  s = s.replace(ANCHOR_RE, (_match, href: string, inner: string) => {
+    const url = decodeEntities(href).trim();
+    const label = decodeEntities(inner.replace(/<[^>]*>/g, '')).trim();
+    const rendered = !label || label === url ? url : `${label} <${url}>`;
+    anchors.push(rendered);
+    return `\u0000${token}${anchors.length - 1}\u0000`;
+  });
   s = s.replace(/<[^>]*>/g, '');
   s = decodeEntities(s);
-  s = s.replace(/\u0000ANCHOR(\d+)\u0000/g, (_m, idx) => anchors[Number(idx)] ?? '');
+  s = s.replace(
+    new RegExp(`\\u0000${token}(\\d+)\\u0000`, 'g'),
+    (_m, idx) => anchors[Number(idx)] ?? '',
+  );
   s = s.replace(/\n{3,}/g, '\n\n');
   return s.trim();
 }
