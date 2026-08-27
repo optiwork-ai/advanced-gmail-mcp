@@ -616,3 +616,27 @@ run.
 The contingent Phase-2 fix pass, then cold Fable validation, then the one
 re-auth round for all five aliases before any of the six new tools can be
 exercised live. (The fix pass is W11 above.)
+
+## W12 — cold Fable validation, final round (2026-08-27)
+
+Verdict: **VALIDATED, empty must-fix list** — written to
+`shared/active-work/2026-08-27-gmail-mcp-upgrade/VALIDATION-VERDICT-2.md`.
+Against artifacts at `cf4f445`: fresh run (typecheck clean; 13 files, 539/539),
+the chair-ordered C3 re-check executed independently (sign-off block verbatim at
+HEAD, 70-col wrap joins to one line, FAIL-before re-run at `626523e` → exactly
+4 failed / 415 passed), Phase-2 D/E/F/G re-derived from the addendum item by
+item, test diff over `626523e..HEAD` pure-additions-or-untouched (zero deleted
+lines; W11's one restated assertion inspected and legitimate), SCOPES diff
+exactly the two ratified entries + comments, own attack batteries against
+`upload_drive_file` paths and the autolinker (no finding), ROUND 2 findings
+re-judged with one round-2 FAIL-before spot-checked in history (3/31 at
+`69f4213~1`). No source file modified, no live API call. Three open chair
+rulings remain (items 32/33, R2-P1, item 17/P10 — none blocks acceptance); the
+definitive live-acceptance checklist, including round 1's P1/P4/C4 carryovers,
+is in the verdict file.
+
+## Remaining — after W12
+
+The chair's: three open rulings, the one re-auth round for all five aliases,
+the live-acceptance checklist in VALIDATION-VERDICT-2.md, the cross-repo shape
+sweep, then Steve's merge/push decision.
