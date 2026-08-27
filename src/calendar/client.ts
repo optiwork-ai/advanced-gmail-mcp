@@ -348,6 +348,24 @@ export async function createEvent(opts: CreateEventOptions): Promise<{
   const start = buildEventDateTime(opts.start, allDay, opts.timeZone, 'start');
   const end = buildEventDateTime(opts.end, allDay, opts.timeZone, 'end');
 
+  // Each endpoint is valid on its own; the RANGE was never checked, so an
+  // inverted one reached the API and came back as an opaque Google error.
+  // get_freebusy already refuses this — same rule here.
+  const startMs = Date.parse(opts.start.trim());
+  const endMs = Date.parse(opts.end.trim());
+  if (allDay) {
+    // An all-day end date is exclusive, so end === start is a one-day event.
+    if (endMs < startMs) {
+      throw new Error(
+        `create_calendar_event: end "${opts.end}" is before start "${opts.start}"`,
+      );
+    }
+  } else if (endMs <= startMs) {
+    throw new Error(
+      `create_calendar_event: end "${opts.end}" must be after start "${opts.start}"`,
+    );
+  }
+
   const attendees = (opts.attendees ?? [])
     .map(email => email.trim())
     .filter(email => email.length > 0);

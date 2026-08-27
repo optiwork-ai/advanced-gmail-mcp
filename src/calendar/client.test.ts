@@ -394,6 +394,47 @@ describe('createEvent', () => {
     expect(result.notice).toMatch(/No invitation emails were sent/);
   });
 
+  it('refuses an end that is before the start, like get_freebusy does', async () => {
+    await expect(
+      createEvent({
+        summary: 'Test',
+        start: '2026-09-01T15:00:00Z',
+        end: '2026-09-01T14:00:00Z',
+      }),
+    ).rejects.toThrow(/end .* must be after start/i);
+    expect(api.events.insert).not.toHaveBeenCalled();
+  });
+
+  it('refuses a zero-length timed event', async () => {
+    await expect(
+      createEvent({
+        summary: 'Test',
+        start: '2026-09-01T14:00:00Z',
+        end: '2026-09-01T14:00:00Z',
+      }),
+    ).rejects.toThrow(/must be after/i);
+    expect(api.events.insert).not.toHaveBeenCalled();
+  });
+
+  it('refuses an inverted all-day range', async () => {
+    await expect(
+      createEvent({
+        summary: 'Test',
+        start: '2026-09-03',
+        end: '2026-09-01',
+        allDay: true,
+      }),
+    ).rejects.toThrow(/before/i);
+    expect(api.events.insert).not.toHaveBeenCalled();
+  });
+
+  it('allows a single-day all-day event where end equals start', async () => {
+    api.events.insert.mockResolvedValueOnce({ data: { id: 'evt2' } });
+    await expect(
+      createEvent({ summary: 'Test', start: '2026-09-01', end: '2026-09-01', allDay: true }),
+    ).resolves.toMatchObject({ id: 'evt2' });
+  });
+
   it("passes 'all' through and says plainly that Google emailed the attendees", async () => {
     api.events.insert.mockResolvedValueOnce(ok);
 
