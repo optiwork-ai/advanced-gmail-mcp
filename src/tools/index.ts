@@ -30,6 +30,9 @@ import { registerStarTools } from './star.js';
 import { registerCreateLabel } from './create-label.js';
 import { registerUpdateLabel } from './update-label.js';
 import { registerDeleteLabel } from './delete-label.js';
+// Mailbox settings (gmail.settings.basic)
+import { registerFilterTools } from './filters.js';
+import { registerVacationTools } from './vacation.js';
 // Read-only Chat / Drive / Docs tools
 import { registerListChatSpaces } from './chat-list-spaces.js';
 import { registerListChatMessages } from './chat-list-messages.js';
@@ -87,6 +90,12 @@ export function registerAllTools(server: McpServer): void {
   registerCreateLabel(server);
   registerUpdateLabel(server);
   registerDeleteLabel(server);
+
+  // Mailbox settings. These need gmail.settings.basic, added 2026-08-27, so
+  // they 403 on every alias until it re-consents. set_vacation is the outward
+  // one: while the responder is on, the account replies to strangers by itself.
+  registerFilterTools(server);
+  registerVacationTools(server);
 
   // Chat / Drive / Docs. Chat and Docs stay strictly read-only; Drive gains
   // exactly one write — upload_drive_file — under the narrow drive.file scope,
