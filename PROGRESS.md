@@ -691,7 +691,7 @@ HEAD is **578**, typecheck clean, **50 tools** registered (unchanged).
       **FAIL-before at HEAD: `6 failed | 42 passed (48)` in
       `settings-api.test.ts`**, plus `tsc` rejecting `confirm` as unknown on
       `SetVacationOptions`. PASS-after: full suite 578. 12 tests added.
-- [x] **`__DOCS_SHA__` — docs.** README `set_vacation` row + a rewritten
+- [x] **`815fee0` — docs.** README `set_vacation` row + a rewritten
       enabling note, a new Calendar permission-errors note; CHANGELOG 1.6.2
       (two Fixed, one Changed); the bundled `.claude/commands/email.md`
       `set_vacation` row carries `confirm?` and both rules.
