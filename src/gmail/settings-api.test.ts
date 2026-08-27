@@ -322,7 +322,7 @@ describe('setVacation', () => {
       data: { enableAutoReply: true, responseSubject: 'Away', responseBodyPlainText: 'Back Monday', restrictToContacts: true },
     });
 
-    const result = await setVacation({ enable: true });
+    const result = await setVacation({ enable: true, confirm: true });
 
     const body = v.updateVacation.mock.calls[0][0].requestBody;
     expect(body).toMatchObject({
@@ -356,12 +356,12 @@ describe('setVacation', () => {
     v.getVacation.mockResolvedValue({ data: {} });
     v.updateVacation.mockResolvedValue({ data: { enableAutoReply: true } });
 
-    await setVacation({ enable: true, body: '<p>Away</p>', isHtml: true });
+    await setVacation({ enable: true, confirm: true, body: '<p>Away</p>', isHtml: true });
     const html = v.updateVacation.mock.calls[0][0].requestBody;
     expect(html.responseBodyHtml).toBe('<p>Away</p>');
     expect(html.responseBodyPlainText).toBe('Away');
 
-    await setVacation({ enable: true, body: 'Away' });
+    await setVacation({ enable: true, confirm: true, body: 'Away' });
     const plain = v.updateVacation.mock.calls[1][0].requestBody;
     expect(plain.responseBodyPlainText).toBe('Away');
     expect(plain.responseBodyHtml).toContain('Away');
@@ -380,7 +380,7 @@ describe('setVacation', () => {
     });
     v.updateVacation.mockResolvedValueOnce({ data: { enableAutoReply: true } });
 
-    await setVacation({ enable: true, body: 'NEW plain reply - back tomorrow' });
+    await setVacation({ enable: true, confirm: true, body: 'NEW plain reply - back tomorrow' });
 
     const body = v.updateVacation.mock.calls[0][0].requestBody;
     expect(body.responseBodyPlainText).toBe('NEW plain reply - back tomorrow');
@@ -394,7 +394,7 @@ describe('setVacation', () => {
     });
     v.updateVacation.mockResolvedValueOnce({ data: { enableAutoReply: true } });
 
-    await setVacation({ enable: true, body: '<p>NEW html reply</p>', isHtml: true });
+    await setVacation({ enable: true, confirm: true, body: '<p>NEW html reply</p>', isHtml: true });
 
     const body = v.updateVacation.mock.calls[0][0].requestBody;
     expect(body.responseBodyHtml).toBe('<p>NEW html reply</p>');
@@ -412,7 +412,7 @@ describe('setVacation', () => {
     });
     v.updateVacation.mockResolvedValueOnce({ data: { enableAutoReply: true } });
 
-    await setVacation({ enable: true });
+    await setVacation({ enable: true, confirm: true });
 
     const body = v.updateVacation.mock.calls[0][0].requestBody;
     expect(body.responseBodyHtml).toBe('<p>Saved html</p>');
@@ -425,6 +425,7 @@ describe('setVacation', () => {
 
     await setVacation({
       enable: true,
+      confirm: true,
       body: 'Away',
       startTime: '2026-09-01T00:00:00.000Z',
       endTime: '2026-09-08T00:00:00.000Z',
@@ -438,7 +439,7 @@ describe('setVacation', () => {
   it('refuses to enable with no body anywhere — nothing saved, nothing supplied', async () => {
     v.getVacation.mockResolvedValueOnce({ data: { enableAutoReply: false } });
 
-    await expect(setVacation({ enable: true })).rejects.toThrow(/response body is required/);
+    await expect(setVacation({ enable: true, confirm: true })).rejects.toThrow(/response body is required/);
     expect(v.updateVacation).not.toHaveBeenCalled();
   });
 
@@ -465,6 +466,7 @@ describe('setVacation', () => {
 
     await expect(setVacation({
       enable: true,
+      confirm: true,
       startTime: '2026-09-08T00:00:00.000Z',
       endTime: '2026-09-01T00:00:00.000Z',
     })).rejects.toThrow(/must be after/);
@@ -475,7 +477,7 @@ describe('setVacation', () => {
     v.getVacation.mockResolvedValueOnce({ data: {} });
     v.updateVacation.mockResolvedValueOnce({ data: { enableAutoReply: true } });
 
-    await setVacation({ enable: true, body: 'I am at a funeral', account: 'work' });
+    await setVacation({ enable: true, confirm: true, body: 'I am at a funeral', account: 'work' });
 
     const entry = logCalls.find(c => c.message === 'set_vacation');
     expect(entry?.fields).toMatchObject({ account: 'work', enable: true });
@@ -527,5 +529,134 @@ describe('without the gmail.settings.basic grant', () => {
   it('leaves a non-auth failure alone', async () => {
     f.delete.mockRejectedValue(Object.assign(new Error('Filter not found'), { code: 404 }));
     await expect(deleteFilter('nope')).rejects.toThrow(/Filter not found/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Enable guards (live incident, 2026-08-27)
+//
+// A vacation responder saved in 2016 was found switched back ON, by something
+// outside this tooling. Two guards make that impossible to do here BY ACCIDENT:
+// a stale saved window is refused rather than re-enabled, and enabling at all
+// takes an explicit confirm — because switching the responder on makes the
+// account send mail outward on its own. Turning it OFF stays friction-free:
+// the safe direction must never be harder than the dangerous one.
+// ---------------------------------------------------------------------------
+
+/** Gmail stores the window as milliseconds-since-epoch strings. */
+const STALE_START = String(Date.parse('2016-06-01T00:00:00Z'));
+const STALE_END = String(Date.parse('2016-06-14T00:00:00Z'));
+
+function savedResponder(extra: Record<string, unknown> = {}): void {
+  v.getVacation.mockResolvedValueOnce({
+    data: {
+      enableAutoReply: false,
+      responseSubject: 'Out of office',
+      responseBodyPlainText: 'Back on the 14th',
+      ...extra,
+    },
+  });
+  v.updateVacation.mockResolvedValueOnce({
+    data: { enableAutoReply: true, responseSubject: 'Out of office' },
+  });
+}
+
+describe('setVacation — enabling takes an explicit confirm', () => {
+  it('refuses enable: true with no confirm, before any write', async () => {
+    savedResponder();
+    await expect(setVacation({ enable: true })).rejects.toThrow(/confirm: true/);
+    expect(v.updateVacation).not.toHaveBeenCalled();
+  });
+
+  it('says plainly why: enabling sends mail outward on the account behalf', async () => {
+    savedResponder();
+    const failure = await setVacation({ enable: true }).catch((e: Error) => e);
+    expect((failure as Error).message).toMatch(/sends mail .* on (the account|this account)/i);
+  });
+
+  it('refuses confirm: false the same way', async () => {
+    savedResponder();
+    await expect(setVacation({ enable: true, confirm: false })).rejects.toThrow(/confirm: true/);
+    expect(v.updateVacation).not.toHaveBeenCalled();
+  });
+
+  it('does not log the outward act when it refuses', async () => {
+    savedResponder();
+    await setVacation({ enable: true }).catch(() => undefined);
+    expect(logCalls.find(c => c.message === 'set_vacation')).toBeUndefined();
+  });
+
+  it('proceeds with confirm: true', async () => {
+    savedResponder();
+    const result = await setVacation({ enable: true, confirm: true });
+    expect(v.updateVacation).toHaveBeenCalledTimes(1);
+    expect(result.notice).toContain('ON');
+  });
+
+  it('never asks for confirm to turn the responder OFF', async () => {
+    v.getVacation.mockResolvedValueOnce({
+      data: { enableAutoReply: true, responseSubject: 'Out', responseBodyPlainText: 'Back' },
+    });
+    v.updateVacation.mockResolvedValueOnce({ data: { enableAutoReply: false } });
+
+    const result = await setVacation({ enable: false });
+    expect(v.updateVacation).toHaveBeenCalledTimes(1);
+    expect(result.notice).toContain('OFF');
+  });
+});
+
+describe('setVacation — a stale saved window is not re-enabled', () => {
+  it('refuses to enable a responder whose window already ended', async () => {
+    savedResponder({ startTime: STALE_START, endTime: STALE_END });
+    await expect(setVacation({ enable: true, confirm: true })).rejects.toThrow(/already ended/i);
+    expect(v.updateVacation).not.toHaveBeenCalled();
+  });
+
+  it('names the stale window dates so the caller can see what it found', async () => {
+    savedResponder({ startTime: STALE_START, endTime: STALE_END });
+    const failure = await setVacation({ enable: true, confirm: true }).catch((e: Error) => e);
+    const message = (failure as Error).message;
+    expect(message).toContain('2016-06-14');
+    expect(message).toContain('2016-06-01');
+    expect(message).toMatch(/start_time/);
+    expect(message).toMatch(/end_time/);
+  });
+
+  it('accepts a fresh end_time over the stale saved one', async () => {
+    savedResponder({ startTime: STALE_START, endTime: STALE_END });
+    const future = new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString();
+    await setVacation({ enable: true, confirm: true, startTime: new Date().toISOString(), endTime: future });
+    expect(v.updateVacation).toHaveBeenCalledTimes(1);
+  });
+
+  it('still allows enabling when there is no window at all', async () => {
+    savedResponder();
+    await setVacation({ enable: true, confirm: true });
+    expect(v.updateVacation).toHaveBeenCalledTimes(1);
+  });
+
+  it('still allows enabling when the saved window is still open', async () => {
+    savedResponder({
+      startTime: String(Date.now() - 3600 * 1000),
+      endTime: String(Date.now() + 7 * 24 * 3600 * 1000),
+    });
+    await setVacation({ enable: true, confirm: true });
+    expect(v.updateVacation).toHaveBeenCalledTimes(1);
+  });
+
+  it('turning it OFF is never blocked by a stale window', async () => {
+    v.getVacation.mockResolvedValueOnce({
+      data: {
+        enableAutoReply: true,
+        responseBodyPlainText: 'Back on the 14th',
+        startTime: STALE_START,
+        endTime: STALE_END,
+      },
+    });
+    v.updateVacation.mockResolvedValueOnce({ data: { enableAutoReply: false } });
+
+    const result = await setVacation({ enable: false });
+    expect(v.updateVacation).toHaveBeenCalledTimes(1);
+    expect(result.notice).toContain('OFF');
   });
 });

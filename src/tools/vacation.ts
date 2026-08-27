@@ -12,7 +12,8 @@ const accountParam = z.string().optional().describe('Account alias or email addr
 export const getVacationParams = { account: accountParam };
 
 export const setVacationParams = {
-  enable: z.boolean().describe('true turns the vacation responder ON; false turns it OFF. Turning it off KEEPS the saved subject and message.'),
+  enable: z.boolean().describe('true turns the vacation responder ON; false turns it OFF. Turning it off KEEPS the saved subject and message, and never needs confirm.'),
+  confirm: z.boolean().optional().describe('Required to be true alongside enable: true, and ignored otherwise. Enabling the responder makes the account send mail outward on its own, so pass this ONLY after the user has explicitly asked for the responder to be turned on — never to clear the error.'),
   subject: z.string().optional().describe('Subject line of the automatic reply. Omit to keep whatever is already saved.'),
   body: z.string().optional().describe('The automatic reply text. Supplying it REPLACES the saved message in both the plain-text and HTML forms Gmail stores, so the reply that goes out is always the text you passed. Omit to keep whatever is already saved; required the first time the responder is enabled on an account.'),
   is_html: z.boolean().optional().describe('Treat body as HTML rather than plain text (default: false). Either way both stored forms are rewritten from it.'),
@@ -47,15 +48,18 @@ export function registerVacationTools(server: McpServer): void {
   server.tool(
     'set_vacation',
     'Turn the vacation responder (out-of-office auto-reply) on or off. '
-    + 'ENABLING IT IS AN OUTWARD ACT: while it is on, Gmail replies automatically, from this account, to people who write in — without any further call to this server. Confirm with the user before enabling, and prefer setting an end_time. '
+    + 'ENABLING IT IS AN OUTWARD ACT: while it is on, Gmail replies automatically, from this account, to people who write in — without any further call to this server. '
+    + 'TWO RULES GOVERN ENABLING. (1) enable: true is REFUSED unless confirm: true is passed as well, and you may pass confirm only after the user has explicitly asked for the responder to be turned on. (2) enable: true is REFUSED when the saved responder window already ended — an old responder is not silently brought back to life; pass a new start_time and end_time for the absence you actually mean. '
+    + 'Turning it OFF (enable: false) needs neither: the safe direction is never harder than the dangerous one. '
     + 'Settings are merged, not replaced: omitted fields keep their saved values, so turning the responder off does not erase the message, and changing the subject does not blank the body. '
     + 'The result carries a notice stating exactly what is now switched on. '
     + SCOPE_NOTE,
     setVacationParams,
-    async ({ enable, subject, body, is_html, start_time, end_time, restrict_to_contacts, restrict_to_domain, account }) => {
+    async ({ enable, confirm, subject, body, is_html, start_time, end_time, restrict_to_contacts, restrict_to_domain, account }) => {
       try {
         const result = await setVacation({
           enable,
+          confirm: confirm ?? undefined,
           subject: subject ?? undefined,
           body: body ?? undefined,
           isHtml: is_html ?? undefined,

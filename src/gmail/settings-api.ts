@@ -247,6 +247,17 @@ export interface VacationState {
 
 export interface SetVacationOptions {
   enable: boolean;
+  /**
+   * Required to be `true` when `enable` is true, and ignored otherwise.
+   *
+   * Switching the responder on is the one thing in this module that makes the
+   * account send mail outward, to strangers, with no further call. `enable`
+   * alone is a value a model can set while paraphrasing a request; a separate
+   * flag cannot be reached without the user having actually asked for it.
+   * Turning the responder OFF never needs it — the safe direction must not be
+   * harder than the dangerous one.
+   */
+  confirm?: boolean;
   subject?: string;
   body?: string;
   isHtml?: boolean;
@@ -373,6 +384,38 @@ export async function setVacation(opts: SetVacationOptions): Promise<VacationSta
   };
 
   if (opts.enable) {
+    // Guard 1 — the outward act needs an explicit yes. Nothing else in this
+    // server starts sending mail on its own, and `enable: true` on its own is
+    // a value a model can produce while paraphrasing "what does my
+    // out-of-office say?". Refusing here costs one extra parameter; not
+    // refusing costs auto-replies to everyone who writes in.
+    if (opts.confirm !== true) {
+      throw new Error(
+        'set_vacation: enabling the vacation responder sends mail outward on this account\'s '
+        + 'behalf — Gmail will reply automatically, to anyone who writes in, with no further '
+        + 'call to this server. Pass confirm: true, and only after the user has explicitly '
+        + 'asked for the responder to be turned on. Turning it OFF (enable: false) never needs '
+        + 'confirm.',
+      );
+    }
+
+    // Guard 2 — a window that already closed must not be re-enabled by
+    // accident. A responder saved years ago keeps its old start/end, and
+    // because `updateVacation` merges, "turn it on" would quietly restore that
+    // dead window along with a message written for a trip that is long over.
+    // Refusing forces the caller to state the window they actually mean.
+    const savedEnd = Number(merged.endTime ?? 0);
+    if (savedEnd > 0 && savedEnd <= Date.now()) {
+      const startIso = toIso(merged.startTime);
+      throw new Error(
+        `set_vacation: the saved responder window already ended — it runs `
+        + `${startIso ? `from ${startIso} ` : ''}to ${toIso(merged.endTime)}, which is in the `
+        + 'past. Enabling it would restore a window (and a message) written for a period that '
+        + 'is over. Pass a new start_time and end_time for the absence you actually mean, or '
+        + 'omit end_time entirely for "until turned off".',
+      );
+    }
+
     const hasBody = !!(merged.responseBodyPlainText?.trim() || merged.responseBodyHtml?.trim());
     if (!hasBody) {
       throw new Error(
