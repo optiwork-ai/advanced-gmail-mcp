@@ -113,9 +113,15 @@ describe('B10 security gate — CRLF header injection', () => {
     );
 
     expect(raw).not.toMatch(/^Bcc:/m);
-    expect(raw).not.toContain('evil@x.com\r\n');
+
     const headerBlock = raw.split('\r\n\r\n')[0];
     expect(headerBlock.split('\r\n').filter(l => /^Bcc:/i.test(l))).toHaveLength(0);
+
+    // The injected text is neutralized by staying inside the To value: no new
+    // header line is minted, and the header set is exactly what was asked for.
+    expect(headerBlock.split('\r\n').filter(l => /^[A-Za-z-]+:/.test(l)).map(l => l.split(':')[0]))
+      .toEqual(['From', 'To', 'Subject', 'MIME-Version', 'Content-Type']);
+    expect(headerBlock).toContain('To: a@b.com Bcc: evil@x.com');
   });
 
   it('does not let a poisoned subject inject headers', () => {

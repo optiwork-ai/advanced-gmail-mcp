@@ -1,14 +1,20 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { gmail_v1 } from 'googleapis';
 import {
-  buildForwardBody,
   buildForwardSubject,
   buildReferences,
   buildReplyCc,
+  buildReplyRecipients,
   buildReplySubject,
   encodeHeaderValue,
+  extractBody,
   parseUnsubscribeHeaders,
   withRetry,
 } from './client.js';
+
+function b64(s: string): string {
+  return Buffer.from(s, 'utf8').toString('base64url');
+}
 
 function statusError(status: number, message = 'fail'): Error & { code?: number } {
   const err = new Error(message) as Error & { code?: number };
@@ -200,57 +206,194 @@ describe('buildForwardSubject', () => {
   });
 });
 
-describe('buildForwardBody', () => {
-  it('builds a Gmail-style forwarded message block without intro', () => {
-    const body = buildForwardBody({
-      originalFrom: 'alice@x.com',
-      originalDate: 'Mon, 1 Jan 2024',
-      originalSubject: 'Hi',
-      originalTo: 'bob@x.com',
-      originalBody: 'Original content',
+// buildForwardBody was replaced by mime.ts's buildForwardBlock, which emits
+// both an HTML and a text flavour; its suite lives in mime.test.ts.
+
+describe('buildReplyRecipients', () => {
+  const base = {
+    selfEmail: 'me@x.com',
+    originalFrom: 'Alice <alice@x.com>',
+    originalTo: 'me@x.com, bob@x.com',
+    originalCc: 'carol@x.com',
+  };
+
+  it('addresses the original sender when there is no Reply-To', () => {
+    expect(buildReplyRecipients(base)).toEqual({
+      to: 'Alice <alice@x.com>',
+      cc: undefined,
     });
-    expect(body).toContain('---------- Forwarded message ----------');
-    expect(body).toContain('From: alice@x.com');
-    expect(body).toContain('Date: Mon, 1 Jan 2024');
-    expect(body).toContain('Subject: Hi');
-    expect(body).toContain('To: bob@x.com');
-    expect(body).toContain('Original content');
-    expect(body.startsWith('---------- Forwarded message ----------')).toBe(true);
   });
 
-  it('prepends intro before forwarded block', () => {
-    const body = buildForwardBody({
-      intro: 'FYI Steve',
-      originalFrom: 'a@x',
-      originalDate: 'date',
-      originalSubject: 's',
-      originalTo: 't',
-      originalBody: 'body',
-    });
-    expect(body.startsWith('FYI Steve\n\n----------')).toBe(true);
+  it('addresses Reply-To instead of From when the original set one', () => {
+    expect(
+      buildReplyRecipients({ ...base, originalReplyTo: 'Support <support@x.com>' }).to,
+    ).toBe('Support <support@x.com>');
   });
 
-  it('omits Cc line when no originalCc', () => {
-    const body = buildForwardBody({
-      originalFrom: 'a',
-      originalDate: 'd',
-      originalSubject: 's',
-      originalTo: 't',
-      originalBody: 'b',
-    });
-    expect(body).not.toContain('Cc:');
+  it('ignores a blank Reply-To', () => {
+    expect(buildReplyRecipients({ ...base, originalReplyTo: '   ' }).to).toBe(
+      'Alice <alice@x.com>',
+    );
   });
 
-  it('includes Cc line when originalCc is provided', () => {
-    const body = buildForwardBody({
-      originalFrom: 'a',
-      originalDate: 'd',
-      originalSubject: 's',
-      originalTo: 't',
-      originalCc: 'carol@x',
-      originalBody: 'b',
+  it('reply-all keeps the original To in To and the original Cc in Cc, minus self', () => {
+    expect(buildReplyRecipients({ ...base, replyAll: true })).toEqual({
+      to: 'Alice <alice@x.com>, bob@x.com',
+      cc: 'carol@x.com',
     });
-    expect(body).toContain('Cc: carol@x');
+  });
+
+  it('reply-all dedups an address appearing in both To and Cc', () => {
+    expect(
+      buildReplyRecipients({
+        ...base,
+        originalCc: 'bob@x.com, carol@x.com',
+        replyAll: true,
+      }).cc,
+    ).toBe('carol@x.com');
+  });
+
+  it('never duplicates the sender into the reply-all To list', () => {
+    expect(
+      buildReplyRecipients({
+        ...base,
+        originalTo: 'alice@x.com, bob@x.com',
+        replyAll: true,
+      }).to,
+    ).toBe('Alice <alice@x.com>, bob@x.com');
+  });
+
+  it('adds a caller-supplied cc without reply-all', () => {
+    expect(buildReplyRecipients({ ...base, userCc: 'dave@x.com' })).toEqual({
+      to: 'Alice <alice@x.com>',
+      cc: 'dave@x.com',
+    });
+  });
+
+  it('dedups a caller-supplied cc against the reply-all set', () => {
+    expect(
+      buildReplyRecipients({ ...base, userCc: 'carol@x.com, dave@x.com', replyAll: true }).cc,
+    ).toBe('carol@x.com, dave@x.com');
+  });
+
+  it('is case-insensitive in the self-exclusion', () => {
+    expect(
+      buildReplyRecipients({
+        ...base,
+        selfEmail: 'Me@X.com',
+        originalTo: 'ME@x.com, bob@x.com',
+        replyAll: true,
+      }).to,
+    ).toBe('Alice <alice@x.com>, bob@x.com');
+  });
+
+  it('still addresses the sender when replying to your own message', () => {
+    expect(
+      buildReplyRecipients({
+        selfEmail: 'me@x.com',
+        originalFrom: 'me@x.com',
+        originalTo: 'alice@x.com',
+        originalCc: '',
+      }).to,
+    ).toBe('me@x.com');
+  });
+
+  it('preserves "Name <email>" formatting', () => {
+    expect(
+      buildReplyRecipients({
+        ...base,
+        originalTo: 'Bob Jones <bob@x.com>',
+        replyAll: true,
+      }).to,
+    ).toBe('Alice <alice@x.com>, Bob Jones <bob@x.com>');
+  });
+});
+
+describe('extractBody', () => {
+  it('reads a single-part text/plain payload', () => {
+    const payload: gmail_v1.Schema$MessagePart = {
+      mimeType: 'text/plain',
+      body: { data: b64('hello') },
+    };
+    expect(extractBody(payload)).toEqual({ html: '', text: 'hello' });
+  });
+
+  it('reads both parts of a multipart/alternative', () => {
+    const payload: gmail_v1.Schema$MessagePart = {
+      mimeType: 'multipart/alternative',
+      parts: [
+        { mimeType: 'text/plain', body: { data: b64('plain') } },
+        { mimeType: 'text/html', body: { data: b64('<p>html</p>') } },
+      ],
+    };
+    expect(extractBody(payload)).toEqual({ html: '<p>html</p>', text: 'plain' });
+  });
+
+  it('is first-wins: a nested alternative does not overwrite the top-level body', () => {
+    const payload: gmail_v1.Schema$MessagePart = {
+      mimeType: 'multipart/mixed',
+      parts: [
+        {
+          mimeType: 'multipart/alternative',
+          parts: [
+            { mimeType: 'text/plain', body: { data: b64('top level') } },
+            { mimeType: 'text/html', body: { data: b64('<p>top level</p>') } },
+          ],
+        },
+        {
+          mimeType: 'multipart/alternative',
+          parts: [
+            { mimeType: 'text/plain', body: { data: b64('later part') } },
+            { mimeType: 'text/html', body: { data: b64('<p>later part</p>') } },
+          ],
+        },
+      ],
+    };
+    expect(extractBody(payload)).toEqual({ html: '<p>top level</p>', text: 'top level' });
+  });
+
+  it('does not descend into a message/rfc822 sub-message (defect F5)', () => {
+    const payload: gmail_v1.Schema$MessagePart = {
+      mimeType: 'multipart/mixed',
+      parts: [
+        { mimeType: 'text/plain', body: { data: b64('my forward note') } },
+        {
+          mimeType: 'message/rfc822',
+          parts: [
+            { mimeType: 'text/plain', body: { data: b64('the nested original') } },
+            { mimeType: 'text/html', body: { data: b64('<p>the nested original</p>') } },
+          ],
+        },
+      ],
+    };
+    expect(extractBody(payload)).toEqual({ html: '', text: 'my forward note' });
+  });
+
+  it('ignores a text/* part that is actually an attachment', () => {
+    const payload: gmail_v1.Schema$MessagePart = {
+      mimeType: 'multipart/mixed',
+      parts: [
+        { mimeType: 'text/plain', body: { data: b64('real body') } },
+        {
+          mimeType: 'text/csv',
+          filename: 'data.csv',
+          body: { data: b64('a,b\n1,2'), attachmentId: 'att1' },
+        },
+        {
+          mimeType: 'text/plain',
+          filename: 'notes.txt',
+          body: { data: b64('attached notes'), attachmentId: 'att2' },
+        },
+      ],
+    };
+    expect(extractBody(payload)).toEqual({ html: '', text: 'real body' });
+  });
+
+  it('returns empty strings for a payload with no body parts', () => {
+    expect(extractBody({ mimeType: 'multipart/mixed', parts: [] })).toEqual({
+      html: '',
+      text: '',
+    });
   });
 });
 

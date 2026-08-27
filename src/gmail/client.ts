@@ -1,10 +1,25 @@
+import { Readable } from 'stream';
 import { google } from 'googleapis';
 import type { gmail_v1 } from 'googleapis';
 import type { Auth } from 'googleapis';
 import { type AccountConfig, resolveAccount } from '../config.js';
 import { getAuthClient } from './auth.js';
 import { log } from '../log.js';
+import {
+  MEDIA_UPLOAD_THRESHOLD_BYTES,
+  type BuiltMessage,
+  type MimeOptions,
+  buildForwardBlock,
+  buildMimeMessage,
+  buildQuoteBlock,
+  formatFromHeader,
+  htmlToText,
+  loadAttachment,
+  sanitizeFilename,
+} from './mime.js';
+import { getSendAsProfile } from './settings.js';
 import type {
+  Attachment,
   EmailSummary,
   EmailFull,
   AttachmentInfo,
@@ -20,6 +35,12 @@ import type {
   BatchResult,
   UnsubscribeResult,
 } from './types.js';
+
+/**
+ * RFC 2047 header encoding lives in mime.ts now; it is re-exported here so the
+ * existing call sites and its unit tests keep importing it from this module.
+ */
+export { encodeHeaderValue } from './mime.js';
 
 // ---------------------------------------------------------------------------
 // Client cache: OAuth2Client per account with 50-min TTL
@@ -123,23 +144,42 @@ function decodeBase64Url(data: string): string {
 }
 
 /**
- * Recursively extract HTML and plain-text body from a MIME payload.
+ * Extract the message's own HTML and plain-text body from a MIME payload.
+ *
+ * First-wins at the shallowest depth (defect F5). The previous last-wins walk
+ * descended into `message/rfc822` sub-messages and into inline alternatives
+ * inside quoted history, so a message that already contained a forwarded
+ * sub-message could report the NESTED original as its body — which every
+ * quote and forward feature would then inherit.
+ *
+ * Exported for unit testing.
  */
-function extractBody(payload: gmail_v1.Schema$MessagePart): { html: string; text: string } {
+export function extractBody(payload: gmail_v1.Schema$MessagePart): { html: string; text: string } {
+  // An attached file is never the message body, even when it is text/*.
+  if (payload.filename && payload.filename.length > 0) {
+    return { html: '', text: '' };
+  }
+
+  if (payload.mimeType === 'text/html' && payload.body?.data) {
+    return { html: decodeBase64Url(payload.body.data), text: '' };
+  }
+  if (payload.mimeType === 'text/plain' && payload.body?.data) {
+    return { html: '', text: decodeBase64Url(payload.body.data) };
+  }
+
   let html = '';
   let text = '';
 
-  if (payload.mimeType === 'text/html' && payload.body?.data) {
-    html = decodeBase64Url(payload.body.data);
-  } else if (payload.mimeType === 'text/plain' && payload.body?.data) {
-    text = decodeBase64Url(payload.body.data);
-  }
-
   if (payload.parts) {
     for (const part of payload.parts) {
+      // A nested message is quoted history, not this message's body.
+      if (part.mimeType === 'message/rfc822') continue;
+      if (part.filename && part.filename.length > 0) continue;
+
       const result = extractBody(part);
-      if (result.html) html = result.html;
-      if (result.text) text = result.text;
+      if (!html && result.html) html = result.html;
+      if (!text && result.text) text = result.text;
+      if (html && text) break;
     }
   }
 
@@ -238,51 +278,151 @@ function toThreadMessage(msg: gmail_v1.Schema$Message): ThreadMessage {
 // MIME construction
 // ---------------------------------------------------------------------------
 
-interface MimeOptions {
+/**
+ * Build a message and encode it as base64url for the Gmail API.
+ *
+ * The assembly itself lives in mime.ts; this wrapper is the sync entry point
+ * kept for callers (and tests) that only need the encoded string.
+ */
+export function buildRawMessage(opts: MimeOptions): string {
+  return buildMimeMessage(opts).rawBase64Url;
+}
+
+/** Gmail's own wrapper around a signature block. */
+function signatureSuffixes(signatureHtml: string): { html: string; text: string } {
+  if (!signatureHtml || signatureHtml.trim().length === 0) {
+    return { html: '', text: '' };
+  }
+  return {
+    html:
+      '<br><div class="gmail_signature" dir="ltr" data-smartmail="gmail_signature">'
+      + signatureHtml
+      + '</div>',
+    // Gmail does not prepend the "-- " sigdashes, so neither do we.
+    text: `\n\n${htmlToText(signatureHtml)}`,
+  };
+}
+
+interface OutboundOptions {
+  resolved: AccountConfig;
+  gmail: gmail_v1.Gmail;
   to: string;
   subject: string;
   body: string;
-  from?: string;
   cc?: string;
   bcc?: string;
   is_html?: boolean;
   in_reply_to?: string;
   references?: string;
-  reply_to?: string;
-  html_suffix?: string;
-  text_suffix?: string;
+  /** Default true. */
+  include_signature?: boolean;
+  /** Absolute paths, loaded from disk. */
+  attachment_paths?: string[];
+  /** Already-loaded attachments (forwarded originals). */
+  attachments?: Attachment[];
+  /** Quoted history or forwarded-message block, appended after the signature. */
+  block?: { html: string; text: string };
 }
 
 /**
- * RFC 2047 encoded-word for header values containing non-ASCII characters.
- * Returns the value untouched when it's pure ASCII. Exported for unit testing.
+ * The single composition path for every outbound tool.
+ *
+ * One builder, one dispatch helper: send, draft, reply, draft-reply and
+ * forward all funnel through here so per-tool body construction cannot drift
+ * apart again.
+ *
+ * Order inside the message is Gmail's default: body, then signature, then the
+ * quote/forward block.
  */
-export function encodeHeaderValue(value: string): string {
-  if (/^[\x00-\x7F]*$/.test(value)) return value;
-  const encoded = Buffer.from(value, 'utf-8').toString('base64');
-  return `=?UTF-8?B?${encoded}?=`;
+async function composeOutbound(opts: OutboundOptions): Promise<BuiltMessage> {
+  const profile = await getSendAsProfile(opts.resolved, opts.gmail);
+
+  const signature = opts.include_signature === false
+    ? { html: '', text: '' }
+    : signatureSuffixes(profile.signatureHtml);
+
+  const attachments: Attachment[] = [...(opts.attachments ?? [])];
+  for (const filePath of opts.attachment_paths ?? []) {
+    attachments.push(await loadAttachment(filePath));
+  }
+
+  return buildMimeMessage({
+    from: formatFromHeader(profile.displayName, opts.resolved.email),
+    to: opts.to,
+    cc: opts.cc,
+    bcc: opts.bcc,
+    subject: opts.subject,
+    body: opts.body,
+    is_html: opts.is_html,
+    in_reply_to: opts.in_reply_to,
+    references: opts.references,
+    reply_to: profile.replyTo || undefined,
+    html_suffix: signature.html + (opts.block?.html ?? ''),
+    text_suffix: signature.text + (opts.block?.text ?? ''),
+    attachments: attachments.length > 0 ? attachments : undefined,
+  });
 }
 
 /**
- * Build an RFC 2822 message and encode as base64url for the Gmail API.
+ * Send an assembled message, picking the transport by size.
+ *
+ * Up to 5MB the message rides in `requestBody.raw` as base64url. Beyond that
+ * Gmail requires the media-upload path, where the RAW MIME (not base64url)
+ * goes in `media.body` and `requestBody` carries only the threadId. The stream
+ * is constructed inside the retry closure so a retried attempt does not
+ * re-read an already-consumed stream.
  */
-export function buildRawMessage(opts: MimeOptions): string {
-  const lines: string[] = [];
+async function dispatchSend(
+  gmail: gmail_v1.Gmail,
+  built: BuiltMessage,
+  threadId?: string,
+): Promise<gmail_v1.Schema$Message> {
+  if (built.bytes <= MEDIA_UPLOAD_THRESHOLD_BYTES) {
+    const response = await withRetry(() =>
+      gmail.users.messages.send({
+        userId: 'me',
+        requestBody: { raw: built.rawBase64Url, ...(threadId ? { threadId } : {}) },
+      })
+    );
+    return response.data;
+  }
 
-  if (opts.from) lines.push(`From: ${opts.from}`);
-  lines.push(`To: ${opts.to}`);
-  if (opts.cc) lines.push(`Cc: ${opts.cc}`);
-  if (opts.bcc) lines.push(`Bcc: ${opts.bcc}`);
-  lines.push(`Subject: ${encodeHeaderValue(opts.subject)}`);
-  if (opts.in_reply_to) lines.push(`In-Reply-To: ${opts.in_reply_to}`);
-  if (opts.references) lines.push(`References: ${opts.references}`);
-  lines.push(`MIME-Version: 1.0`);
-  lines.push(`Content-Type: ${opts.is_html ? 'text/html' : 'text/plain'}; charset="UTF-8"`);
-  lines.push(''); // blank line separates headers from body
-  lines.push(opts.body);
+  const rawBuffer = Buffer.from(built.raw, 'utf8');
+  const response = await withRetry(() =>
+    gmail.users.messages.send({
+      userId: 'me',
+      requestBody: threadId ? { threadId } : {},
+      media: { mimeType: 'message/rfc822', body: Readable.from(rawBuffer) },
+    })
+  );
+  return response.data;
+}
 
-  const raw = lines.join('\r\n');
-  return Buffer.from(raw).toString('base64url');
+/** Draft counterpart of dispatchSend, with the same size-based transport rule. */
+async function dispatchDraft(
+  gmail: gmail_v1.Gmail,
+  built: BuiltMessage,
+  threadId?: string,
+): Promise<gmail_v1.Schema$Draft> {
+  if (built.bytes <= MEDIA_UPLOAD_THRESHOLD_BYTES) {
+    const response = await withRetry(() =>
+      gmail.users.drafts.create({
+        userId: 'me',
+        requestBody: { message: { raw: built.rawBase64Url, ...(threadId ? { threadId } : {}) } },
+      })
+    );
+    return response.data;
+  }
+
+  const rawBuffer = Buffer.from(built.raw, 'utf8');
+  const response = await withRetry(() =>
+    gmail.users.drafts.create({
+      userId: 'me',
+      requestBody: { message: threadId ? { threadId } : {} },
+      media: { mimeType: 'message/rfc822', body: Readable.from(rawBuffer) },
+    })
+  );
+  return response.data;
 }
 
 // ---------------------------------------------------------------------------
@@ -437,31 +577,31 @@ export async function sendMessage(opts: {
   cc?: string;
   bcc?: string;
   is_html?: boolean;
+  include_signature?: boolean;
+  attachments?: string[];
 }): Promise<SendResult> {
   const resolved = resolveAccount(opts.account);
   const gmail = await getGmailClient(resolved);
 
-  const raw = buildRawMessage({
-    from: resolved.email,
+  const built = await composeOutbound({
+    resolved,
+    gmail,
     to: opts.to,
     subject: opts.subject,
     body: opts.body,
     cc: opts.cc,
     bcc: opts.bcc,
     is_html: opts.is_html,
+    include_signature: opts.include_signature,
+    attachment_paths: opts.attachments,
   });
 
-  const response = await withRetry(() =>
-    gmail.users.messages.send({
-      userId: 'me',
-      requestBody: { raw },
-    })
-  );
+  const sent = await dispatchSend(gmail, built);
 
   return {
-    id: response.data.id || '',
-    threadId: response.data.threadId || '',
-    labelIds: response.data.labelIds || [],
+    id: sent.id || '',
+    threadId: sent.threadId || '',
+    labelIds: sent.labelIds || [],
   };
 }
 
@@ -476,34 +616,32 @@ export async function createDraft(opts: {
   cc?: string;
   bcc?: string;
   is_html?: boolean;
+  include_signature?: boolean;
+  attachments?: string[];
 }): Promise<DraftResult> {
   const resolved = resolveAccount(opts.account);
   const gmail = await getGmailClient(resolved);
 
-  const raw = buildRawMessage({
-    from: resolved.email,
+  const built = await composeOutbound({
+    resolved,
+    gmail,
     to: opts.to,
     subject: opts.subject,
     body: opts.body,
     cc: opts.cc,
     bcc: opts.bcc,
     is_html: opts.is_html,
+    include_signature: opts.include_signature,
+    attachment_paths: opts.attachments,
   });
 
-  const response = await withRetry(() =>
-    gmail.users.drafts.create({
-      userId: 'me',
-      requestBody: {
-        message: { raw },
-      },
-    })
-  );
+  const draft = await dispatchDraft(gmail, built);
 
   return {
-    draft_id: response.data.id || '',
+    draft_id: draft.id || '',
     message: {
-      id: response.data.message?.id || '',
-      threadId: response.data.message?.threadId || '',
+      id: draft.message?.id || '',
+      threadId: draft.message?.threadId || '',
     },
   };
 }
@@ -791,6 +929,82 @@ export function buildReplyCc(opts: {
   return ccParts.length > 0 ? ccParts.join(', ') : undefined;
 }
 
+/**
+ * Split an address list into its entries, preserving `Name <addr>` formatting.
+ */
+function splitAddressList(raw: string): string[] {
+  return raw.split(',').map(a => a.trim()).filter(a => a.length > 0);
+}
+
+function addressOf(entry: string): string {
+  const match = entry.match(/<([^>]+)>/);
+  return (match ? match[1] : entry).trim().toLowerCase();
+}
+
+/**
+ * Build a reply's To and Cc the way Gmail does.
+ *
+ * `To` is the original's Reply-To when it set one, otherwise its From — plus,
+ * on reply-all, the original To recipients minus self. `Cc` is the original Cc
+ * minus self, plus any caller-supplied Cc.
+ *
+ * Two defects are fixed here: Reply-To used to be ignored entirely, so replies
+ * to ticketing systems and mailing lists went to the wrong address (R1); and
+ * reply-all used to fold the original To recipients into Cc (R2).
+ *
+ * Exported for unit testing.
+ */
+export function buildReplyRecipients(opts: {
+  selfEmail: string;
+  originalFrom: string;
+  originalReplyTo?: string;
+  originalTo: string;
+  originalCc: string;
+  userCc?: string;
+  replyAll?: boolean;
+}): { to: string; cc: string | undefined } {
+  const self = opts.selfEmail.trim().toLowerCase();
+  const seen = new Set<string>();
+
+  const primary = (opts.originalReplyTo && opts.originalReplyTo.trim().length > 0)
+    ? opts.originalReplyTo.trim()
+    : opts.originalFrom.trim();
+
+  const toParts: string[] = [];
+  // The primary recipient is always addressed, even when it is the account
+  // itself (replying to your own message).
+  for (const entry of splitAddressList(primary)) {
+    const email = addressOf(entry);
+    if (seen.has(email)) continue;
+    seen.add(email);
+    toParts.push(entry);
+  }
+  seen.add(self);
+
+  const ccParts: string[] = [];
+  const addAll = (list: string, into: string[]): void => {
+    for (const entry of splitAddressList(list)) {
+      const email = addressOf(entry);
+      if (seen.has(email)) continue;
+      seen.add(email);
+      into.push(entry);
+    }
+  };
+
+  if (opts.replyAll) {
+    addAll(opts.originalTo, toParts);
+    addAll(opts.originalCc, ccParts);
+  }
+  if (opts.userCc) {
+    addAll(opts.userCc, ccParts);
+  }
+
+  return {
+    to: toParts.join(', '),
+    cc: ccParts.length > 0 ? ccParts.join(', ') : undefined,
+  };
+}
+
 interface ReplyOpts {
   messageId: string;
   body: string;
@@ -799,72 +1013,104 @@ interface ReplyOpts {
   reply_all?: boolean;
   cc?: string;
   bcc?: string;
+  include_signature?: boolean;
+  include_quote?: boolean;
+  attachments?: string[];
 }
 
 /**
- * Fetch the original message and build a base64url-encoded reply with
- * proper threading headers (In-Reply-To, References, threadId).
+ * Fetch the original message and build a reply with proper threading headers
+ * (In-Reply-To, References, threadId), Gmail-native recipients, and the
+ * quoted original below the new text.
  */
-async function prepareReply(opts: ReplyOpts): Promise<{ raw: string; threadId: string | undefined }> {
+async function prepareReply(
+  opts: ReplyOpts,
+): Promise<{ built: BuiltMessage; threadId: string | undefined; gmail: gmail_v1.Gmail }> {
   const resolved = resolveAccount(opts.account);
   const gmail = await getGmailClient(resolved);
 
-  const original = await withRetry(() =>
-    gmail.users.messages.get({
-      userId: 'me',
-      id: opts.messageId,
-      format: 'metadata',
-      metadataHeaders: ['From', 'To', 'Cc', 'Subject', 'Message-ID', 'References'],
-    })
-  );
+  // 'full' rather than 'metadata': metadata cannot return a body, and the body
+  // is what the quote block is built from.
+  let original: { data: gmail_v1.Schema$Message };
+  try {
+    original = await withRetry(() =>
+      gmail.users.messages.get({ userId: 'me', id: opts.messageId, format: 'full' })
+    );
+  } catch (err: unknown) {
+    const status = (err as { code?: number; response?: { status?: number } })?.code
+      ?? (err as { response?: { status?: number } })?.response?.status;
+    if (status === 404) {
+      throw new Error(
+        `Message ${opts.messageId} was not found in account "${resolved.alias}" `
+        + `(${resolved.email}). If it lives in another account, pass that account's alias.`
+      );
+    }
+    throw err;
+  }
 
   const headers = original.data.payload?.headers || [];
   const originalFrom = extractHeader(headers, 'From');
+  const originalReplyTo = extractHeader(headers, 'Reply-To');
   const originalTo = extractHeader(headers, 'To');
   const originalCc = extractHeader(headers, 'Cc');
   const originalSubject = extractHeader(headers, 'Subject');
   const originalMessageId = extractHeader(headers, 'Message-ID');
   const originalReferences = extractHeader(headers, 'References');
+  const originalDate = extractHeader(headers, 'Date');
 
-  const raw = buildRawMessage({
-    from: resolved.email,
-    to: originalFrom,
-    cc: buildReplyCc({
-      selfEmail: resolved.email,
-      originalTo,
-      originalCc,
-      userCc: opts.cc,
-      replyAll: opts.reply_all,
-    }),
+  const recipients = buildReplyRecipients({
+    selfEmail: resolved.email,
+    originalFrom,
+    originalReplyTo,
+    originalTo,
+    originalCc,
+    userCc: opts.cc,
+    replyAll: opts.reply_all,
+  });
+
+  let block: { html: string; text: string } | undefined;
+  if (opts.include_quote !== false) {
+    const body = original.data.payload
+      ? extractBody(original.data.payload)
+      : { html: '', text: '' };
+    block = buildQuoteBlock({
+      from: originalFrom,
+      date: originalDate,
+      html: body.html,
+      text: body.text,
+    });
+  }
+
+  const built = await composeOutbound({
+    resolved,
+    gmail,
+    to: recipients.to,
+    cc: recipients.cc,
     bcc: opts.bcc,
     subject: buildReplySubject(originalSubject),
     body: opts.body,
     is_html: opts.is_html,
     in_reply_to: originalMessageId,
     references: buildReferences(originalReferences, originalMessageId),
+    include_signature: opts.include_signature,
+    attachment_paths: opts.attachments,
+    block,
   });
 
-  return { raw, threadId: original.data.threadId || undefined };
+  return { built, threadId: original.data.threadId || undefined, gmail };
 }
 
 /**
  * Send a reply to an existing message with proper threading headers.
  */
 export async function replyToMessage(opts: ReplyOpts): Promise<SendResult> {
-  const { raw, threadId } = await prepareReply(opts);
-  const gmail = await getGmailClient(opts.account);
-
-  const response = await withRetry(() =>
-    gmail.users.messages.send({
-      userId: 'me',
-      requestBody: { raw, threadId },
-    })
-  );
+  const { built, threadId, gmail } = await prepareReply(opts);
+  const sent = await dispatchSend(gmail, built, threadId);
 
   return {
-    id: response.data.id || '',
-    threadId: response.data.threadId || '',
-    labelIds: response.data.labelIds || [],
+    id: sent.id || '',
+    threadId: sent.threadId || '',
+    labelIds: sent.labelIds || [],
   };
 }
 
@@ -872,23 +1118,14 @@ export async function replyToMessage(opts: ReplyOpts): Promise<SendResult> {
  * Create a draft reply with the same threading semantics as replyToMessage.
  */
 export async function createDraftReply(opts: ReplyOpts): Promise<DraftResult> {
-  const { raw, threadId } = await prepareReply(opts);
-  const gmail = await getGmailClient(opts.account);
-
-  const response = await withRetry(() =>
-    gmail.users.drafts.create({
-      userId: 'me',
-      requestBody: {
-        message: { raw, threadId },
-      },
-    })
-  );
+  const { built, threadId, gmail } = await prepareReply(opts);
+  const draft = await dispatchDraft(gmail, built, threadId);
 
   return {
-    draft_id: response.data.id || '',
+    draft_id: draft.id || '',
     message: {
-      id: response.data.message?.id || '',
-      threadId: response.data.message?.threadId || '',
+      id: draft.message?.id || '',
+      threadId: draft.message?.threadId || '',
     },
   };
 }
@@ -994,11 +1231,14 @@ export async function unsubscribeFromEmail(opts: {
 
   // Fallback: mailto unsubscribe.
   if (mailto) {
+    // Legacy single-part text/plain, no signature — an unsubscribe request is
+    // a machine-to-machine message, not correspondence.
     const raw = buildRawMessage({
       from: resolved.email,
       to: mailto.address,
       subject: mailto.subject,
       body: mailto.body,
+      plain_text_only: true,
     });
 
     await withRetry(() =>
@@ -1042,33 +1282,15 @@ export function buildForwardSubject(originalSubject: string): string {
 }
 
 /**
- * Build the body of a forwarded message — optional intro followed by a
- * Gmail-style forwarded-message block. Exported for unit testing.
- */
-export function buildForwardBody(opts: {
-  intro?: string;
-  originalFrom: string;
-  originalDate: string;
-  originalSubject: string;
-  originalTo: string;
-  originalCc?: string;
-  originalBody: string;
-}): string {
-  const intro = opts.intro ? `${opts.intro}\n\n` : '';
-  const lines = [
-    '---------- Forwarded message ----------',
-    `From: ${opts.originalFrom}`,
-    `Date: ${opts.originalDate}`,
-    `Subject: ${opts.originalSubject}`,
-    `To: ${opts.originalTo}`,
-  ];
-  if (opts.originalCc) lines.push(`Cc: ${opts.originalCc}`);
-  return `${intro}${lines.join('\n')}\n\n${opts.originalBody}`;
-}
-
-/**
  * Forward an existing message to new recipients.
- * Text/HTML body is forwarded; original attachments are NOT re-attached.
+ *
+ * The caller's optional intro is the message body proper and goes through the
+ * normal composition pipeline; the forwarded-message block is appended after
+ * the signature, in both flavours. The original's attachments are re-attached
+ * unless `include_attachments` is false.
+ *
+ * A forward starts a new thread (no In-Reply-To / References / threadId) —
+ * that is what Gmail does, and it is deliberate.
  */
 export async function forwardMessage(opts: {
   messageId: string;
@@ -1078,47 +1300,64 @@ export async function forwardMessage(opts: {
   cc?: string;
   bcc?: string;
   is_html?: boolean;
+  include_signature?: boolean;
+  include_attachments?: boolean;
 }): Promise<SendResult> {
   const resolved = resolveAccount(opts.account);
   const gmail = await getGmailClient(resolved);
 
-  const original = await getMessage({ messageId: opts.messageId, account: resolved.email, format: 'full' });
+  const original = await getMessage({
+    messageId: opts.messageId,
+    account: resolved.email,
+    format: 'full',
+  });
 
-  const originalBody = opts.is_html
-    ? (original.body_html || original.body_text)
-    : (original.body_text || original.body_html);
+  const attachments: Attachment[] = [];
+  if (opts.include_attachments !== false) {
+    for (const info of original.attachments) {
+      const data = await getAttachment({
+        messageId: opts.messageId,
+        attachmentId: info.attachmentId,
+        account: resolved.email,
+      });
+      attachments.push({
+        filename: sanitizeFilename(info.filename),
+        mimeType: info.mimeType,
+        content: Buffer.from(data.data_base64, 'base64'),
+      });
+    }
+  }
 
-  const body = buildForwardBody({
-    intro: opts.body,
+  const block = buildForwardBlock({
     originalFrom: original.from,
     originalDate: original.date,
     originalSubject: original.subject,
     originalTo: original.to,
     originalCc: original.cc || undefined,
-    originalBody,
+    originalHtml: original.body_html,
+    originalText: original.body_text,
   });
 
-  const raw = buildRawMessage({
-    from: resolved.email,
+  const built = await composeOutbound({
+    resolved,
+    gmail,
     to: opts.to,
     cc: opts.cc,
     bcc: opts.bcc,
     subject: buildForwardSubject(original.subject),
-    body,
+    body: opts.body ?? '',
     is_html: opts.is_html,
+    include_signature: opts.include_signature,
+    attachments,
+    block,
   });
 
-  const response = await withRetry(() =>
-    gmail.users.messages.send({
-      userId: 'me',
-      requestBody: { raw },
-    })
-  );
+  const sent = await dispatchSend(gmail, built);
 
   return {
-    id: response.data.id || '',
-    threadId: response.data.threadId || '',
-    labelIds: response.data.labelIds || [],
+    id: sent.id || '',
+    threadId: sent.threadId || '',
+    labelIds: sent.labelIds || [],
   };
 }
 

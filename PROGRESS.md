@@ -20,13 +20,17 @@ adds: CRLF/header-injection sanitation and `resolveAccount` hardening).
 - [x] **B3 `src/gmail/settings.ts` + `settings.test.ts`** — cached sendAs profile (50-min TTL),
       picked isDefault -> isPrimary -> email match, deliberately OUTSIDE withRetry so a 403
       degrades to an empty profile instead of killing the send. 8 tests, all green.
+- [x] **B4/B5 + `client.ts` rewrite** — extractBody is first-wins and skips message/rfc822 and
+      attachment parts (F5); buildRawMessage delegates to mime.ts; composeOutbound is the single
+      composition path (signature then quote/forward block) and dispatchSend/dispatchDraft the
+      single transport choice (raw under 5MB, media.body above); prepareReply now fetches
+      format:'full', honours Reply-To, quotes the original, and names the account on a 404;
+      buildReplyRecipients replaces the reply-all Cc folding; forward re-attaches the original's
+      attachments. Unsubscribe pinned to plain_text_only. Full suite 173 green — the five B10
+      acceptance gates now PASS.
 
 ## Remaining
 
-- [ ] B4 attachments + size gates + media transport
-- [ ] B5 forward rebuild
-- [ ] `client.ts` rewrite: buildRawMessage, prepareReply, buildReplyRecipients,
-      extractBody first-wins (F5), dispatch helpers
 - [ ] `resolveAccount` hardening (`src/config.ts`)
 - [ ] B6 tool params/descriptions (5 files)
 - [ ] B7 docs (README, CHANGELOG)
