@@ -132,12 +132,23 @@ export interface UnsubscribeResult {
   detail: string;
 }
 
-/** Attachment metadata (no content). */
+/**
+ * Attachment metadata (no content).
+ *
+ * "Attachment" here means any downloadable part, including an image embedded in
+ * the body. Those are marked `inline` and carry the `contentId` the body's
+ * `cid:` reference resolves against; listing only the parts with a filename hid
+ * every embedded image from `read_email`, `get_thread` and `get_attachment`.
+ */
 export interface AttachmentInfo {
   attachmentId: string;
   filename: string;
   mimeType: string;
   size: number;
+  /** True for a part meant to render inside the body rather than hang off it. */
+  inline?: boolean;
+  /** The Content-ID, angle brackets stripped. Present on inline parts. */
+  contentId?: string;
 }
 
 /** Result from fetching an attachment. */

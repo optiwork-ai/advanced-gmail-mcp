@@ -237,16 +237,35 @@ export function extractBody(payload: gmail_v1.Schema$MessagePart): { html: strin
 
 /**
  * Extract attachment metadata from message parts (no content download).
+ *
+ * A part counts when it is downloadable AND identifies itself as a file or as
+ * an embedded image — a filename, or a Content-ID. Requiring a filename alone
+ * (the old rule) hid every `cid:` image in the message: an inline image often
+ * has no filename at all, so `read_email` reported no attachments while the
+ * body referenced pictures, and `get_attachment` could not fetch them.
+ *
+ * Content-ID is the marker rather than the disposition because a large text
+ * body part also arrives with an `attachmentId` and sometimes an `inline`
+ * disposition; it has no Content-ID, so it stays what it is — the body.
  */
 function extractAttachments(payload: gmail_v1.Schema$MessagePart): AttachmentInfo[] {
   const attachments: AttachmentInfo[] = [];
 
-  if (payload.filename && payload.filename.length > 0 && payload.body?.attachmentId) {
+  const filename = payload.filename ?? '';
+  const contentId = extractHeader(payload.headers || [], 'Content-ID')
+    .trim()
+    .replace(/^<|>$/g, '');
+  const disposition = extractHeader(payload.headers || [], 'Content-Disposition');
+  const isInline = contentId.length > 0 || /^\s*inline/i.test(disposition);
+
+  if (payload.body?.attachmentId && (filename.length > 0 || contentId.length > 0)) {
     attachments.push({
       attachmentId: payload.body.attachmentId,
-      filename: payload.filename,
+      filename: filename.length > 0 ? filename : contentId,
       mimeType: payload.mimeType || 'application/octet-stream',
       size: payload.body.size || 0,
+      ...(isInline ? { inline: true } : {}),
+      ...(contentId.length > 0 ? { contentId } : {}),
     });
   }
 
@@ -376,6 +395,8 @@ interface OutboundOptions {
   inline_image_paths?: string[];
   /** Already-loaded attachments (forwarded originals). */
   attachments?: Attachment[];
+  /** Already-loaded inline images, Content-ID and all (forwarded originals). */
+  inline_images?: InlineImage[];
   /** Quoted history or forwarded-message block, appended after the signature. */
   block?: { html: string; text: string };
 }
@@ -402,7 +423,7 @@ async function composeOutbound(opts: OutboundOptions): Promise<BuiltMessage> {
     attachments.push(await loadAttachment(filePath));
   }
 
-  const inlineImages: InlineImage[] = [];
+  const inlineImages: InlineImage[] = [...(opts.inline_images ?? [])];
   for (const filePath of opts.inline_image_paths ?? []) {
     inlineImages.push(await loadInlineImage(filePath));
   }
@@ -2020,6 +2041,7 @@ export async function forwardMessage(opts: {
   });
 
   const attachments: Attachment[] = [];
+  const inlineImages: InlineImage[] = [];
   if (opts.include_attachments !== false) {
     for (const info of original.attachments) {
       // The low-level fetch, not getAttachment: a forward re-attaches the
@@ -2030,11 +2052,20 @@ export async function forwardMessage(opts: {
         attachmentId: info.attachmentId,
         account: resolved,
       });
-      attachments.push({
+      const part = {
         filename: sanitizeFilename(info.filename),
         mimeType: info.mimeType,
         content,
-      });
+      };
+      // An embedded image keeps its ORIGINAL Content-ID, because the forwarded
+      // HTML block still references it by that id. Re-attaching it as a plain
+      // file instead would turn every picture in the quoted message into a
+      // broken image plus a stray attachment.
+      if (info.contentId) {
+        inlineImages.push({ ...part, contentId: info.contentId });
+      } else {
+        attachments.push(part);
+      }
     }
   }
 
@@ -2059,6 +2090,7 @@ export async function forwardMessage(opts: {
     is_html: opts.is_html,
     include_signature: opts.include_signature,
     attachments,
+    inline_images: inlineImages,
     block,
   });
 
@@ -2069,6 +2101,7 @@ export async function forwardMessage(opts: {
     forwarded_message_id: opts.messageId,
     message_id: sent.id || '',
     attachments: attachments.length,
+    inline_images: inlineImages.length,
   });
 
   return {

@@ -70,6 +70,7 @@ const {
   getMessage,
   getThread,
   createDraft,
+  forwardMessage,
   replyToMessage,
   sendMessage,
   listDrafts,
@@ -1537,5 +1538,151 @@ describe('inline_images wiring', () => {
       }),
     ).rejects.toThrow(/share the reference "cid:logo\.png"/);
     expect(api.messages.send).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Read side: inline parts are listed too (Unit E)
+// ---------------------------------------------------------------------------
+
+describe('attachment listing includes inline parts', () => {
+  function messageWithInlineImage() {
+    return ok({
+      id: 'm1',
+      threadId: 't1',
+      payload: {
+        mimeType: 'multipart/related',
+        headers: [{ name: 'Subject', value: 'With a picture' }],
+        parts: [
+          {
+            mimeType: 'text/html',
+            body: { data: b64url('<img src="cid:ii_abc123">') },
+          },
+          {
+            // A pasted Gmail image: Content-ID, no filename at all.
+            mimeType: 'image/png',
+            filename: '',
+            headers: [
+              { name: 'Content-Type', value: 'image/png' },
+              { name: 'Content-Disposition', value: 'inline' },
+              { name: 'Content-ID', value: '<ii_abc123>' },
+            ],
+            body: { attachmentId: 'att-inline', size: 2048 },
+          },
+        ],
+      },
+    });
+  }
+
+  it('lists a cid image that has no filename — it used to be invisible', async () => {
+    api.messages.get.mockResolvedValue(messageWithInlineImage());
+
+    const email = await getMessage({ messageId: 'm1' });
+
+    expect(email.attachments).toEqual([
+      {
+        attachmentId: 'att-inline',
+        filename: 'ii_abc123',
+        mimeType: 'image/png',
+        size: 2048,
+        inline: true,
+        contentId: 'ii_abc123',
+      },
+    ]);
+  });
+
+  it('does not report the body as an attachment when Gmail offloads it', async () => {
+    // A big text/plain body arrives with an attachmentId and no data — and
+    // sometimes an inline disposition. It has no Content-ID, so it is a body.
+    api.messages.get.mockResolvedValue(
+      ok({
+        id: 'm1',
+        threadId: 't1',
+        payload: {
+          mimeType: 'multipart/alternative',
+          headers: [],
+          parts: [
+            {
+              mimeType: 'text/plain',
+              filename: '',
+              headers: [{ name: 'Content-Disposition', value: 'inline' }],
+              body: { attachmentId: 'body-part', size: 900000 },
+            },
+          ],
+        },
+      }),
+    );
+
+    const email = await getMessage({ messageId: 'm1' });
+
+    expect(email.attachments).toEqual([]);
+  });
+
+  it('leaves a plain attachment unmarked', async () => {
+    api.messages.get.mockResolvedValue(
+      ok({
+        id: 'm1',
+        threadId: 't1',
+        payload: {
+          mimeType: 'multipart/mixed',
+          headers: [],
+          parts: [
+            { mimeType: 'text/plain', body: { data: b64url('hi') } },
+            {
+              mimeType: 'application/pdf',
+              filename: 'report.pdf',
+              body: { attachmentId: 'att1', size: 10 },
+            },
+          ],
+        },
+      }),
+    );
+
+    const email = await getMessage({ messageId: 'm1' });
+
+    expect(email.attachments).toEqual([
+      { attachmentId: 'att1', filename: 'report.pdf', mimeType: 'application/pdf', size: 10 },
+    ]);
+  });
+
+  it('lets get_attachment fetch an inline image, which it previously could not find', async () => {
+    api.messages.get.mockResolvedValue(messageWithInlineImage());
+    api.messages.attachments.get.mockResolvedValue(
+      ok({ size: 7, data: Buffer.from('PNGDATA').toString('base64url') }),
+    );
+
+    const result = await getAttachment({ messageId: 'm1', attachmentId: 'att-inline' });
+
+    expect(result).toMatchObject({ filename: 'ii_abc123', mimeType: 'image/png' });
+    expect(Buffer.from(result.data_base64!, 'base64').toString()).toBe('PNGDATA');
+  });
+
+  it('forwards an embedded image as an embedded image, keeping its cid', async () => {
+    api.messages.get.mockResolvedValue(messageWithInlineImage());
+    api.messages.attachments.get.mockResolvedValue(
+      ok({ size: 7, data: Buffer.from('PNGDATA').toString('base64url') }),
+    );
+    api.messages.send.mockResolvedValue(ok({ id: 'f1', threadId: 'tf', labelIds: ['SENT'] }));
+
+    await forwardMessage({ messageId: 'm1', to: 'c@d.com' });
+
+    const raw = Buffer.from(
+      api.messages.send.mock.calls[0][0].requestBody.raw as string,
+      'base64url',
+    ).toString('utf8');
+    // The forwarded HTML block still says cid:ii_abc123, so the part it points
+    // at has to keep that id rather than becoming a loose attachment.
+    expect(raw).toContain('multipart/related');
+    expect(raw).toContain('Content-ID: <ii_abc123>');
+    expect(raw).toContain('Content-Disposition: inline; filename="ii_abc123"');
+    // The forwarded HTML itself is base64, so decode the parts to see the
+    // reference that makes keeping the Content-ID necessary.
+    const decodedParts = raw
+      .split(/\r\n\r\n/)
+      .slice(1)
+      .map(block => block.split(/\r\n--/)[0])
+      .filter(block => /^[A-Za-z0-9+/=\r\n]+$/.test(block) && block.trim().length > 0)
+      .map(block => Buffer.from(block.replace(/\r\n/g, ''), 'base64').toString('utf8'));
+    expect(decodedParts.some(part => part.includes('cid:ii_abc123'))).toBe(true);
   });
 });
