@@ -114,6 +114,52 @@ Nothing. Live acceptance (B10.5) is the chair's.
   the one to read first: three tools changed their return shape, which is breaking for
   callers outside this repo.**
 
+## Unit C — done (builder W3)
+
+- [x] **STEP 0 live read-only probe (steve-ah)** — `calendar.events.list` on `primary`
+      returned 3 upcoming events; `calendarList.list` returned 5 calendars;
+      `freebusy.query` returned `{"primary":{"busy":[]}}`. The Calendar API is enabled and
+      the steve-ah token carries the calendar scopes, so the unit was cleared to build. No
+      enable-URL question needed. The probe was a throwaway script, run and deleted; nothing
+      was created on any calendar during this unit.
+- [x] **`ebacdbc` — `src/calendar/client.ts` + the four tools.** Factory copied from the
+      Chat/Drive/Docs template (per-account cache, 50-min TTL, `getAuthClient`), plus four
+      API functions the tool files wrap:
+      - `list_calendars` (`calendarList.list`, paginated, primary flagged) — read-only
+      - `list_calendar_events` (`calendar_id` default `primary`, `time_min`/`time_max`,
+        `query`, `max_results` default 50 cap 250, `page_token`/`nextPageToken`,
+        `singleEvents: true` + `orderBy: 'startTime'`) — read-only
+      - `get_freebusy` (`time_min`/`time_max` required and validated, `calendar_ids`
+        default `['primary']`; a per-calendar `errors` entry is returned rather than
+        failing the whole query) — read-only
+      - `create_calendar_event` — the only mutating call. `send_updates` **defaults to
+        `'none'`**; its description states plainly that `'all'` EMAILS every attendee.
+        The result carries a `notice` saying whether anyone was mailed. Logged via `log()`
+        with account / calendar id / event id / attendee count / send_updates — never
+        attendee addresses or the body. `buildEventDateTime` refuses a date-only value for
+        a timed event and a timestamp for an all-day one instead of guessing.
+      34 unit tests in `src/calendar/client.test.ts` against a fully stubbed
+      `calendar_v3.Calendar` (googleapis, auth, config and log all mocked) — the suite
+      creates nothing.
+- [x] **`e76b079` — docs.** README tool count 38 -> 42, a Calendar section in the tools
+      table with the invitation-email behaviour spelled out, Google Calendar API added to
+      the Cloud setup steps and the calendar scopes to the consent-screen list; CHANGELOG
+      1.4.0.
+
+### Unit C verification (2026-08-27)
+
+- `npm run typecheck` clean. `npm test`: **10 files, 360 tests, all passing** (baseline
+  after Unit B was 326; +34 from this unit, no pre-existing test changed — the Unit A and
+  Unit B test files are byte-unchanged by W3).
+- Registration smoke run: **42 tools**, including all four calendar tools.
+- Prohibitions: no `accounts.json` / `credentials.json` / `tokens/` / `package.json` /
+  `auth.ts` change, no new deps, no push/deploy, no AI attribution, no calendar write of
+  any kind (the only live calls were the three read-only STEP 0 probes).
+
+## Remaining — Unit C
+
+Nothing. No questions filed.
+
 ## How to resume
 
 `git log 536a9be..HEAD` for what landed. `npm run typecheck && npm test` from the repo
