@@ -37,11 +37,13 @@ vi.mock('../log.js', () => ({
 }));
 
 const {
+  CALENDAR_LIST_SCOPE,
   DEFAULT_EVENT_PAGE_SIZE,
   MAX_EVENT_PAGE_SIZE,
   buildEventDateTime,
   createEvent,
   getCalendarClient,
+  translateCalendarError,
   listCalendars,
   listEvents,
   queryFreeBusy,
@@ -529,5 +531,135 @@ describe('createEvent', () => {
     ).rejects.toThrow('boom');
 
     expect(logCalls.find(c => c.message === 'create_calendar_event')).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 403 honesty (chair-queued item 17 / W4-P10)
+//
+// `withRetry` is shared with the Gmail client and rewrites EVERY non-rate-limit
+// 401/403 into "Authentication error … Re-authenticate". For Calendar that is
+// usually wrong advice: the common 403s are "the Calendar API is not enabled on
+// this project" and "this token was never granted the calendar scopes" — one is
+// fixed in the Cloud console, the other by re-consenting to a NAMED scope, and
+// neither is a broken login. Re-authenticating a healthy account fixes nothing
+// and hides the real cause in the tail of the message.
+// ---------------------------------------------------------------------------
+
+/** A Google API error in the shape googleapis actually throws. */
+function googleError(status: number, reason: string, message: string): Error {
+  return Object.assign(new Error(message), {
+    code: status,
+    errors: [{ reason }],
+    response: { status, data: { error: { errors: [{ reason }] } } },
+  });
+}
+
+const API_DISABLED_MESSAGE =
+  'Google Calendar API has not been used in project 12345 before or it is disabled. '
+  + 'Enable it by visiting https://console.developers.google.com/apis/api/calendar-json.googleapis.com/overview?project=12345 then retry.';
+
+describe('calendar 403s tell the truth', () => {
+  it('a missing calendar scope names the scope and the re-consent command', async () => {
+    api.calendarList.list.mockRejectedValueOnce(
+      googleError(403, 'insufficientPermissions', 'Request had insufficient authentication scopes.'),
+    );
+
+    await expect(listCalendars('work')).rejects.toThrow(
+      /list_calendars needs the https:\/\/www\.googleapis\.com\/auth\/calendar\.calendarlist\.readonly scope/,
+    );
+  });
+
+  it('names the alias in the re-consent command', async () => {
+    api.calendarList.list.mockRejectedValueOnce(
+      googleError(403, 'insufficientPermissions', 'Request had insufficient authentication scopes.'),
+    );
+
+    await expect(listCalendars('work')).rejects.toThrow(/npm run auth -- work/);
+  });
+
+  it('an API-not-enabled 403 says to enable the API, not to re-authenticate', async () => {
+    api.events.list.mockRejectedValueOnce(
+      googleError(403, 'accessNotConfigured', API_DISABLED_MESSAGE),
+    );
+
+    const failure = await listEvents({ calendarId: 'primary' }).catch((e: Error) => e);
+    expect(failure).toBeInstanceOf(Error);
+    const message = (failure as Error).message;
+    expect(message).toMatch(/Google Calendar API is not enabled/i);
+    expect(message).toContain('console.developers.google.com');
+    expect(message).not.toMatch(/Re-authenticate with/);
+    expect(message).not.toMatch(/^Authentication error/);
+  });
+
+  it('applies to get_freebusy too', async () => {
+    api.freebusy.query.mockRejectedValueOnce(
+      googleError(403, 'accessNotConfigured', API_DISABLED_MESSAGE),
+    );
+
+    await expect(
+      queryFreeBusy({ timeMin: '2026-09-01T00:00:00Z', timeMax: '2026-09-02T00:00:00Z' }),
+    ).rejects.toThrow(/Google Calendar API is not enabled/i);
+  });
+
+  it('applies to create_calendar_event too, and still does not log the write', async () => {
+    api.events.insert.mockRejectedValueOnce(
+      googleError(403, 'accessNotConfigured', API_DISABLED_MESSAGE),
+    );
+
+    await expect(
+      createEvent({ summary: 'x', start: '2026-09-01T14:00:00Z', end: '2026-09-01T15:00:00Z' }),
+    ).rejects.toThrow(/Google Calendar API is not enabled/i);
+    expect(logCalls.find(c => c.message === 'create_calendar_event')).toBeUndefined();
+  });
+
+  it('an ordinary forbidden 403 reports itself without re-auth advice', async () => {
+    api.calendarList.list.mockRejectedValueOnce(
+      googleError(403, 'forbidden', 'The authenticated user cannot access this calendar.'),
+    );
+
+    const failure = await listCalendars().catch((e: Error) => e);
+    const message = (failure as Error).message;
+    expect(message).toContain('cannot access this calendar');
+    expect(message).not.toMatch(/Re-authenticate with/);
+  });
+});
+
+// The rate-limit case is asserted at the translator rather than through
+// listCalendars because a rate-limit 403 is RETRYABLE: driving it end to end
+// would spend the real 1s + 2s + 4s backoff inside withRetry. What matters is
+// that the translator hands it back untouched so that retry still happens and
+// Google's own words reach the caller.
+describe('translateCalendarError', () => {
+  const ctx = { tool: 'list_calendars', scope: CALENDAR_LIST_SCOPE, alias: 'work' };
+
+  it('hands a rate-limit 403 back untouched so withRetry still retries it', () => {
+    const err = googleError(403, 'rateLimitExceeded', 'Rate Limit Exceeded');
+    expect(translateCalendarError(err, ctx)).toBe(err);
+  });
+
+  it('hands a user rate-limit 403 back untouched too', () => {
+    const err = googleError(403, 'userRateLimitExceeded', 'User Rate Limit Exceeded');
+    expect(translateCalendarError(err, ctx)).toBe(err);
+  });
+
+  it('leaves a 401 to the shared re-authenticate path', () => {
+    const err = googleError(401, 'authError', 'Invalid Credentials');
+    expect(translateCalendarError(err, ctx)).toBe(err);
+  });
+
+  it('leaves a 500 untouched so it stays retryable', () => {
+    const err = googleError(500, 'backendError', 'Backend Error');
+    expect(translateCalendarError(err, ctx)).toBe(err);
+  });
+
+  it('recognizes a missing scope from the message alone', () => {
+    const err = Object.assign(new Error('Request had insufficient authentication scopes.'), {
+      code: 403,
+    });
+    const out = translateCalendarError(err, ctx) as Error;
+    expect(out).not.toBe(err);
+    expect(out.message).toContain('calendar.calendarlist.readonly');
+    expect(out.message).toContain('npm run auth -- work');
   });
 });

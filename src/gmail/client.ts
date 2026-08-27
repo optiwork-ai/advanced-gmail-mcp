@@ -110,7 +110,7 @@ const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 const RETRYABLE_403_REASONS = new Set(['ratelimitexceeded', 'userratelimitexceeded']);
 
 /** True for a 403 that is really a rate limit rather than an authorization failure. */
-function isRateLimit403(status: unknown, err: unknown): boolean {
+export function isRateLimit403(status: unknown, err: unknown): boolean {
   return status === 403 && googleErrorReasons(err).some(r => RETRYABLE_403_REASONS.has(r));
 }
 
