@@ -10,6 +10,7 @@ import {
   buildMimeMessage,
   buildQuoteBlock,
   contentIdForFilename,
+  encodeAddressList,
   encodeHeaderValue,
   escapeHtml,
   foldHeader,
@@ -1191,5 +1192,180 @@ describe('autolink entity boundaries (chair ruling Q6)', () => {
   it('still keeps an escaped ampersand inside a query string', () => {
     const href = textToHtml('q https://example.com/s?a=1&b=2 end').match(/href="([^"]*)"/)?.[1];
     expect(href).toBe('https://example.com/s?a=1&amp;b=2');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Non-ASCII recipient display names (acceptance P4)
+//
+// A `To` of "José Müller <steve@optiwork.ai>" went out as raw 8-bit in the
+// header, which is illegal in RFC 5322 and arrives as mojibake. Only the
+// DISPLAY NAME half may be RFC 2047-encoded; the angle-addr is the routing
+// information and must never be rewritten. A pure-ASCII list is byte-identical
+// to what the caller passed.
+// ---------------------------------------------------------------------------
+
+/** Pull one header out of an assembled message, unfolding continuation lines. */
+function headerValue(raw: string, name: string): string | undefined {
+  const head = raw.split('\r\n\r\n')[0];
+  const unfolded = head.replace(/\r\n[\t ]/g, ' ');
+  for (const line of unfolded.split('\r\n')) {
+    const idx = line.indexOf(': ');
+    if (idx > 0 && line.slice(0, idx).toLowerCase() === name.toLowerCase()) {
+      return line.slice(idx + 2);
+    }
+  }
+  return undefined;
+}
+
+/** Decode every RFC 2047 encoded-word in a header value back to text. */
+function decodeWords(value: string): string {
+  return value
+    .replace(/(=\?UTF-8\?B\?[A-Za-z0-9+/=]*\?=)\s+(?==\?UTF-8\?B\?)/g, '$1')
+    .replace(/=\?UTF-8\?B\?([A-Za-z0-9+/=]*)\?=/g, (_m, b64: string) =>
+      Buffer.from(b64, 'base64').toString('utf8'));
+}
+
+function toHeaderFor(to: string): string {
+  const raw = decode(buildMimeMessage({ to, subject: 'Hi', body: 'Hello' }).rawBase64Url);
+  return headerValue(raw, 'To') ?? '';
+}
+
+describe('address-list display names — RFC 2047 (acceptance P4)', () => {
+  it('encodes a single non-ASCII display name and leaves the address alone', () => {
+    const value = toHeaderFor('José Müller <steve@optiwork.ai>');
+    expect(value).toMatch(/^=\?UTF-8\?B\?[A-Za-z0-9+/=]+\?= <steve@optiwork\.ai>$/);
+    expect(decodeWords(value)).toBe('José Müller <steve@optiwork.ai>');
+  });
+
+  it('emits a pure-ASCII header line for a non-ASCII display name', () => {
+    const raw = decode(
+      buildMimeMessage({
+        to: 'José Müller <steve@optiwork.ai>',
+        subject: 'Hi',
+        body: 'Hello',
+      }).rawBase64Url,
+    );
+    const head = raw.split('\r\n\r\n')[0];
+    expect(/^[\x00-\x7F]*$/.test(head)).toBe(true);
+  });
+
+  it('encodes only the non-ASCII mailbox in a mixed list', () => {
+    const value = toHeaderFor('José Müller <jose@x.com>, Plain Person <plain@y.com>');
+    const parts = value.split(', ');
+    expect(parts).toHaveLength(2);
+    expect(parts[0]).toMatch(/^=\?UTF-8\?B\?[A-Za-z0-9+/=]+\?= <jose@x\.com>$/);
+    expect(parts[1]).toBe('Plain Person <plain@y.com>');
+  });
+
+  it('does not split a quoted display name that contains a comma', () => {
+    const value = toHeaderFor('"Angelo, Steve" <a@b.c>, José <j@x.com>');
+    const prefix = '"Angelo, Steve" <a@b.c>, ';
+    expect(value.startsWith(prefix)).toBe(true);
+    expect(decodeWords(value.slice(prefix.length))).toBe('José <j@x.com>');
+    // Two mailboxes, not three: the quoted comma was not a separator.
+    expect(value.match(/@/g)).toHaveLength(2);
+  });
+
+  it('leaves a bare address untouched alongside an encoded one', () => {
+    const value = toHeaderFor('a@b.com, José <j@x.com>');
+    const parts = value.split(', ');
+    expect(parts[0]).toBe('a@b.com');
+    expect(parts[1]).toMatch(/^=\?UTF-8\?B\?[A-Za-z0-9+/=]+\?= <j@x\.com>$/);
+  });
+
+  it('passes an already-encoded word through untouched', () => {
+    const encoded = '=?UTF-8?B?Sm9zw6k=?=';
+    const value = toHeaderFor(`${encoded} <j@x.com>, Ünicode <u@y.com>`);
+    const parts = value.split(', ');
+    expect(parts[0]).toBe(`${encoded} <j@x.com>`);
+    expect(decodeWords(parts[1])).toBe('Ünicode <u@y.com>');
+  });
+
+  it('never rewrites the angle-addr, even a strange one', () => {
+    const value = toHeaderFor('Zoë <weird.local+tag@sub.example.co.uk>');
+    expect(value.endsWith(' <weird.local+tag@sub.example.co.uk>')).toBe(true);
+  });
+
+  it('encodes Cc and Bcc display names the same way', () => {
+    const raw = decode(
+      buildMimeMessage({
+        to: 'a@b.com',
+        cc: 'Renée <r@x.com>',
+        bcc: 'Søren <s@y.com>, plain@z.com',
+        subject: 'Hi',
+        body: 'Hello',
+      }).rawBase64Url,
+    );
+    expect(decodeWords(headerValue(raw, 'Cc') ?? '')).toBe('Renée <r@x.com>');
+    expect(decodeWords(headerValue(raw, 'Bcc') ?? '')).toBe('Søren <s@y.com>, plain@z.com');
+    expect(/^[\x00-\x7F]*$/.test(raw.split('\r\n\r\n')[0])).toBe(true);
+  });
+
+  it('leaves every pure-ASCII list byte-identical to the caller value', () => {
+    const cases = [
+      'a@b.com',
+      'a@b.com, c@d.com',
+      'Alice <a@b.com>',
+      'Alice <a@b.com>, Bob <b@c.com>',
+      '"Angelo, Steve" <a@b.c>',
+      '"Angelo, Steve" <a@b.c>,Bob <b@c.com>',
+      'Alice <a@b.com>,   Bob <b@c.com>',
+      '=?UTF-8?B?Sm9zw6k=?= <j@x.com>',
+      '',
+    ];
+    for (const value of cases) {
+      expect(toHeaderFor(value)).toBe(value);
+    }
+  });
+});
+
+describe('encodeAddressList', () => {
+  it('is the identity on any pure-ASCII value', () => {
+    for (const value of [
+      '',
+      'a@b.com',
+      '  a@b.com ,  c@d.com  ',
+      '"Angelo, Steve" <a@b.c>',
+      '=?UTF-8?B?Sm9zw6k=?= <j@x.com>',
+      'undisclosed-recipients:;',
+    ]) {
+      expect(encodeAddressList(value)).toBe(value);
+    }
+  });
+
+  it('encodes the display name and preserves the angle-addr verbatim', () => {
+    expect(encodeAddressList('José <j@x.com>')).toBe(
+      `${encodeHeaderValue('José')} <j@x.com>`,
+    );
+  });
+
+  it('unquotes a quoted non-ASCII name before encoding it', () => {
+    const encoded = encodeAddressList('"Müller, Jos" <m@x.com>');
+    expect(encoded).toBe(`${encodeHeaderValue('Müller, Jos')} <m@x.com>`);
+    expect(encoded).not.toContain('"');
+  });
+
+  it('keeps a name-less angle-addr as a bare angle-addr', () => {
+    expect(encodeAddressList('<a@b.com>, José <j@x.com>')).toBe(
+      `<a@b.com>, ${encodeHeaderValue('José')} <j@x.com>`,
+    );
+  });
+
+  it('leaves a non-ASCII bare address alone rather than corrupting the route', () => {
+    expect(encodeAddressList('jösé@example.com')).toBe('jösé@example.com');
+  });
+
+  it('drops an empty segment from a trailing comma', () => {
+    expect(encodeAddressList('José <j@x.com>,')).toBe(`${encodeHeaderValue('José')} <j@x.com>`);
+  });
+
+  it('splits a long non-ASCII name into several encoded-words that still fold', () => {
+    const name = 'Ünicode '.repeat(30).trim();
+    const value = encodeAddressList(`${name} <long@x.com>`);
+    expect(value).toContain('?= =?UTF-8?B?');
+    for (const line of foldHeader('To', value).split('\r\n')) {
+      expect(Buffer.byteLength(line, 'utf8')).toBeLessThanOrEqual(998);
+    }
   });
 });

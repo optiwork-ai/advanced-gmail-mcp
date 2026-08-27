@@ -233,6 +233,116 @@ export function formatFromHeader(displayName: string, email: string): string {
   return `${encoded} <${addr}>`;
 }
 
+/**
+ * Split an address-list header value on the commas that actually separate
+ * mailboxes.
+ *
+ * A comma inside a quoted display name (`"Angelo, Steve" <a@b.c>`) or inside an
+ * angle-addr is part of the mailbox, not a separator — splitting on it turns one
+ * recipient into two malformed ones, which is the failure mode that makes naive
+ * address-list encoding worse than none.
+ */
+function splitAddressList(value: string): string[] {
+  const parts: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  let inAngle = false;
+  let escaped = false;
+
+  for (const char of value) {
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+    if (inQuotes && char === '\\') {
+      current += char;
+      escaped = true;
+      continue;
+    }
+    if (char === '"') {
+      inQuotes = !inQuotes;
+      current += char;
+      continue;
+    }
+    if (!inQuotes && char === '<') inAngle = true;
+    if (!inQuotes && char === '>') inAngle = false;
+    if (char === ',' && !inQuotes && !inAngle) {
+      parts.push(current);
+      current = '';
+      continue;
+    }
+    current += char;
+  }
+  parts.push(current);
+  return parts;
+}
+
+/**
+ * RFC 2047-encode the DISPLAY NAME half of every mailbox in an address list —
+ * and nothing else.
+ *
+ * `To: José Müller <steve@optiwork.ai>` used to go out as raw 8-bit octets in
+ * the header, which RFC 5322 forbids and which arrives as mojibake. `Subject`
+ * was already encoded; the recipient headers were not, because encoding one
+ * means parsing a LIST first and a wrong parse breaks delivery outright.
+ *
+ * Two rules keep that risk at zero:
+ *
+ * 1. **A pure-ASCII list returns byte-identical**, before any parsing happens.
+ *    Every existing send therefore emits exactly the header it emitted before —
+ *    spacing, quoting, group syntax and all.
+ * 2. **The angle-addr is never rewritten.** Only the display name is encoded,
+ *    and only when that name itself is non-ASCII. A mailbox that is already an
+ *    encoded-word, a bare address, or an ASCII quoted-string passes through
+ *    verbatim even when a SIBLING mailbox in the same list needs encoding.
+ */
+export function encodeAddressList(value: string): string {
+  if (isAscii(value)) return value;
+
+  const out: string[] = [];
+  for (const segment of splitAddressList(value)) {
+    const mailbox = segment.trim();
+    if (mailbox.length === 0) continue;
+
+    // Nothing to do — and nothing worth risking — for an ASCII mailbox.
+    if (isAscii(mailbox)) {
+      out.push(mailbox);
+      continue;
+    }
+
+    // Greedy prefix so the LAST angle-addr wins: a display name may itself
+    // contain angle brackets inside a quoted string.
+    const match = /^(.*)<([^<>]*)>$/.exec(mailbox);
+    if (!match) {
+      // A non-ASCII bare address (an internationalized address). Encoding it
+      // would corrupt the route; SMTPUTF8 is the transport's business.
+      out.push(mailbox);
+      continue;
+    }
+
+    const addr = match[2].trim();
+    let name = match[1].trim();
+    if (name.length === 0) {
+      out.push(`<${addr}>`);
+      continue;
+    }
+    if (name.length >= 2 && name.startsWith('"') && name.endsWith('"')) {
+      name = name.slice(1, -1).replace(/\\(["\\])/g, '$1');
+    }
+    // The non-ASCII lives in the address, not the name — leave the whole
+    // mailbox as authored.
+    if (isAscii(name)) {
+      out.push(mailbox);
+      continue;
+    }
+
+    out.push(`${encodeHeaderValue(name)} <${addr}>`);
+  }
+
+  return out.join(', ');
+}
+
 /** Split a `Name <addr>` header value into its parts. */
 export function parseAddress(raw: string): { name: string; email: string } {
   const match = raw.match(/^\s*(.*?)\s*<([^>]+)>\s*$/);
@@ -934,10 +1044,19 @@ export function buildMimeMessage(opts: MimeOptions): BuiltMessage {
     headers.push(fold ? foldHeader(name, clean) : `${name}: ${clean}`);
   };
 
+  // Address lists get their display names RFC 2047-encoded; a pure-ASCII list
+  // comes back byte-identical, so this changes nothing for an ASCII send.
+  const addAddressHeader = (name: string, value: string | undefined): void => {
+    if (value === undefined || value === null) return;
+    const clean = encodeAddressList(sanitizeHeaderValue(String(value)));
+    if (clean.length === 0) return;
+    headers.push(foldHeader(name, clean));
+  };
+
   addHeader('From', opts.from);
-  headers.push(foldHeader('To', sanitizeHeaderValue(opts.to ?? '')));
-  addHeader('Cc', opts.cc, true);
-  addHeader('Bcc', opts.bcc, true);
+  headers.push(foldHeader('To', encodeAddressList(sanitizeHeaderValue(opts.to ?? ''))));
+  addAddressHeader('Cc', opts.cc);
+  addAddressHeader('Bcc', opts.bcc);
   addHeader('Reply-To', opts.reply_to);
   headers.push(
     foldHeader('Subject', encodeHeaderValue(sanitizeHeaderValue(opts.subject ?? ''))),
