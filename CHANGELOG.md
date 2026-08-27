@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **An attachment's content type is validated** as a MIME token instead of only being CR/LF-stripped, and non-ASCII filenames are fully percent-encoded per RFC 2231.
 - **A failed signature/display-name lookup is no longer cached for 50 minutes.** One transient error used to strip the signature and display name from every message sent for the rest of the window; a failure is now retried after a minute.
 - **`create_calendar_event` refuses an inverted or zero-length time range** before calling the API, the way `get_freebusy` already did.
+- **The reflow pass welded typed sign-offs onto the sentence above them.** A four-line block ("…yesterday afternoon." / "Steve Angelo" / "Appraisal Host" / "555-1234") went out as one run-on line, because each seam was judged against the accumulated line rather than the paragraph. Reflow now classifies a whole paragraph: it collapses only when every line but the last is full-width and no line break looks authored, and otherwise ships the paragraph exactly as written. Composer wrapping at ~70 columns is still fully undone.
 
 ## [1.4.0] — 2026-08-27
 

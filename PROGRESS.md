@@ -278,3 +278,50 @@ are real vitest output. Baseline at `af3fe44` was 360 tests; HEAD is 413.
 
 W6 cold Fable validation. Read the W5 addendum at the end of
 `REVIEW-FINDINGS.md` alongside W4's findings.
+
+## W7 — C3 reflow, chair ruling Q2+Q15 (2026-08-27)
+
+W6's validation named exactly one MUST-FIX between the branch and the chair's
+live acceptance sends: the chair-ratified reflow fix (Option B) had never been
+applied. This unit applies it and nothing else.
+
+- [x] **`reflowPlainText` now classifies the WHOLE PARAGRAPH.** A paragraph
+      collapses to one line only when EVERY seam in it passes `canJoin` — every
+      line but the last at or over `REFLOW_MIN_JOIN_LEN`, none ending in a colon,
+      and no following line a list item, a quote or indented. Any single failing
+      seam leaves the paragraph byte-for-byte as authored, instead of joining the
+      prefix and breaking at the seam. `canJoin` itself is unchanged (the
+      per-line guards are exactly the ones B1c specified); only the unit of
+      decision moved from the accumulated line to the paragraph, per the chair's
+      amendment of B1c. The `REFLOW_MIN_JOIN_LEN` §A1 evidence comment is
+      untouched; the `canJoin` and `reflowPlainText` docstrings state the new
+      rule and why.
+- **FAIL-before, run at `626523e` with the six new tests added and the
+  implementation untouched:** `Tests  4 failed | 415 passed (419)`. The failing
+  four are W6's exact repro (`leaves a typed sign-off block verbatim under a long
+  line` — output was the single welded line
+  `Thanks for sending over the updated appraisal report yesterday afternoon.
+  Steve Angelo Appraisal Host 555-1234`), plus `leaves the whole paragraph
+  verbatim when an interior line is short`, `lets one vetoed seam block the whole
+  paragraph, not just that seam` and `classifies each paragraph independently`.
+- **PASS-after:** `npm run typecheck` clean; `npm test` **10 files, 419 tests,
+  419 passing** (mime 123, up from 117 — six added, none changed or removed).
+- **Preserved deliberately:** the 70-column composer-wrap join (that paragraph
+  passes every seam, so it still collapses to one line — first test in the
+  suite), idempotence (now true by construction: a reflowed paragraph is one line
+  with no seams left, a declined paragraph is unchanged input and classifies the
+  same way again — asserted for both cases), and every existing guard test
+  (list/quote/indent/colon/threshold), all of which pass unedited.
+- **W7 verification:** no baseline or prior-unit test was edited, deleted or
+  weakened — `src/gmail/mime.test.ts` gains six `it` blocks and no existing
+  assertion changed; `client.test.ts`, `acceptance.test.ts` and `log.test.ts` are
+  byte-unchanged by this unit. `git diff 536a9be..HEAD -- src/gmail/auth.ts`
+  still empty; no `accounts.json` / `credentials.json` / `tokens/` /
+  `package.json` change; no new deps; no push, deploy or `gh` write; no live API
+  call; no AI attribution.
+
+## Remaining — after W7
+
+A cold re-check of this unit, then the chair's live acceptance sends (B10.5,
+P1 raw-band media upload, P4 non-ASCII recipient display names, C4's 25,000,000
+byte attachment). Nothing else from W6's verdict is a code blocker.
