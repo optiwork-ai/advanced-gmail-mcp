@@ -42,6 +42,12 @@ adds: CRLF/header-injection sanitation and `resolveAccount` hardening).
 
 
 
+## B10 gate evidence (reproducible)
+
+FAIL-before: `git worktree add --detach <dir> 915a8c0 && npx vitest run src/gmail/acceptance.test.ts`
+-> 5 tests, 5 failed (multipart assertion, two not-implemented stubs, two Bcc-injection
+assertions). PASS-after on HEAD: 5 passed. Full suite: 185 passed, typecheck clean.
+
 ## Not this worker's
 
 - B10.5 live acceptance sends (send / reply / forward / draft+send, `[TEST]`-prefixed, raw
