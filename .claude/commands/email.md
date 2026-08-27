@@ -17,11 +17,11 @@ Before using any tool, run `ToolSearch` with query `+gmail` to load them.
 
 | Tool | Purpose |
 |------|---------|
-| `list_emails` | List inbox/label (account, label, max_results, query) |
-| `search_emails` | Gmail query search (query, account, max_results) |
+| `list_emails` | List inbox/label (account, label, max_results, query, page_token) — returns `{messages, nextPageToken}`; label and query are ANDed |
+| `search_emails` | Gmail query search across the mailbox (query, account, max_results, page_token) — returns `{messages, nextPageToken}` |
 | `read_email` | Read full email by ID (message_id, account) |
 | `get_thread` | Get full thread by ID (thread_id, account) |
-| `get_labels` | List all labels (account) |
+| `get_labels` | List all labels (account, include_counts?) |
 | `send_email` | Send new email (to, subject, body, account) |
 | `draft_email` | Create draft (to, subject, body, account) |
 | `reply_email` | Reply to email (message_id, body, account) |
@@ -29,14 +29,18 @@ Before using any tool, run `ToolSearch` with query `+gmail` to load them.
 | `send_draft` | Send an existing draft by ID |
 | `archive_email` | Archive email (message_id, account) |
 | `label_email` | Add/remove labels (message_id, add_labels, remove_labels, account) |
-| `trash_email` | Trash email (message_id, account) |
-| `batch_modify` | Batch archive/trash/label (message_ids, action, account) |
+| `trash_email` | Trash one message (message_id, account) |
+| `modify_thread` | Add/remove labels across a whole thread (thread_id, add_labels, remove_labels, account) — archive = remove `INBOX` |
+| `trash_thread` | Trash an entire thread (thread_id, account) — confirm with user first |
+| `batch_modify` | Batch archive/trash/label (message_ids, action, account) — returns the IDs that actually succeeded plus any failures |
 | `unsubscribe_email` | Process `List-Unsubscribe` header (one-click HTTPS or mailto) |
 | `mark_read` | Remove UNREAD label (message_id, account) |
 | `mark_unread` | Add UNREAD label (message_id, account) |
-| `get_attachment` | Fetch attachment bytes (message_id, attachment_id, account) |
-| `list_drafts` | List drafts with id + headers (account, max_results) |
+| `get_attachment` | Fetch an attachment (message_id, attachment_id, account, save_dir?) — pass `save_dir` to write it to disk; inline base64 is capped at 1MB |
+| `list_drafts` | List drafts with id + headers (account, max_results, page_token) — returns `{drafts, nextPageToken}` |
 | `read_draft` | Read a draft's content by ID (draft_id, account) |
+| `update_draft` | Replace a draft's contents (draft_id + the same params as `draft_email`) — Gmail REPLACES, so resend every field |
+| `delete_draft` | Permanently delete a draft (draft_id, account) — confirm with user first |
 | `forward_email` | Forward an email (message_id, to, account, body?, cc?, bcc?, is_html?) |
 | `star_email` / `unstar_email` | Toggle STARRED label (message_id, account) |
 | `mark_important` / `mark_not_important` | Toggle IMPORTANT label (message_id, account) |

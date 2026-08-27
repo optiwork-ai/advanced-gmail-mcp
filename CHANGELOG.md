@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] — 2026-08-27
+
+### Added
+- **Thread-level operations** — `modify_thread` (add/remove label IDs on every message in a conversation; archive by removing `INBOX`) and `trash_thread`. Archiving a single message left the rest of the thread in the inbox, which is not what "archive this conversation" means.
+- **Draft editing** — `update_draft` (replaces a draft's contents through the same Gmail-native composition path as `draft_email`, preserving the draft's `threadId`) and `delete_draft` (permanent, and its description says so).
+- **`get_attachment` now takes `save_dir`** — an absolute directory path. The bytes are written to a file instead of being inlined; the filename comes from the message part (sanitized against path traversal), an existing file is never overwritten, and the result carries `path`, `filename`, `mimeType` and `size`.
+- **`get_labels` takes `include_counts`** (default `false`) to fetch `messagesTotal`/`messagesUnread` per label.
+- **`page_token` on `list_emails`, `search_emails` and `list_drafts`**, which now return `{ messages | drafts, nextPageToken }`.
+- **`order_by` on `list_chat_messages`**, defaulting to `createTime desc`.
+
+### Changed
+- **`list_emails` and `search_emails` default to 50 results, not 500.** An unparameterized call previously issued ~501 API round trips (one `messages.get` per message) and returned 500 objects. The ceiling is now 500 per page, with `page_token` for the rest.
+- **`get_attachment` will not inline more than 1MB.** A larger attachment errors with an instruction to pass `save_dir`, and is refused before the download rather than after. A 25MB attachment used to become ~34MB of base64 in the model's context.
+- **`batch_modify` returns what actually succeeded.** The tool used to synthesize `success: true` from its own input array and discard the client's result; a partial failure is now visible, with the failing IDs listed.
+- **`read_email` with `format: "metadata"` or `"minimal"`** returns a headers-only shape with an explicit `body_note` instead of a full-shaped email whose body was silently empty.
+- **`create_label` refuses one colour without the other** rather than inventing `#000000`/`#ffffff`, and **`update_label` preserves the colour half you omit** by reading the label first — its "omit to keep existing" promise is now true. `update_label` also enforces its stated "at least one of name/text_color/background_color" rule, as `label_email` does for `add_labels`/`remove_labels`.
+
+### Fixed
+- **SSRF in `unsubscribe_email`.** The one-click POST took its target from the attacker-supplied `List-Unsubscribe` header with no host check and a scheme regex that admitted plain `http`. It now requires `https`, resolves the hostname and refuses any private, loopback, link-local, CGNAT, benchmarking, documentation, multicast or reserved address (IPv4 and IPv6), and never follows redirects. A refused URL falls through to the mailto path with the reason reported.
+- **Rate-limit 403s are retried, not mislabelled.** Gmail answers 403 for `rateLimitExceeded`/`userRateLimitExceeded` as well as for real authorization failures; every 403 was being rewritten into a fatal "re-authenticate" instruction.
+- **`batchModify` is chunked at Gmail's 1000-ID limit**, and batch trash continues past a failure with per-ID results instead of a serial loop that discarded the record of everything already trashed.
+- **`get_thread` no longer returns empty bodies for HTML-only messages** (it falls back to the flattened HTML) and now includes per-message attachment metadata.
+- **`get_labels` no longer reports `0` counts it never fetched.** `labels.list` does not return them; the fields are absent unless real.
+- **`get_attachment` restores base64 padding.** The old base64url conversion dropped the `=`, so strict decoders rejected output the description promised was directly decodable.
+- **`list_drafts` paginates**, like every other list tool.
+- **Google Doc tables no longer collapse into one line** — table rows were joined with the empty string.
+- **`read_drive_file` states what its exports lose** — a Sheets CSV export returns only the first sheet, and a Slides text export drops speaker notes; both are now declared in `contentNote`.
+- **Destructive calls are logged.** Send, reply, forward, send draft, trash message, trash thread, modify thread, delete draft, delete label, batch trash and both unsubscribe paths record the action, account alias and target ID. Bodies and addresses are never logged.
+
 ## [1.2.0] — 2026-08-27
 
 ### Changed

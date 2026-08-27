@@ -72,10 +72,32 @@ assertions). PASS-after on HEAD: 5 passed. Full suite: 185 passed, typecheck cle
       the >5MB media path is shared rather than forked), preserving the draft's threadId;
       `delete_draft` is a permanent delete and is logged. 11 more tests.
 
+- [x] **Item 4 — correctness repairs**, in five commits:
+      - pagination + formats: #6 (default 50, cap 500, `page_token`, `nextPageToken`, the two
+        drifted list loops merged into one), #16 (label+query ANDing documented), #18
+        (`list_drafts` paginates), #11 (`read_email` metadata/minimal -> headers + `body_note`),
+        #7 (`get_thread` HTML fallback + per-message attachments)
+      - labels: #8 (no fabricated zero counts; `include_counts` fans out `labels.get` at
+        concurrency 10), #9/#19 (never invent half a colour; fetch-and-preserve on partial
+        update), #26 (empty modify/patch refused on `label_email` and `update_label`)
+      - retry + batch: #12 (403 `rateLimitExceeded`/`userRateLimitExceeded` retried like 429,
+        every other 403 still re-auth), #13/#14 (`batchModify` chunked at 1000 and reporting
+        real outcomes; new `batchTrash` continues past failures at concurrency 10; the tool
+        returns the client's result instead of synthesizing success)
+      - chat/docs/drive: #17 (`order_by`, default `createTime desc`), #10 (table rows carry
+        their own newline; flattener exported + tested), #21 (Sheets first-sheet-only and
+        Slides speaker-notes losses declared in `contentNote`)
+      - security: #1 (new `src/gmail/url-guard.ts` — https only, resolve-and-refuse
+        private/loopback/link-local/CGNAT/reserved v4+v6, `redirect: 'error'`, 10s timeout;
+        `parseUnsubscribeHeaders` left a pure parser so policy lives at the request site),
+        #27 (`log()` wired into all twelve destructive paths)
+- [x] **Item 5 — tests + docs** — 326 tests across 9 files; README tool count 34 -> 38 with
+      every changed row rewritten; CHANGELOG 1.3.0; the bundled `.claude/commands/email.md`
+      tool table updated for the new tools, params and return shapes.
+
 ## Remaining — Unit B
-- [ ] Item 4 — correctness repairs (#6, #16, #7, #11, #8, #9/#26/#19, #12, #13/#14, #18,
-      #17, #10, #21, #1 SSRF, #27 logging)
-- [ ] Item 5 — README/CHANGELOG
+
+Nothing. Live acceptance (B10.5) is the chair's.
 
 ## How to resume
 

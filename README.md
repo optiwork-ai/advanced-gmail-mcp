@@ -6,7 +6,7 @@ A Gmail [MCP server](https://modelcontextprotocol.io) for [Claude Code](https://
 
 ## Features
 
-- **34 tools** spanning Gmail (read, compose, draft management, modify, attachments, label management) plus read-only Google Chat, Drive, and Docs — see the [Tools](#tools) table
+- **38 tools** spanning Gmail (read, compose, draft management, modify, attachments, thread and label management) plus read-only Google Chat, Drive, and Docs — see the [Tools](#tools) table
 - **Gmail-native outbound mail** — everything you send goes out as `multipart/alternative` (HTML plus a plain-text alternative), with your account's Gmail signature, quoted history on replies, and a proper `Name <address>` sender. Attachments supported on send, draft and reply; forwards re-attach the original's files
 - **Multi-account** support with simple aliases
 - **OAuth2** authentication with interactive CLI flow
@@ -113,24 +113,28 @@ Then use `/email` or `/checkemail` in Claude Code.
 
 | Tool | Description |
 |------|-------------|
-| `list_emails` | List inbox or label emails |
-| `search_emails` | Search with Gmail query syntax |
+| `list_emails` | List inbox or label emails (50 per page, `page_token` for more) |
+| `search_emails` | Search with Gmail query syntax (50 per page, `page_token` for more) |
 | `read_email` | Read full email by ID |
-| `get_thread` | Get full thread with all messages |
-| `get_labels` | List all labels |
-| `get_attachment` | Fetch an attachment's bytes (base64) by attachmentId |
+| `get_thread` | Get full thread with all messages, bodies and attachment metadata |
+| `get_labels` | List all labels (`include_counts` for message counts) |
+| `get_attachment` | Fetch an attachment: writes it to `save_dir`, or returns base64 for files up to 1MB |
 | `send_email` | Send a new email (Gmail-native HTML + text, signature, attachments) |
 | `draft_email` | Create a draft (same composition as `send_email`) |
 | `reply_email` | Reply with proper threading, `Reply-To` handling and quoted history |
 | `draft_reply` | Draft a reply (review in Gmail before sending) |
 | `send_draft` | Send an existing draft by ID |
-| `list_drafts` | List drafts with id + headers |
+| `list_drafts` | List drafts with id + headers (paginated) |
 | `read_draft` | Read a draft's full content by ID |
+| `update_draft` | Replace a draft's contents (same composition as `draft_email`) |
+| `delete_draft` | Permanently delete a draft |
 | `forward_email` | Forward an email to new recipients, re-attaching the original's attachments |
 | `archive_email` | Archive (remove INBOX label) |
 | `label_email` | Add/remove labels |
-| `trash_email` | Move to trash |
-| `batch_modify` | Batch archive/trash/label |
+| `trash_email` | Move one message to trash |
+| `modify_thread` | Add/remove labels on every message in a thread (archive = remove `INBOX`) |
+| `trash_thread` | Move an entire thread to trash |
+| `batch_modify` | Batch archive/trash/label, chunked, with per-failure reporting |
 | `unsubscribe_email` | Process `List-Unsubscribe` header (one-click HTTPS or mailto) |
 | `mark_read` | Remove UNREAD label from a message |
 | `mark_unread` | Add UNREAD label to a message |
@@ -149,10 +153,10 @@ These tools are **strictly read-only** — nothing is sent, posted, created, upd
 | Tool | Description |
 |------|-------------|
 | `list_chat_spaces` | List the Chat spaces/DMs the account belongs to |
-| `list_chat_messages` | List messages in a Chat space (requires a space name/id) |
+| `list_chat_messages` | List messages in a Chat space (requires a space name/id; newest first) |
 | `get_chat_message` | Read a single Chat message by resource name |
 | `search_drive_files` | Search Drive files with Drive `q` query syntax |
-| `read_drive_file` | Read a Drive file's metadata + text (Docs/Sheets/Slides exported to text; binary types return metadata only; ~1MB cap) |
+| `read_drive_file` | Read a Drive file's metadata + text (Docs/Sheets/Slides exported to text; binary types return metadata only; ~1MB cap; read `contentNote` — a Sheets export is first-sheet-only) |
 | `get_google_doc` | Read a Google Doc as title + flattened plain text |
 
 All tools accept an optional `account` parameter (alias or email). Defaults to the account set in `accounts.json`.
