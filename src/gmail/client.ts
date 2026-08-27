@@ -248,6 +248,9 @@ interface MimeOptions {
   is_html?: boolean;
   in_reply_to?: string;
   references?: string;
+  reply_to?: string;
+  html_suffix?: string;
+  text_suffix?: string;
 }
 
 /**
@@ -263,7 +266,7 @@ export function encodeHeaderValue(value: string): string {
 /**
  * Build an RFC 2822 message and encode as base64url for the Gmail API.
  */
-function buildRawMessage(opts: MimeOptions): string {
+export function buildRawMessage(opts: MimeOptions): string {
   const lines: string[] = [];
 
   if (opts.from) lines.push(`From: ${opts.from}`);
