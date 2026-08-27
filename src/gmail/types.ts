@@ -228,11 +228,19 @@ export interface ModifyResult {
   labels?: string[];
 }
 
-/** Result from batch operations. */
+/**
+ * Result from batch operations.
+ *
+ * `message_ids` is what actually SUCCEEDED, not the input array — a partial
+ * failure used to be invisible because the tool synthesized success from its
+ * own arguments and discarded what the API said.
+ */
 export interface BatchResult {
   success: boolean;
   modified_count: number;
   message_ids: string[];
+  /** Present only when something failed. One entry per failed chunk (or id). */
+  failures?: Array<{ ids: string[]; error: string }>;
 }
 
 /** OAuth token shape stored on disk. */

@@ -93,6 +93,43 @@ export async function getGmailClient(account?: string | AccountConfig): Promise<
 // ---------------------------------------------------------------------------
 
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
+
+/**
+ * Gmail answers 403 for two quite different things: a genuine authorization
+ * failure, and a rate limit. Treating every 403 as fatal told a user to
+ * re-authenticate when all that had happened was too many requests a second.
+ * These reasons are the rate-limit ones, and they retry like a 429.
+ */
+const RETRYABLE_403_REASONS = new Set(['ratelimitexceeded', 'userratelimitexceeded']);
+
+/** Collect the `reason` strings a Google API error carries, lowercased. */
+function googleErrorReasons(err: unknown): string[] {
+  const e = err as {
+    errors?: Array<{ reason?: string }>;
+    response?: { data?: { error?: { errors?: Array<{ reason?: string }>; status?: string } } };
+  };
+  const reasons: string[] = [];
+  const push = (value: unknown): void => {
+    if (typeof value === 'string' && value.length > 0) reasons.push(value.toLowerCase());
+  };
+
+  if (Array.isArray(e?.errors)) {
+    for (const item of e.errors) push(item?.reason);
+  }
+  const nested = e?.response?.data?.error;
+  if (Array.isArray(nested?.errors)) {
+    for (const item of nested.errors) push(item?.reason);
+  }
+  push(nested?.status);
+
+  return reasons;
+}
+
+/** True for a 403 that is really a rate limit rather than an authorization failure. */
+function isRateLimit403(status: unknown, err: unknown): boolean {
+  return status === 403 && googleErrorReasons(err).some(r => RETRYABLE_403_REASONS.has(r));
+}
+
 const defaultSleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
 export async function withRetry<T>(
@@ -108,8 +145,9 @@ export async function withRetry<T>(
     } catch (err: unknown) {
       lastError = err;
       const status = (err as any)?.code || (err as any)?.response?.status;
+      const rateLimited = isRateLimit403(status, err);
 
-      if (status === 401 || status === 403) {
+      if ((status === 401 || status === 403) && !rateLimited) {
         const message = err instanceof Error ? err.message : String(err);
         log('error', 'auth_error', { status, message });
         throw new Error(
@@ -118,7 +156,7 @@ export async function withRetry<T>(
         );
       }
 
-      if (RETRYABLE_STATUSES.has(status) && attempt < maxRetries) {
+      if ((RETRYABLE_STATUSES.has(status) || rateLimited) && attempt < maxRetries) {
         const delay = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
         log('warn', 'retry', { status, attempt: attempt + 1, delay_ms: delay });
         await sleep(delay);
@@ -804,8 +842,23 @@ export async function trashMessage(opts: {
   };
 }
 
+/** Gmail's hard limit on one batchModify call. */
+export const BATCH_MODIFY_CHUNK = 1000;
+
+/** How many trash calls run at once — Gmail has no batch trash endpoint. */
+const TRASH_CONCURRENCY = 10;
+
 /**
  * Batch modify messages (add/remove labels).
+ *
+ * Chunked at Gmail's 1000-id limit, and a chunk that fails no longer discards
+ * the record of the ones that went through: the failing ids come back in
+ * `failures` and `modified_count` counts only what actually succeeded.
+ *
+ * Note the honest limit of the API here: `batchModify` returns an empty 204 on
+ * success, so Gmail reports no per-message outcome. A chunk that returns 2xx is
+ * counted as modified; that is the API's real answer, not an assumption
+ * synthesized from the input array.
  */
 export async function batchModify(opts: {
   messageIds: string[];
@@ -813,23 +866,85 @@ export async function batchModify(opts: {
   removeLabelIds?: string[];
   account?: string;
 }): Promise<BatchResult> {
+  const add = opts.addLabelIds ?? [];
+  const remove = opts.removeLabelIds ?? [];
+  if (add.length === 0 && remove.length === 0) {
+    throw new Error(
+      'batch_modify with action "label" needs at least one of add_labels or remove_labels; '
+      + 'with neither it would be a no-op reported as a success.'
+    );
+  }
+
   const gmail = await getGmailClient(opts.account);
 
-  await withRetry(() =>
-    gmail.users.messages.batchModify({
-      userId: 'me',
-      requestBody: {
-        ids: opts.messageIds,
-        addLabelIds: opts.addLabelIds || [],
-        removeLabelIds: opts.removeLabelIds || [],
-      },
-    })
-  );
+  const modified: string[] = [];
+  const failures: Array<{ ids: string[]; error: string }> = [];
+
+  for (let i = 0; i < opts.messageIds.length; i += BATCH_MODIFY_CHUNK) {
+    const chunk = opts.messageIds.slice(i, i + BATCH_MODIFY_CHUNK);
+    try {
+      await withRetry(() =>
+        gmail.users.messages.batchModify({
+          userId: 'me',
+          requestBody: { ids: chunk, addLabelIds: add, removeLabelIds: remove },
+        })
+      );
+      modified.push(...chunk);
+    } catch (err) {
+      failures.push({ ids: chunk, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
 
   return {
-    success: true,
-    modified_count: opts.messageIds.length,
-    message_ids: opts.messageIds,
+    success: failures.length === 0,
+    modified_count: modified.length,
+    message_ids: modified,
+    ...(failures.length > 0 ? { failures } : {}),
+  };
+}
+
+/**
+ * Trash many messages, one API call each — Gmail has no batch trash endpoint.
+ *
+ * Runs 10 at a time rather than serially, and CONTINUES past a failure: a
+ * failure at id #150 used to throw away all record of the 149 already trashed,
+ * leaving the caller with an error string and no idea what had happened.
+ */
+export async function batchTrash(opts: {
+  messageIds: string[];
+  account?: string;
+}): Promise<BatchResult> {
+  const resolved = resolveAccount(opts.account);
+  const gmail = await getGmailClient(resolved);
+
+  log('info', 'batch_trash', { account: resolved.alias, count: opts.messageIds.length });
+
+  const trashed: string[] = [];
+  const failures: Array<{ ids: string[]; error: string }> = [];
+
+  for (let i = 0; i < opts.messageIds.length; i += TRASH_CONCURRENCY) {
+    const chunk = opts.messageIds.slice(i, i + TRASH_CONCURRENCY);
+    const results = await Promise.all(
+      chunk.map(async (id) => {
+        try {
+          await withRetry(() => gmail.users.messages.trash({ userId: 'me', id }));
+          return { id, error: null as string | null };
+        } catch (err) {
+          return { id, error: err instanceof Error ? err.message : String(err) };
+        }
+      }),
+    );
+    for (const result of results) {
+      if (result.error === null) trashed.push(result.id);
+      else failures.push({ ids: [result.id], error: result.error });
+    }
+  }
+
+  return {
+    success: failures.length === 0,
+    modified_count: trashed.length,
+    message_ids: trashed,
+    ...(failures.length > 0 ? { failures } : {}),
   };
 }
 
