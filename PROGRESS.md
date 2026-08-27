@@ -31,13 +31,24 @@ adds: CRLF/header-injection sanitation and `resolveAccount` hardening).
 - [x] **`resolveAccount` hardening** — pure `selectAccount` split out and unit-tested (12 tests);
       substring email matching removed (exact alias or exact email, case-insensitive both sides);
       the default lookup throws a named config error instead of a non-null assertion.
+- [x] **B6 tool params + descriptions** — shared-params.ts holds the body/is_html contract wording
+      and the new optional params; send/draft/reply/draft-reply/forward updated. Server still
+      registers 34 tools (smoke-checked).
+- [x] **B7 docs** — README tool count 35 -> 34, forward row no longer says "no attachments",
+      Gmail-native feature bullet added; CHANGELOG 1.2.0 entry.
+- [x] **B8 tests + B10 PASS-after** — 185 tests green, typecheck clean, all five B10 gates pass.
 
-## Remaining
+## Remaining — nothing in Unit A's scope
 
-- [ ] B6 tool params/descriptions (5 files)
-- [ ] B7 docs (README, CHANGELOG)
-- [ ] B8 tests (mime.test.ts, settings.test.ts, client.test.ts extension)
-- [ ] B10 PASS-after run
+
+
+## Not this worker's
+
+- B10.5 live acceptance sends (send / reply / forward / draft+send, `[TEST]`-prefixed, raw
+  verification) — the chair runs these.
+- The >5MB media-upload transport is implemented and unit-covered on the size arithmetic, but
+  the contract asks for it to be confirmed against one real send during acceptance. Not
+  builder-runnable.
 
 ## How to resume
 

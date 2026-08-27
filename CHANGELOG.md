@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] — 2026-08-27
+
+### Changed
+- **Outbound mail is now `multipart/alternative` by default.** Every message sent, drafted, replied or forwarded carries a `text/plain` part AND a Gmail-shaped `text/html` part. **`is_html` now selects how your `body` is interpreted, not what container is sent** — `is_html: true` still means "my body is HTML" and now also gets a generated plain-text alternative; leaving it unset still means "my body is plain text" and now also gets a generated HTML alternative. Existing callers keep working and render better.
+- **Every part is base64 `Content-Transfer-Encoding` at 76 characters**, and long headers fold at column 78. This retires the RFC 5322 998-octet line limit, which any HTML body or long `References` chain crossed trivially.
+- **Reply-all now matches Gmail**: the original `To` recipients go in `To` and the original `Cc` in `Cc`, both minus your own address. They previously all went to `Cc`.
+- **`resolveAccount` no longer substring-matches an email address.** An exact alias or an exact email only (case-insensitive). A near-miss now errors with the list of valid aliases instead of silently picking whichever account contained the text. A missing default alias throws a named config error.
+- **`forward_email` re-attaches the original's attachments** by default (`include_attachments: false` opts out) and uses Gmail's own forwarded-message block, separator and date shape.
+
+### Added
+- **Gmail signature and sender display name.** Outbound mail picks up the account's `sendAs` display name (`Steve <steve@…>` rather than a bare address) and appends its Gmail signature, in Gmail's own wrapper. `include_signature: false` opts out per call. No new OAuth scopes and no re-consent: `sendAs.list` works on the tokens already on disk, and any failure degrades to no signature rather than failing the send.
+- **Quoted history on replies** — the `gmail_quote` container, blockquote and `On <date> <sender> wrote:` attribution Gmail itself emits, in both HTML and text flavours. `include_quote: false` opts out.
+- **Attachments** — new `attachments` parameter (absolute file paths) on `send_email`, `draft_email`, `reply_email` and `draft_reply`. 25MB per file and in total; messages over 5MB are sent through the media-upload transport.
+- **A deterministic reflow pass** that undoes composer hard-wrapping (paragraphs wrapped at ~70 columns became visible line breaks in the recipient's inbox) while preserving blank lines, list items, quoted lines, indented blocks and lead-in lines. The composing tools' `body` descriptions now state the newline contract explicitly.
+- **`src/gmail/mime.ts`** — all MIME assembly, text/HTML conversion, reflow, quote and forward blocks, header folding and attachment loading, with ~95 unit tests. **`src/gmail/settings.ts`** — the cached `sendAs` lookup.
+
+### Fixed
+- **Header injection.** CR and LF are stripped from every caller-supplied header value (`to`, `cc`, `bcc`, `from`, `subject`, `reply_to`). A recipient of `a@b.com\r\nBcc: evil@x.com` previously minted a real `Bcc` header and silently blind-copied it.
+- **`Reply-To` was ignored on replies.** Replying to any sender that sets `Reply-To` (ticketing systems, marketing platforms, mailing lists) sent the reply to the wrong address.
+- **`extractBody` was last-wins** and descended into `message/rfc822` sub-messages, so a message containing a forwarded original could report the nested original as its own body.
+- **A 404 when replying** now names the account the message was looked for in, instead of surfacing a raw Gmail error.
+
 ## [Unreleased]
 
 ### Added

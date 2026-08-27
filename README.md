@@ -6,7 +6,8 @@ A Gmail [MCP server](https://modelcontextprotocol.io) for [Claude Code](https://
 
 ## Features
 
-- **35 tools** spanning Gmail (read, compose, draft management, modify, attachments, label management) plus read-only Google Chat, Drive, and Docs — see the [Tools](#tools) table
+- **34 tools** spanning Gmail (read, compose, draft management, modify, attachments, label management) plus read-only Google Chat, Drive, and Docs — see the [Tools](#tools) table
+- **Gmail-native outbound mail** — everything you send goes out as `multipart/alternative` (HTML plus a plain-text alternative), with your account's Gmail signature, quoted history on replies, and a proper `Name <address>` sender. Attachments supported on send, draft and reply; forwards re-attach the original's files
 - **Multi-account** support with simple aliases
 - **OAuth2** authentication with interactive CLI flow
 - **Token auto-refresh** — re-authenticates transparently
@@ -118,14 +119,14 @@ Then use `/email` or `/checkemail` in Claude Code.
 | `get_thread` | Get full thread with all messages |
 | `get_labels` | List all labels |
 | `get_attachment` | Fetch an attachment's bytes (base64) by attachmentId |
-| `send_email` | Send a new email |
-| `draft_email` | Create a draft |
-| `reply_email` | Reply with proper threading |
+| `send_email` | Send a new email (Gmail-native HTML + text, signature, attachments) |
+| `draft_email` | Create a draft (same composition as `send_email`) |
+| `reply_email` | Reply with proper threading, `Reply-To` handling and quoted history |
 | `draft_reply` | Draft a reply (review in Gmail before sending) |
 | `send_draft` | Send an existing draft by ID |
 | `list_drafts` | List drafts with id + headers |
 | `read_draft` | Read a draft's full content by ID |
-| `forward_email` | Forward an email to new recipients (text/HTML body, no attachments) |
+| `forward_email` | Forward an email to new recipients, re-attaching the original's attachments |
 | `archive_email` | Archive (remove INBOX label) |
 | `label_email` | Add/remove labels |
 | `trash_email` | Move to trash |
