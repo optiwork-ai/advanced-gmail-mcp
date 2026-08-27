@@ -330,16 +330,71 @@ describe('setVacation', () => {
     expect(result.notice).toContain('OFF');
   });
 
-  it('writes an HTML body to responseBodyHtml and a plain one to plain text', async () => {
+  it('writes the supplied body to its own flavour AND derives the other one', async () => {
     v.getVacation.mockResolvedValue({ data: {} });
     v.updateVacation.mockResolvedValue({ data: { enableAutoReply: true } });
 
     await setVacation({ enable: true, body: '<p>Away</p>', isHtml: true });
-    expect(v.updateVacation.mock.calls[0][0].requestBody.responseBodyHtml).toBe('<p>Away</p>');
-    expect(v.updateVacation.mock.calls[0][0].requestBody.responseBodyPlainText).toBeUndefined();
+    const html = v.updateVacation.mock.calls[0][0].requestBody;
+    expect(html.responseBodyHtml).toBe('<p>Away</p>');
+    expect(html.responseBodyPlainText).toBe('Away');
 
     await setVacation({ enable: true, body: 'Away' });
-    expect(v.updateVacation.mock.calls[1][0].requestBody.responseBodyPlainText).toBe('Away');
+    const plain = v.updateVacation.mock.calls[1][0].requestBody;
+    expect(plain.responseBodyPlainText).toBe('Away');
+    expect(plain.responseBodyHtml).toContain('Away');
+  });
+
+  // R2-C1: Gmail prefers responseBodyHtml when both are set. Writing only the
+  // flavour the caller supplied left the OTHER one saying something else, so a
+  // plain-text change to an HTML responder reported success and changed nothing
+  // about what the account actually replies.
+  it('a plain body REPLACES a saved HTML responder rather than leaving it stale', async () => {
+    v.getVacation.mockResolvedValueOnce({
+      data: {
+        enableAutoReply: true,
+        responseBodyHtml: '<p>OLD html reply - I am in Spain until March</p>',
+      },
+    });
+    v.updateVacation.mockResolvedValueOnce({ data: { enableAutoReply: true } });
+
+    await setVacation({ enable: true, body: 'NEW plain reply - back tomorrow' });
+
+    const body = v.updateVacation.mock.calls[0][0].requestBody;
+    expect(body.responseBodyPlainText).toBe('NEW plain reply - back tomorrow');
+    expect(body.responseBodyHtml).toContain('NEW plain reply');
+    expect(body.responseBodyHtml).not.toContain('Spain');
+  });
+
+  it('an HTML body REPLACES a saved plain-text responder rather than leaving it stale', async () => {
+    v.getVacation.mockResolvedValueOnce({
+      data: { enableAutoReply: true, responseBodyPlainText: 'OLD plain reply' },
+    });
+    v.updateVacation.mockResolvedValueOnce({ data: { enableAutoReply: true } });
+
+    await setVacation({ enable: true, body: '<p>NEW html reply</p>', isHtml: true });
+
+    const body = v.updateVacation.mock.calls[0][0].requestBody;
+    expect(body.responseBodyHtml).toBe('<p>NEW html reply</p>');
+    expect(body.responseBodyPlainText).toBe('NEW html reply');
+    expect(body.responseBodyPlainText).not.toContain('OLD');
+  });
+
+  it('leaves BOTH saved flavours alone when no body is supplied', async () => {
+    v.getVacation.mockResolvedValueOnce({
+      data: {
+        enableAutoReply: false,
+        responseBodyHtml: '<p>Saved html</p>',
+        responseBodyPlainText: 'Saved text',
+      },
+    });
+    v.updateVacation.mockResolvedValueOnce({ data: { enableAutoReply: true } });
+
+    await setVacation({ enable: true });
+
+    const body = v.updateVacation.mock.calls[0][0].requestBody;
+    expect(body.responseBodyHtml).toBe('<p>Saved html</p>');
+    expect(body.responseBodyPlainText).toBe('Saved text');
   });
 
   it('converts an ISO window to the epoch-ms strings Gmail wants', async () => {

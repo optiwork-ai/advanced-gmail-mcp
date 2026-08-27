@@ -25,6 +25,7 @@
 import type { gmail_v1 } from 'googleapis';
 import { type AccountConfig, resolveAccount } from '../config.js';
 import { getGmailClient, withRetry } from './client.js';
+import { htmlToText, textToHtml } from './mime.js';
 import { log } from '../log.js';
 import { withScopeHint } from '../scope-error.js';
 
@@ -327,8 +328,19 @@ export async function setVacation(opts: SetVacationOptions): Promise<VacationSta
     ...current,
     enableAutoReply: opts.enable,
     ...(opts.subject !== undefined ? { responseSubject: opts.subject } : {}),
-    ...(body !== undefined && isHtml ? { responseBodyHtml: body } : {}),
-    ...(body !== undefined && !isHtml ? { responseBodyPlainText: body } : {}),
+    // BOTH flavours, or neither. Gmail's VacationSettings carries a plain-text
+    // and an HTML body and PREFERS the HTML one when both are set, so writing
+    // only the flavour the caller named left the other one saying something
+    // else: changing an HTML responder's text with a plain `body` reported
+    // success, echoed the new text, and the account went on sending the old
+    // one. Fetch-and-preserve is right for the subject and the window; for the
+    // body it is the bug. The unnamed flavour is derived from the supplied one
+    // by the same converters the composer uses, so the two cannot disagree.
+    ...(body !== undefined
+      ? isHtml
+        ? { responseBodyHtml: body, responseBodyPlainText: htmlToText(body) }
+        : { responseBodyPlainText: body, responseBodyHtml: textToHtml(body) }
+      : {}),
     ...(opts.restrictToContacts !== undefined ? { restrictToContacts: opts.restrictToContacts } : {}),
     ...(opts.restrictToDomain !== undefined ? { restrictToDomain: opts.restrictToDomain } : {}),
     ...(opts.startTime !== undefined ? { startTime: toEpochMs(opts.startTime, 'start_time') } : {}),

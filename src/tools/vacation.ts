@@ -14,8 +14,8 @@ export const getVacationParams = { account: accountParam };
 export const setVacationParams = {
   enable: z.boolean().describe('true turns the vacation responder ON; false turns it OFF. Turning it off KEEPS the saved subject and message.'),
   subject: z.string().optional().describe('Subject line of the automatic reply. Omit to keep whatever is already saved.'),
-  body: z.string().optional().describe('The automatic reply text. Omit to keep whatever is already saved; required the first time the responder is enabled on an account.'),
-  is_html: z.boolean().optional().describe('Treat body as HTML rather than plain text (default: false).'),
+  body: z.string().optional().describe('The automatic reply text. Supplying it REPLACES the saved message in both the plain-text and HTML forms Gmail stores, so the reply that goes out is always the text you passed. Omit to keep whatever is already saved; required the first time the responder is enabled on an account.'),
+  is_html: z.boolean().optional().describe('Treat body as HTML rather than plain text (default: false). Either way both stored forms are rewritten from it.'),
   start_time: z.string().optional().describe('ISO 8601 date or timestamp for when the responder starts, e.g. "2026-09-01". Omit for "immediately".'),
   end_time: z.string().optional().describe('ISO 8601 date or timestamp for when the responder stops. Omit for "until turned off" — worth setting, since an unbounded responder is the one people forget.'),
   restrict_to_contacts: z.boolean().optional().describe('Reply only to people in the account\'s contacts.'),
