@@ -693,6 +693,34 @@ describe('buildMimeMessage', () => {
     ).toThrow(/Attachments total 26\.0MB; Gmail's limit is 25MB/);
   });
 
+  it('refuses plain_text_only with attachments rather than dropping them', () => {
+    // The single-part path returns before any attachment part is emitted AND
+    // before the total-size gate, so this used to build a 90-byte message with
+    // the attachment silently discarded and no error of any kind.
+    expect(() =>
+      buildMimeMessage({
+        to: 'a@b.com',
+        subject: 'Hi',
+        body: 'x',
+        plain_text_only: true,
+        attachments: [
+          { filename: 'secret.pdf', mimeType: 'application/pdf', content: Buffer.alloc(1024) },
+        ],
+      }),
+    ).toThrow(/plain_text_only.*cannot carry attachments/i);
+  });
+
+  it('still builds a plain_text_only message with no attachments', () => {
+    const built = buildMimeMessage({
+      to: 'a@b.com',
+      subject: 'Hi',
+      body: 'x',
+      plain_text_only: true,
+      attachments: [],
+    });
+    expect(built.raw).toContain('Content-Type: text/plain; charset="UTF-8"');
+  });
+
   it('accepts the full advertised 25MB of attachments', () => {
     // The whole point of the limit is that it is reachable. Before this was
     // fixed the total gate measured MiB while the message ceiling measured

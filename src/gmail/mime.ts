@@ -791,6 +791,15 @@ export function buildMimeMessage(opts: MimeOptions): BuiltMessage {
   const attachments = opts.attachments ?? [];
 
   if (opts.plain_text_only === true) {
+    // A single-part text/plain message has nowhere to put an attachment. This
+    // used to return here silently, dropping the files AND skipping the total
+    // size gate — a 30MB attachment produced a 90-byte message with no error.
+    if (attachments.length > 0) {
+      throw new Error(
+        'plain_text_only builds a single-part text/plain message and cannot carry '
+        + `attachments (${attachments.length} supplied). Drop plain_text_only, or send no files.`,
+      );
+    }
     // Byte-identical to the legacy single-part message (unsubscribe mailto path).
     headers.push('Content-Type: text/plain; charset="UTF-8"');
     return finalize(`${headers.join(CRLF)}${CRLF}${CRLF}${textBody}`, attachments);
