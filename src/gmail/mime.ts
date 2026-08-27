@@ -116,14 +116,53 @@ export function sanitizeHeaderValue(value: string): string {
   return value.replace(/[\r\n\u0000]+/g, ' ').trim();
 }
 
+/** RFC 2047: an encoded-word may not exceed 75 characters, delimiters included. */
+const MAX_ENCODED_WORD = 75;
+const ENCODED_WORD_OVERHEAD = '=?UTF-8?B?'.length + '?='.length; // 12
+/** Base64 chars that fit, rounded down to a whole quantum. */
+const ENCODED_WORD_B64_CHARS =
+  Math.floor((MAX_ENCODED_WORD - ENCODED_WORD_OVERHEAD) / 4) * 4; // 60
+/** ...and the raw UTF-8 bytes those encode. */
+const ENCODED_WORD_RAW_BYTES = (ENCODED_WORD_B64_CHARS / 4) * 3; // 45
+
+function encodedWord(chunk: string): string {
+  return `=?UTF-8?B?${Buffer.from(chunk, 'utf-8').toString('base64')}?=`;
+}
+
 /**
- * RFC 2047 encoded-word for header values containing non-ASCII characters.
+ * RFC 2047 encoded-word(s) for header values containing non-ASCII characters.
  * Returns the value untouched when it's pure ASCII.
+ *
+ * A long value becomes SEVERAL space-separated encoded-words, which is the
+ * whole reason RFC 2047 caps a word at 75 characters: an encoded-word contains
+ * no whitespace, so `foldHeader` cannot break one, and a single unbroken word
+ * for a 400-character subject produced a 1,097-octet `Subject:` line — past the
+ * 998-octet hard cap of RFC 5322. Splitting here is what actually retires that
+ * defect on the header side; base64 body encoding only retires it for bodies.
+ *
+ * Chunks are cut on codepoint boundaries (RFC 2047 requires each word to encode
+ * an integral number of characters), and whitespace BETWEEN adjacent
+ * encoded-words is discarded by the decoder, so the value round-trips exactly.
  */
 export function encodeHeaderValue(value: string): string {
   if (/^[\x00-\x7F]*$/.test(value)) return value;
-  const encoded = Buffer.from(value, 'utf-8').toString('base64');
-  return `=?UTF-8?B?${encoded}?=`;
+
+  const words: string[] = [];
+  let chunk = '';
+  let chunkBytes = 0;
+  for (const char of value) {
+    const size = Buffer.byteLength(char, 'utf-8');
+    if (chunkBytes > 0 && chunkBytes + size > ENCODED_WORD_RAW_BYTES) {
+      words.push(encodedWord(chunk));
+      chunk = '';
+      chunkBytes = 0;
+    }
+    chunk += char;
+    chunkBytes += size;
+  }
+  if (chunk.length > 0) words.push(encodedWord(chunk));
+
+  return words.join(' ');
 }
 
 /**

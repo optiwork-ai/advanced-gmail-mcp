@@ -306,10 +306,73 @@ describe('foldHeader', () => {
     expect(folded.replace(/\r\n\t/g, ' ')).toBe(`References: ${ids.join(' ')}`);
   });
 
-  it('never splits an encoded-word', () => {
+  it('never splits an individual encoded-word across a fold', () => {
     const encoded = encodeHeaderValue('a very long subject line with lots of accents: éééééééééééééééééééééééééééééé');
     const folded = foldHeader('Subject', encoded);
-    expect(folded).toContain(encoded);
+    // A long value becomes SEVERAL encoded-words (RFC 2047 caps one at 75
+    // characters), so the folded header need not contain the joined string —
+    // but every individual word must survive intact on some line.
+    for (const word of encoded.split(' ')) {
+      expect(folded).toContain(word);
+    }
+    expect(folded.replace(/\r\n\t/g, ' ')).toBe(`Subject: ${encoded}`);
+  });
+});
+
+describe('encodeHeaderValue — RFC 2047 length', () => {
+  it('emits one encoded-word for a short non-ASCII value', () => {
+    expect(encodeHeaderValue('Café ☕')).toMatch(/^=\?UTF-8\?B\?[A-Za-z0-9+/=]+\?=$/);
+  });
+
+  it.each([50, 200, 400, 600, 1200])(
+    'caps every encoded-word at 75 characters for a %i-character value',
+    (n) => {
+      const words = encodeHeaderValue('é'.repeat(n)).split(' ');
+      for (const word of words) {
+        expect(word).toMatch(/^=\?UTF-8\?B\?[A-Za-z0-9+/=]+\?=$/);
+        expect(word.length).toBeLessThanOrEqual(75);
+      }
+    },
+  );
+
+  it('round-trips a long mixed value through the encoded-word sequence', () => {
+    const value = `Ré: ${'é'.repeat(400)} tail`;
+    const decoded = encodeHeaderValue(value)
+      .split(' ')
+      .map(word => Buffer.from(word.slice(10, -2), 'base64').toString('utf8'))
+      .join('');
+    expect(decoded).toBe(value);
+  });
+
+  it('never splits a multi-byte character across two encoded-words', () => {
+    const value = '👋'.repeat(60); // 4 bytes each, so the chunk edge lands mid-emoji
+    const decoded = encodeHeaderValue(value)
+      .split(' ')
+      .map(word => Buffer.from(word.slice(10, -2), 'base64').toString('utf8'))
+      .join('');
+    expect(decoded).toBe(value);
+    expect(decoded).not.toContain('�');
+  });
+
+  it('keeps a long non-ASCII Subject line under 998 octets in the assembled message', () => {
+    const raw = buildMimeMessage({
+      to: 'a@b.com',
+      subject: `Ré: ${'é'.repeat(600)}`,
+      body: 'hello',
+    }).raw;
+    for (const line of raw.split('\r\n')) {
+      expect(Buffer.byteLength(line, 'utf8')).toBeLessThanOrEqual(998);
+    }
+    // And the folded Subject still decodes back to what was asked for.
+    const subjectLine = raw.split('\r\n\r\n')[0]
+      .split(/\r\n(?!\t)/)
+      .find(line => line.startsWith('Subject:')) as string;
+    const decoded = subjectLine
+      .replace(/^Subject: /, '')
+      .split(/\s+/)
+      .map(word => Buffer.from(word.slice(10, -2), 'base64').toString('utf8'))
+      .join('');
+    expect(decoded).toBe(`Ré: ${'é'.repeat(600)}`);
   });
 });
 
