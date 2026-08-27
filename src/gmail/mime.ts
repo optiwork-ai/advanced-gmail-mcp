@@ -25,11 +25,25 @@ const MAX_HEADER_LINE = 78;
 /** Base64 body lines are chunked at 76 characters (RFC 2045). */
 const BASE64_LINE_LEN = 76;
 
+/**
+ * All three ceilings below are DECIMAL megabytes, and they have to be: the
+ * assembled-message ceiling is compared against the attachment budget after
+ * base64 inflation (~1.37x with the CRLF line breaks), so mixing MiB and MB
+ * makes them silently inconsistent. It did: with the attachment budget in MiB
+ * and the message ceiling in decimal MB, a 25 MiB attachment cleared the "25MB
+ * total" gate and then died at the message ceiling with "Assembled message is
+ * 34.2MB, over the 35MB ceiling" — a sentence claiming 34.2 exceeds 35, and an
+ * advertised 25MB allowance that could never actually be used.
+ *
+ * 25,000,000 raw bytes inflate to ~34.2M, which fits under the 35,000,000
+ * ceiling with room for the headers and the body parts.
+ */
+
 /** Per-file attachment ceiling — Gmail's own limit. */
-export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+export const MAX_ATTACHMENT_BYTES = 25_000_000;
 
 /** Total raw attachment bytes allowed on one message. */
-export const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+export const MAX_TOTAL_ATTACHMENT_BYTES = 25_000_000;
 
 /** Hard ceiling on the assembled message; beyond this Gmail will reject it. */
 export const MAX_ENCODED_MESSAGE_BYTES = 35_000_000;
@@ -595,8 +609,9 @@ export function mimeTypeForFilename(filename: string): string {
   return EXT_MIME[ext] ?? 'application/octet-stream';
 }
 
+/** Decimal MB, matching the units every ceiling in this module is stated in. */
 function mb(bytes: number): string {
-  return (bytes / (1024 * 1024)).toFixed(1);
+  return (bytes / 1_000_000).toFixed(1);
 }
 
 /** Strip characters that would break a MIME parameter or a header line. */

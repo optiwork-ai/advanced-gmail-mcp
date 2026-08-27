@@ -16,6 +16,8 @@ import {
   formatGmailDate,
   htmlToText,
   loadAttachment,
+  MAX_ENCODED_MESSAGE_BYTES,
+  MAX_TOTAL_ATTACHMENT_BYTES,
   mimeTypeForFilename,
   normalizeNewlines,
   parseAddress,
@@ -655,11 +657,55 @@ describe('buildMimeMessage', () => {
         subject: 'Hi',
         body: 'x',
         attachments: [
-          { filename: 'a.bin', mimeType: 'application/octet-stream', content: Buffer.alloc(20 * 1024 * 1024) },
-          { filename: 'b.bin', mimeType: 'application/octet-stream', content: Buffer.alloc(6 * 1024 * 1024) },
+          { filename: 'a.bin', mimeType: 'application/octet-stream', content: Buffer.alloc(20 * 1000 * 1000) },
+          { filename: 'b.bin', mimeType: 'application/octet-stream', content: Buffer.alloc(6 * 1000 * 1000) },
         ],
       }),
     ).toThrow(/Attachments total 26\.0MB; Gmail's limit is 25MB/);
+  });
+
+  it('accepts the full advertised 25MB of attachments', () => {
+    // The whole point of the limit is that it is reachable. Before this was
+    // fixed the total gate measured MiB while the message ceiling measured
+    // decimal MB, so anything near 25MB died at the ceiling instead — with an
+    // error that read "Assembled message is 34.2MB, over the 35MB ceiling."
+    const built = buildMimeMessage({
+      to: 'a@b.com',
+      subject: 'Hi',
+      body: 'x',
+      attachments: [
+        {
+          filename: 'big.bin',
+          mimeType: 'application/octet-stream',
+          content: Buffer.alloc(MAX_TOTAL_ATTACHMENT_BYTES),
+        },
+      ],
+    });
+    expect(built.bytes).toBeLessThanOrEqual(MAX_ENCODED_MESSAGE_BYTES);
+  });
+
+  it('reports the assembled size in the same units as the ceiling it names', () => {
+    // A message that lands just over 35,000,000 bytes. Reported in MiB it read
+    // "34.1MB, over the 35MB ceiling" — a sentence that says 34.1 exceeds 35.
+    let message = '';
+    try {
+      buildMimeMessage({
+        to: 'a@b.com',
+        subject: 'Hi',
+        body: 'x'.repeat(600_000),
+        attachments: [
+          {
+            filename: 'big.bin',
+            mimeType: 'application/octet-stream',
+            content: Buffer.alloc(25_000_000),
+          },
+        ],
+      });
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    const reported = Number(message.match(/Assembled message is ([\d.]+)MB/)?.[1]);
+    expect(reported).toBeGreaterThan(35);
   });
 
   it('reports a size that crosses the media-upload threshold', () => {
