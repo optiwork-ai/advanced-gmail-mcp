@@ -11,12 +11,15 @@ adds: CRLF/header-injection sanitation and `resolveAccount` hardening).
       two CRLF header-injection gates). FAIL-before run recorded: 5/5 failed against the
       old single-part builder. `buildRawMessage` exported and `MimeOptions` given the new
       optional suffix fields so the gate compiles; `src/gmail/mime.ts` stubbed.
+- [x] **B1 + B2 + B4-partial `src/gmail/mime.ts` + `src/gmail/mime.test.ts`** — normalizeNewlines,
+      escapeHtml, sanitizeHeaderValue (CRLF injection guard), encodeHeaderValue, foldHeader,
+      formatFromHeader, parseAddress, reflowPlainText, textToHtml, htmlToText, formatGmailDate,
+      buildQuoteBlock, buildForwardBlock, loadAttachment + MIME table, buildMimeMessage
+      (multipart/alternative, multipart/mixed, base64 CTE, size gates). 95 unit tests, all green.
+      `types.ts` gained Attachment / SendAsProfile / ComposeOptions.
 
 ## Remaining
 
-- [ ] B1 `mime.ts` — normalizeNewlines, escapeHtml, header sanitation, foldHeader,
-      reflowPlainText, textToHtml, htmlToText, buildMimeMessage
-- [ ] B2 quote block + formatGmailDate
 - [ ] B3 `settings.ts` sendAs profile (cached, never inside withRetry)
 - [ ] B4 attachments + size gates + media transport
 - [ ] B5 forward rebuild

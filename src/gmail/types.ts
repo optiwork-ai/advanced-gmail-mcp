@@ -83,8 +83,35 @@ export interface LabelInfo {
   messagesUnread: number;
 }
 
+/** A file attached to an outbound message, already loaded into memory. */
+export interface Attachment {
+  /** Basename, already sanitized of CR/LF and quotes. */
+  filename: string;
+  mimeType: string;
+  content: Buffer;
+}
+
+/** The account's Gmail sendAs settings (display name, signature, reply-to). */
+export interface SendAsProfile {
+  email: string;
+  /** '' when unset. */
+  displayName: string;
+  /** '' when unset. HTML, as Gmail stores it. */
+  signatureHtml: string;
+  /** '' when unset. */
+  replyTo: string;
+}
+
+/** Options shared by every outbound composition path. */
+export interface ComposeOptions {
+  /** Append the account's Gmail signature. Default true. */
+  include_signature?: boolean;
+  /** Absolute file paths to attach. */
+  attachments?: string[];
+}
+
 /** Send/draft message input. */
-export interface ComposeInput {
+export interface ComposeInput extends ComposeOptions {
   to: string;
   subject: string;
   body: string;
@@ -94,13 +121,15 @@ export interface ComposeInput {
 }
 
 /** Reply message input. */
-export interface ReplyInput {
+export interface ReplyInput extends ComposeOptions {
   message_id: string;
   body: string;
   is_html?: boolean;
   reply_all?: boolean;
   cc?: string;
   bcc?: string;
+  /** Include the quoted original below the reply, as Gmail does. Default true. */
+  include_quote?: boolean;
 }
 
 /** Result from send/draft operations. */
