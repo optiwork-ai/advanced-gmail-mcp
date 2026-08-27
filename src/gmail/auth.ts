@@ -27,15 +27,25 @@ import type { StoredToken } from './types.js';
  *
  * Chat/Drive/Docs read-only scopes (chat.spaces.readonly,
  * chat.messages.readonly, drive.readonly, documents.readonly) back the
- * read-only Chat/Drive/Docs MCP tools. They are strictly read scopes — the
- * server never sends, posts, creates, updates, or deletes anything in those
- * services.
+ * read-only Chat/Drive/Docs MCP tools. Those four are strictly read scopes,
+ * and the Chat and Docs tools remain read-only: the server never posts a Chat
+ * message and never edits a document.
+ *
+ * Two WRITE scopes were added 2026-08-27 for the Phase 2 tools:
+ *   - drive.file — deliberately the narrow one. It grants access ONLY to files
+ *     this app itself creates, never to the rest of the user's Drive; the broad
+ *     read of Drive still comes from drive.readonly. It backs `upload_drive_file`.
+ *   - gmail.settings.basic — backs the mail-rule and vacation-responder tools
+ *     (`list_filters` / `create_filter` / `delete_filter`, `get_vacation` /
+ *     `set_vacation`) and properly scopes the `users.settings.sendAs` signature
+ *     lookup that composition already performs.
  *
  * Adding scopes is additive at the constant level — existing tokens keep
  * working with their current grants until each alias is RE-CONSENTED with
  * `npm run auth {alias}`. A token issued before a scope was added will NOT
- * carry that scope, so the new Chat/Drive/Docs tools 403 until every alias
- * that needs them is re-run through the auth flow.
+ * carry that scope, so the Chat/Drive/Docs tools, and now the Drive-upload and
+ * Gmail-settings tools, 403 until every alias that needs them is re-run
+ * through the auth flow.
  */
 const SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
@@ -50,6 +60,9 @@ const SCOPES = [
   'https://www.googleapis.com/auth/chat.messages.readonly',
   'https://www.googleapis.com/auth/drive.readonly',
   'https://www.googleapis.com/auth/documents.readonly',
+  // Write scopes (added 2026-08-27) — see the note above.
+  'https://www.googleapis.com/auth/drive.file',
+  'https://www.googleapis.com/auth/gmail.settings.basic',
 ];
 
 const REDIRECT_URI = 'http://localhost:3000/oauth2callback';
