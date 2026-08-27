@@ -7,7 +7,7 @@ import type { Auth } from 'googleapis';
 import { type AccountConfig, resolveAccount } from '../config.js';
 import { getAuthClient } from './auth.js';
 import { log } from '../log.js';
-import { googleErrorReasons } from '../scope-error.js';
+import { errorStatus, googleErrorReasons } from '../scope-error.js';
 import {
   MEDIA_UPLOAD_THRESHOLD_BYTES,
   type BuiltMessage,
@@ -810,10 +810,11 @@ function assertHistoryId(value: string): string {
   return trimmed;
 }
 
-function historyStatus(err: unknown): number | undefined {
-  return (err as { code?: number })?.code
-    ?? (err as { response?: { status?: number } })?.response?.status;
-}
+// The status is read through the shared helper rather than `err.code ??
+// err.response.status`: `??` does not fall through a truthy string, and gaxios
+// sets `code` from an underlying error rather than the HTTP status, so a
+// string there silently swallowed the whole 404-to-resync conversion.
+const historyStatus = errorStatus;
 
 function refFrom(message: gmail_v1.Schema$Message | undefined): HistoryMessageRef | null {
   if (!message?.id) return null;

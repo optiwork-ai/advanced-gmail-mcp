@@ -1209,6 +1209,20 @@ describe('getMailChanges', () => {
     );
   });
 
+  // R2-P4: the status was read with `??`, which does not fall through a truthy
+  // string. gaxios can set `code` from an underlying error rather than the HTTP
+  // status, and a string there swallowed the whole 404-to-resync conversion.
+  it('still recognizes the expired cursor when the error code is a string', async () => {
+    api.history.list.mockRejectedValue(Object.assign(
+      new Error('Requested entity was not found.'),
+      { code: 'ERR_BAD_REQUEST', response: { status: 404 } },
+    ));
+
+    await expect(getMailChanges({ historyId: '100' })).rejects.toThrow(
+      /too old.*get_history_baseline.*resync/is,
+    );
+  });
+
   it('does not disguise a non-404 failure as an expired cursor', async () => {
     // 400, not 500: a retryable status would spend the retry budget in real sleeps.
     api.history.list.mockRejectedValue(apiError(400, 'Invalid startHistoryId'));
