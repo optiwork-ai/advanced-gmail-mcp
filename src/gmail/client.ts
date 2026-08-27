@@ -2042,8 +2042,18 @@ export async function forwardMessage(opts: {
 
   const attachments: Attachment[] = [];
   const inlineImages: InlineImage[] = [];
+  // A quoted chain repeats its embedded images: an Outlook signature logo
+  // appears once at the top level and again inside each nested message/rfc822,
+  // all under the SAME Content-ID. Every copy is the same picture, and the
+  // forwarded HTML references the id once, so the first one wins. Without this
+  // the builder's cid-uniqueness check refused to send the message at all —
+  // and its advice ("rename one") is meaningless here, because the caller named
+  // no files. The check still guards the caller-supplied case it was written
+  // for, where two different files really would answer to one reference.
+  const seenContentIds = new Set<string>();
   if (opts.include_attachments !== false) {
     for (const info of original.attachments) {
+      if (info.contentId && seenContentIds.has(info.contentId)) continue;
       // The low-level fetch, not getAttachment: a forward re-attaches the
       // original's files whatever their size, so the 1MB inline gate that
       // protects the model's context must not apply here.
@@ -2062,6 +2072,7 @@ export async function forwardMessage(opts: {
       // file instead would turn every picture in the quoted message into a
       // broken image plus a stray attachment.
       if (info.contentId) {
+        seenContentIds.add(info.contentId);
         inlineImages.push({ ...part, contentId: info.contentId });
       } else {
         attachments.push(part);

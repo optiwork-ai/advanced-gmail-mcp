@@ -1685,4 +1685,70 @@ describe('attachment listing includes inline parts', () => {
       .map(block => Buffer.from(block.replace(/\r\n/g, ''), 'base64').toString('utf8'));
     expect(decodedParts.some(part => part.includes('cid:ii_abc123'))).toBe(true);
   });
+
+  // R2-C2: an Outlook-style chain repeats the signature logo at every quoting
+  // level, so the SAME Content-ID appears twice in the part tree. Both copies
+  // were pushed into inline_images and the builder's uniqueness check threw
+  // before the send — a message that forwarded fine before Unit E.
+  function chainRepeatingAContentId() {
+    const logoPart = (attachmentId: string) => ({
+      mimeType: 'image/png',
+      filename: 'image001.png',
+      headers: [
+        { name: 'Content-Type', value: 'image/png' },
+        { name: 'Content-Disposition', value: 'inline' },
+        { name: 'Content-ID', value: '<image001.png@01DA0000.11112222>' },
+      ],
+      body: { attachmentId, size: 512 },
+    });
+    return ok({
+      id: 'm1',
+      threadId: 't1',
+      payload: {
+        mimeType: 'multipart/mixed',
+        headers: [{ name: 'Subject', value: 'FW: quarterly numbers' }],
+        parts: [
+          {
+            mimeType: 'multipart/related',
+            parts: [
+              {
+                mimeType: 'text/html',
+                body: { data: b64url('<img src="cid:image001.png@01DA0000.11112222">') },
+              },
+              logoPart('att-outer'),
+            ],
+          },
+          {
+            // The quoted original, carrying its own copy of the same logo.
+            mimeType: 'message/rfc822',
+            parts: [logoPart('att-inner')],
+          },
+        ],
+      },
+    });
+  }
+
+  it('forwards a chain that repeats a Content-ID instead of refusing to send', async () => {
+    api.messages.get.mockResolvedValue(chainRepeatingAContentId());
+    api.messages.attachments.get.mockResolvedValue(
+      ok({ size: 7, data: Buffer.from('PNGDATA').toString('base64url') }),
+    );
+    api.messages.send.mockResolvedValue(ok({ id: 'f1', threadId: 'tf', labelIds: ['SENT'] }));
+
+    const read = await getMessage({ messageId: 'm1' });
+    expect(read.attachments.filter(a => a.contentId === 'image001.png@01DA0000.11112222'))
+      .toHaveLength(2);
+
+    await forwardMessage({ messageId: 'm1', to: 'c@d.com' });
+
+    expect(api.messages.send).toHaveBeenCalledTimes(1);
+    const raw = Buffer.from(
+      api.messages.send.mock.calls[0][0].requestBody.raw as string,
+      'base64url',
+    ).toString('utf8');
+    // Exactly one copy rides along, under the id the forwarded HTML references.
+    const cidHeaders = raw.match(/Content-ID: <image001\.png@01DA0000\.11112222>/g) ?? [];
+    expect(cidHeaders).toHaveLength(1);
+  });
+
 });
