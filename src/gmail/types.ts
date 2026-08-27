@@ -204,6 +204,17 @@ export interface Attachment {
   content: Buffer;
 }
 
+/**
+ * An image embedded in the HTML body rather than listed as a file.
+ *
+ * `contentId` is what an `<img src="cid:...">` in the body refers to. It is
+ * derived from the file's basename so the composing model can predict it
+ * without a round trip.
+ */
+export interface InlineImage extends Attachment {
+  contentId: string;
+}
+
 /** The account's Gmail sendAs settings (display name, signature, reply-to). */
 export interface SendAsProfile {
   email: string;

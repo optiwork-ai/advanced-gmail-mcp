@@ -9,6 +9,7 @@ import {
   buildForwardBlock,
   buildMimeMessage,
   buildQuoteBlock,
+  contentIdForFilename,
   encodeHeaderValue,
   escapeHtml,
   foldHeader,
@@ -16,6 +17,7 @@ import {
   formatGmailDate,
   htmlToText,
   loadAttachment,
+  loadInlineImage,
   MAX_ENCODED_MESSAGE_BYTES,
   MAX_TOTAL_ATTACHMENT_BYTES,
   mimeTypeForFilename,
@@ -950,5 +952,211 @@ describe('loadAttachment', () => {
     expect(att.filename).toBe('quote.csv');
     expect(att.mimeType).toBe('text/csv');
     expect(att.content.toString()).toBe('a,b\n1,2\n');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Inline images — multipart/related (Unit E)
+// ---------------------------------------------------------------------------
+
+describe('contentIdForFilename', () => {
+  it('is the basename, so the caller can predict the reference', () => {
+    expect(contentIdForFilename('/tmp/pics/logo.png')).toBe('logo.png');
+  });
+
+  it('folds characters that would break a cid: reference', () => {
+    expect(contentIdForFilename('/tmp/my logo (final).png')).toBe('my_logo__final_.png');
+  });
+
+  it('never yields a leading dot or an empty token', () => {
+    expect(contentIdForFilename('/tmp/.hidden')).toBe('hidden');
+    expect(contentIdForFilename('/tmp/...')).toBe('inline');
+  });
+});
+
+describe('loadInlineImage', () => {
+  const created: string[] = [];
+
+  afterEach(() => {
+    for (const f of created.splice(0)) {
+      try { fs.rmSync(f, { force: true }); } catch { /* ignore */ }
+    }
+  });
+
+  it('loads the file and derives the cid from its name', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gmail-mcp-inline-'));
+    const full = path.join(dir, 'logo.png');
+    fs.writeFileSync(full, 'PNGDATA');
+    created.push(full);
+
+    const image = await loadInlineImage(full);
+
+    expect(image).toMatchObject({
+      filename: 'logo.png',
+      mimeType: 'image/png',
+      contentId: 'logo.png',
+    });
+    expect(image.content.toString()).toBe('PNGDATA');
+  });
+
+  it('applies the same absolute-path rule as an attachment', async () => {
+    await expect(loadInlineImage('relative/logo.png')).rejects.toThrow(
+      /Attachment path must be absolute/,
+    );
+  });
+});
+
+describe('buildMimeMessage — inline images', () => {
+  const image = (name = 'logo.png', bytes = 'PNGDATA') => ({
+    filename: name,
+    mimeType: 'image/png',
+    content: Buffer.from(bytes),
+    contentId: contentIdForFilename(name),
+  });
+
+  it('wraps the alternative in a multipart/related naming it as the root', () => {
+    const raw = decode(
+      buildMimeMessage({
+        to: 'a@b.com',
+        subject: 'Hi',
+        body: '<p>Look: <img src="cid:logo.png"></p>',
+        is_html: true,
+        inline_images: [image()],
+      }).rawBase64Url,
+    );
+
+    expect(raw).toMatch(
+      /Content-Type: multipart\/related; type="multipart\/alternative"; boundary="[^"]+"/,
+    );
+    expect(raw).toContain('Content-Type: multipart/alternative; boundary="');
+    expect(raw).toContain('Content-Type: text/plain; charset="UTF-8"');
+    expect(raw).toContain('Content-Type: text/html; charset="UTF-8"');
+    // No attachments, so nothing wraps the related.
+    expect(raw).not.toContain('multipart/mixed');
+  });
+
+  it('gives the image an inline disposition and the Content-ID the body refers to', () => {
+    const raw = decode(
+      buildMimeMessage({
+        to: 'a@b.com',
+        subject: 'Hi',
+        body: '<img src="cid:logo.png">',
+        is_html: true,
+        inline_images: [image()],
+      }).rawBase64Url,
+    );
+
+    expect(raw).toContain('Content-Type: image/png; name="logo.png"');
+    expect(raw).toContain('Content-Disposition: inline; filename="logo.png"');
+    expect(raw).toContain('Content-ID: <logo.png>');
+    expect(raw).toContain('X-Attachment-Id: logo.png');
+    expect(raw).toContain(Buffer.from('PNGDATA').toString('base64'));
+  });
+
+  it('leaves an ordinary attachment attached, with no Content-ID', () => {
+    const raw = decode(
+      buildMimeMessage({
+        to: 'a@b.com',
+        subject: 'Hi',
+        body: 'x',
+        attachments: [{ filename: 'r.pdf', mimeType: 'application/pdf', content: Buffer.from('P') }],
+      }).rawBase64Url,
+    );
+
+    expect(raw).toContain('Content-Disposition: attachment; filename="r.pdf"');
+    expect(raw).not.toContain('Content-ID:');
+    expect(raw).not.toContain('X-Attachment-Id:');
+  });
+
+  it('nests related inside mixed when a message has both', () => {
+    const raw = decode(
+      buildMimeMessage({
+        to: 'a@b.com',
+        subject: 'Hi',
+        body: '<img src="cid:logo.png">',
+        is_html: true,
+        inline_images: [image()],
+        attachments: [{ filename: 'r.pdf', mimeType: 'application/pdf', content: Buffer.from('P') }],
+      }).rawBase64Url,
+    );
+
+    const mixed = raw.match(/Content-Type: multipart\/mixed; boundary="([^"]+)"/)?.[1] as string;
+    const related = raw.match(/Content-Type: multipart\/related; type="multipart\/alternative"; boundary="([^"]+)"/)?.[1] as string;
+    expect(mixed).toBeTruthy();
+    expect(related).toBeTruthy();
+    expect(mixed).not.toBe(related);
+
+    // The related opens inside the mixed, and the attachment sits outside it.
+    expect(raw.indexOf(`--${mixed}`)).toBeLessThan(raw.indexOf(`--${related}`));
+    expect(raw.indexOf(`--${related}--`)).toBeLessThan(
+      raw.indexOf('Content-Disposition: attachment; filename="r.pdf"'),
+    );
+    expect(raw.trimEnd().endsWith(`--${mixed}--`)).toBe(true);
+  });
+
+  it('refuses two images that would answer to the same cid', () => {
+    expect(() =>
+      buildMimeMessage({
+        to: 'a@b.com',
+        subject: 'Hi',
+        body: '<img src="cid:logo.png">',
+        is_html: true,
+        inline_images: [image('logo.png', 'ONE'), image('logo.png', 'TWO')],
+      }),
+    ).toThrow(/share the reference "cid:logo\.png"/);
+  });
+
+  it('counts inline images against the same 25MB budget as attachments', () => {
+    expect(() =>
+      buildMimeMessage({
+        to: 'a@b.com',
+        subject: 'Hi',
+        body: '<img src="cid:big.png">',
+        is_html: true,
+        inline_images: [
+          { filename: 'big.png', mimeType: 'image/png', content: Buffer.alloc(20 * 1000 * 1000), contentId: 'big.png' },
+        ],
+        attachments: [
+          { filename: 'b.bin', mimeType: 'application/octet-stream', content: Buffer.alloc(6 * 1000 * 1000) },
+        ],
+      }),
+    ).toThrow(/Attachments and inline images total 26\.0MB; Gmail's limit is 25MB/);
+  });
+
+  it('refuses plain_text_only with inline images rather than dropping them', () => {
+    expect(() =>
+      buildMimeMessage({
+        to: 'a@b.com',
+        subject: 'Hi',
+        body: 'x',
+        plain_text_only: true,
+        inline_images: [image()],
+      }),
+    ).toThrow(/plain_text_only.*cannot carry inline images/is);
+  });
+
+  it('builds exactly the pre-inline message when no images are supplied', () => {
+    const built = buildMimeMessage({ to: 'a@b.com', subject: 'Hi', body: 'x', inline_images: [] });
+    expect(decode(built.rawBase64Url)).toContain('Content-Type: multipart/alternative; boundary="');
+    expect(decode(built.rawBase64Url)).not.toContain('multipart/related');
+  });
+
+  it('keeps the boundary of the related distinct from the alternative it carries', () => {
+    const raw = decode(
+      buildMimeMessage({
+        to: 'a@b.com',
+        subject: 'Hi',
+        body: '<img src="cid:logo.png">',
+        is_html: true,
+        inline_images: [image()],
+      }).rawBase64Url,
+    );
+    const related = raw.match(/multipart\/related; type="multipart\/alternative"; boundary="([^"]+)"/)?.[1] as string;
+    const alternative = raw.match(/Content-Type: multipart\/alternative; boundary="([^"]+)"/)?.[1] as string;
+
+    expect(related).not.toBe(alternative);
+    // Both containers are closed exactly once.
+    expect(raw.split(`--${related}--`)).toHaveLength(2);
+    expect(raw.split(`--${alternative}--`)).toHaveLength(2);
   });
 });

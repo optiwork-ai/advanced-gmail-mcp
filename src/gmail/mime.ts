@@ -13,9 +13,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomBytes } from 'crypto';
-import type { Attachment } from './types.js';
+import type { Attachment, InlineImage } from './types.js';
 
-export type { Attachment };
+export type { Attachment, InlineImage };
 
 const CRLF = '\r\n';
 
@@ -86,6 +86,11 @@ export interface MimeOptions {
   /** Signature + quote/forward block, text flavour. Appended to the text part. */
   text_suffix?: string;
   attachments?: Attachment[];
+  /**
+   * Images embedded in the HTML body via `cid:` references. They ride in a
+   * `multipart/related` alongside the body rather than in the attachment list.
+   */
+  inline_images?: InlineImage[];
   /** Legacy single-part `text/plain` escape hatch (unsubscribe mailto path). */
   plain_text_only?: boolean;
   /** Undo composer hard-wrapping. Defaults to true when !is_html. */
@@ -706,6 +711,32 @@ export async function loadAttachment(filePath: string): Promise<Attachment> {
   };
 }
 
+/**
+ * The `cid:` token for an inline image, derived from its filename.
+ *
+ * The convention is deliberately dull and predictable: the file's basename,
+ * with anything outside `[A-Za-z0-9._-]` folded to `_`. A composing model that
+ * knows the path knows the reference — `/tmp/logo.png` is `cid:logo.png` — with
+ * no round trip and no server-invented identifier to look up. A Content-ID also
+ * has to survive being written into an href-shaped attribute, which is why the
+ * character set is narrow rather than "whatever the filesystem allowed".
+ */
+export function contentIdForFilename(filename: string): string {
+  const base = sanitizeFilename(path.basename(filename));
+  const cleaned = base.replace(/[^A-Za-z0-9._-]/g, '_').replace(/^\.+/, '');
+  return cleaned.length > 0 ? cleaned : 'inline';
+}
+
+/**
+ * Read an image from disk as an inline body part.
+ *
+ * Same limits and checks as `loadAttachment` — this only adds the Content-ID.
+ */
+export async function loadInlineImage(filePath: string): Promise<InlineImage> {
+  const attachment = await loadAttachment(filePath);
+  return { ...attachment, contentId: contentIdForFilename(attachment.filename) };
+}
+
 // ---------------------------------------------------------------------------
 // Message assembly
 // ---------------------------------------------------------------------------
@@ -764,22 +795,31 @@ function encodeExtValue(value: string): string {
   );
 }
 
-function attachmentPart(att: Attachment, boundary: string): string {
+/**
+ * One base64 media part.
+ *
+ * `contentId` switches it from a listed attachment to an inline body part: the
+ * disposition becomes `inline` and the part gains the Content-ID an
+ * `<img src="cid:...">` resolves against. Gmail also emits `X-Attachment-Id`
+ * on its own inline images, so this does too.
+ */
+function mediaPart(att: Attachment, boundary: string, contentId?: string): string {
   const filename = sanitizeFilename(att.filename);
   const mimeType = normalizeMimeType(att.mimeType);
+  const kind = contentId ? 'inline' : 'attachment';
 
   let contentType: string;
   let disposition: string;
   if (isAscii(filename)) {
     contentType = `Content-Type: ${mimeType}; name="${filename}"`;
-    disposition = `Content-Disposition: attachment; filename="${filename}"`;
+    disposition = `Content-Disposition: ${kind}; filename="${filename}"`;
   } else {
     // RFC 2231 for the disposition, RFC 2047 for the (display-only) name param.
     const fallback = filename.replace(/[^\x00-\x7F]/g, '_');
     const encoded = encodeExtValue(filename);
     contentType = `Content-Type: ${mimeType}; name="${encodeHeaderValue(filename)}"`;
     disposition =
-      `Content-Disposition: attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
+      `Content-Disposition: ${kind}; filename="${fallback}"; filename*=UTF-8''${encoded}`;
   }
 
   return [
@@ -787,9 +827,14 @@ function attachmentPart(att: Attachment, boundary: string): string {
     contentType,
     disposition,
     'Content-Transfer-Encoding: base64',
+    ...(contentId ? [`Content-ID: <${contentId}>`, `X-Attachment-Id: ${contentId}`] : []),
     '',
     base64Body(att.content),
   ].join(CRLF);
+}
+
+function attachmentPart(att: Attachment, boundary: string): string {
+  return mediaPart(att, boundary);
 }
 
 function buildAlternative(textBody: string, htmlBody: string): { boundary: string; content: string } {
@@ -815,13 +860,55 @@ function buildAlternative(textBody: string, htmlBody: string): { boundary: strin
   return { boundary, content };
 }
 
+/** A body section ready to be named by a Content-Type header. */
+interface BodySection {
+  /** The value of the Content-Type header that introduces `content`. */
+  contentType: string;
+  content: string;
+}
+
+/**
+ * Wrap the alternative and the inline images in a `multipart/related`.
+ *
+ * RFC 2387: the `type` parameter names the root part, which is the alternative
+ * — the images exist only to be resolved by `cid:` references inside it. A
+ * client that ignores related still shows the body; one that honours it shows
+ * the images in place.
+ */
+function buildRelated(
+  alternative: { boundary: string; content: string },
+  inline: InlineImage[],
+): BodySection {
+  const parts = inline.map(img => ({ img, rendered: base64Body(img.content) }));
+  const boundary = makeBoundary([alternative.content, ...parts.map(p => p.rendered)]);
+
+  const content = [
+    `--${boundary}`,
+    `Content-Type: multipart/alternative; boundary="${alternative.boundary}"`,
+    '',
+    alternative.content,
+    ...inline.map(img => mediaPart(img, boundary, img.contentId)),
+    `--${boundary}--`,
+  ].join(CRLF);
+
+  return {
+    contentType: `multipart/related; type="multipart/alternative"; boundary="${boundary}"`,
+    content,
+  };
+}
+
 /**
  * Assemble the outbound message.
  *
  * Body rules (review-outbound.md §B1b): normalize newlines; `is_html` selects
  * how `body` is interpreted, never the container; suffixes carry the signature
- * and the quote/forward block; the result is `multipart/alternative`, wrapped
- * in `multipart/mixed` when there are attachments.
+ * and the quote/forward block.
+ *
+ * The container is built from the inside out, exactly as Gmail builds it:
+ *
+ *     multipart/alternative                      body only
+ *     multipart/related [ alternative, images ]  with inline images
+ *     multipart/mixed   [ the above, files ]     with attachments
  */
 export function buildMimeMessage(opts: MimeOptions): BuiltMessage {
   const bodySource = normalizeNewlines(opts.body ?? '');
@@ -860,6 +947,19 @@ export function buildMimeMessage(opts: MimeOptions): BuiltMessage {
   headers.push('MIME-Version: 1.0');
 
   const attachments = opts.attachments ?? [];
+  const inline = opts.inline_images ?? [];
+
+  const cids = new Set<string>();
+  for (const image of inline) {
+    if (cids.has(image.contentId)) {
+      throw new Error(
+        `Two inline images share the reference "cid:${image.contentId}". The cid is the `
+        + 'file\'s name, so two files with the same name cannot be told apart in the body — '
+        + 'rename one and reference it by its new name.',
+      );
+    }
+    cids.add(image.contentId);
+  }
 
   if (opts.plain_text_only === true) {
     // A single-part text/plain message has nowhere to put an attachment. This
@@ -871,37 +971,57 @@ export function buildMimeMessage(opts: MimeOptions): BuiltMessage {
         + `attachments (${attachments.length} supplied). Drop plain_text_only, or send no files.`,
       );
     }
+    if (inline.length > 0) {
+      throw new Error(
+        'plain_text_only builds a single-part text/plain message and cannot carry '
+        + `inline images (${inline.length} supplied). An inline image only means something `
+        + 'in an HTML body.',
+      );
+    }
     // Byte-identical to the legacy single-part message (unsubscribe mailto path).
     headers.push('Content-Type: text/plain; charset="UTF-8"');
     return finalize(`${headers.join(CRLF)}${CRLF}${CRLF}${textBody}`, attachments);
   }
 
-  const alternative = buildAlternative(textBody, htmlBody);
-
-  if (attachments.length === 0) {
-    headers.push(`Content-Type: multipart/alternative; boundary="${alternative.boundary}"`);
-    return finalize(`${headers.join(CRLF)}${CRLF}${CRLF}${alternative.content}`, attachments);
-  }
-
-  const totalRaw = attachments.reduce((sum, a) => sum + a.content.length, 0);
+  // Inline images count against the same 25MB budget as attachments: Gmail
+  // does not care which container a file rode in.
+  const media = [...inline, ...attachments];
+  const totalRaw = media.reduce((sum, a) => sum + a.content.length, 0);
   if (totalRaw > MAX_TOTAL_ATTACHMENT_BYTES) {
+    const label = inline.length > 0 ? 'Attachments and inline images total' : 'Attachments total';
     throw new Error(
-      `Attachments total ${mb(totalRaw)}MB; Gmail's limit is 25MB of files per message.`,
+      `${label} ${mb(totalRaw)}MB; Gmail's limit is 25MB of files per message.`,
     );
   }
 
-  const outer = makeBoundary([alternative.content]);
+  const alternative = buildAlternative(textBody, htmlBody);
+
+  // Inline images wrap the alternative in a related; attachments then wrap
+  // whichever of the two came out of that in a mixed.
+  const body: BodySection = inline.length > 0
+    ? buildRelated(alternative, inline)
+    : {
+        contentType: `multipart/alternative; boundary="${alternative.boundary}"`,
+        content: alternative.content,
+      };
+
+  if (attachments.length === 0) {
+    headers.push(`Content-Type: ${body.contentType}`);
+    return finalize(`${headers.join(CRLF)}${CRLF}${CRLF}${body.content}`, media);
+  }
+
+  const outer = makeBoundary([body.content]);
   const sections = [
     `--${outer}`,
-    `Content-Type: multipart/alternative; boundary="${alternative.boundary}"`,
+    `Content-Type: ${body.contentType}`,
     '',
-    alternative.content,
+    body.content,
     ...attachments.map(att => attachmentPart(att, outer)),
     `--${outer}--`,
   ];
   headers.push(`Content-Type: multipart/mixed; boundary="${outer}"`);
 
-  return finalize(`${headers.join(CRLF)}${CRLF}${CRLF}${sections.join(CRLF)}`, attachments);
+  return finalize(`${headers.join(CRLF)}${CRLF}${CRLF}${sections.join(CRLF)}`, media);
 }
 
 /**
