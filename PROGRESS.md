@@ -200,7 +200,81 @@ This is a same-model first pass and is NOT validation. W6's cold Fable pass
 should re-derive C1 and independently re-run the B10 gate at `915a8c0` rather
 than trusting this report.
 
-## Remaining — after W4
+## W5 — fix pass (2026-08-27)
 
-W5 fix pass on the confirmed findings (reflow gated on QUESTIONS item 15), then
-W6 cold validation.
+Every fix has a test that FAILED before it and PASSES after; the counts below
+are real vitest output. Baseline at `af3fe44` was 360 tests; HEAD is 413.
+
+- [x] **`a8d582e` — C1 SSRF (high).** `url-guard.ts` expands an IPv6 address to
+      its 16 bytes before judging it, so the hex spelling of an IPv4-mapped
+      address is recognized. Covers IPv4-mapped, IPv4-translated,
+      IPv4-compatible, NAT64 `64:ff9b::/32`, 6to4 `2002::/16` and Teredo; an
+      unparseable address is refused rather than assumed public (also closes the
+      residual surface W4 filed as P6). FAIL-before **17 failed / 61 passed**,
+      PASS-after **78 passed**. Five of the new cases run against the REAL
+      resolver — the stubbed one could not see what Node returns for a bracketed
+      literal, which is why the existing 53 tests missed it.
+- [x] **`54fe5cf` — C2 998-octet headers.** `encodeHeaderValue` splits a long
+      value into 45-byte chunks on codepoint boundaries and emits several
+      encoded-words, which `foldHeader` can then fold. FAIL-before **6 failed /
+      98 passed**, PASS-after **104 passed**. One W1 test changed meaning: it
+      asserted the joined encoded string survives a fold, which is the defect;
+      it now asserts each word survives intact and unfolding reproduces the
+      value. No baseline (`536a9be`) test touched.
+- [x] **`cdbba7f` — C4 size arithmetic.** All three ceilings and `mb()` are
+      decimal MB, so 25,000,000 bytes of attachments is actually usable and the
+      ceiling message no longer claims 34.2 exceeds 35. FAIL-before **3 failed /
+      103 passed** (including the reviewer's exact `expected 34.2 to be greater
+      than 35`), PASS-after **106 passed**.
+- [x] **`43d2867` — C5 autolink overrun.** The URL character class excludes `&`
+      and re-admits only `&amp;`, so an escaped quote or angle bracket ends the
+      link while a query-string ampersand does not. FAIL-before **3 failed /
+      107 passed**, PASS-after **110 passed**.
+- [x] **`8b91115` — C6 `plain_text_only` + attachments** is a refusal instead of
+      a silent drop. FAIL-before 1 failed, PASS-after **402 passed** (full suite).
+- [x] **`be87418` — C7/C8 `htmlToText`.** Quoted attribute values are consumed
+      whole, so a `>` inside one no longer ends the anchor tag; the anchor
+      placeholder token is random per call and NUL is stripped from the input,
+      so the source document cannot forge it. FAIL-before 2 failed (reproducing
+      W4's `b">label <http://q.com>` exactly), PASS-after **404 passed**.
+- [x] **`432446c` — P2 + P9.** An attachment's content type is reduced to a bare
+      `type/subtype` and must match a MIME token (falls back to
+      `application/octet-stream`); RFC 2231 ext-values also percent-encode
+      `' ! ( ) *`. FAIL-before 3 failed, PASS-after **407 passed**.
+- [x] **`e5b02f9` — P3 negative caching.** A failed sendAs lookup is cached for
+      60 seconds, not 50 minutes. FAIL-before 1 failed, PASS-after **409 passed**.
+- [x] **`8dd8c40` — P8 calendar range.** `create_calendar_event` refuses an
+      inverted or zero-length range before the API call, matching `get_freebusy`;
+      an all-day `end === start` stays legal (the end date is exclusive).
+      FAIL-before 3 failed, PASS-after **413 passed**.
+
+### NOT fixed by W5, and why
+
+- **C3 (reflow welds sign-off blocks)** — a design fork, filed by W4 as
+  QUESTIONS-FOR-FABLE item 15 and still unanswered. Both readings of B1c are
+  wrong and the recommended third rewrites the contract's stated join rule, so
+  it is not the fix pass's call. Nothing else was downstream of it.
+- **C2's ASCII sibling** — a single unbroken ASCII token longer than 998
+  characters (`to: 'x'.repeat(1200) + '@b.com'`) still emits an over-length
+  line. There is no legal way to fold an unbroken token; the alternatives are
+  truncation or rejection, both worse. Recorded, not fixed.
+- **P1, P4, P5, P6-residual, P7, P10** — see the W5 addendum in
+  `REVIEW-FINDINGS.md`. Each needs a live call, a design ruling, or machinery
+  out of proportion to the finding.
+
+### W5 verification
+
+- `npm run typecheck` clean. `npm test`: **10 files, 413 tests, all passing.**
+- `src/gmail/client.test.ts`, `src/gmail/acceptance.test.ts` and `src/log.test.ts`
+  are byte-unchanged by this pass — the B9-protected suites and the B10 gate were
+  not touched, loosened or re-run against a weakened assertion. The only test
+  assertion CHANGED (rather than added) anywhere is the one named under `54fe5cf`.
+- `git diff 536a9be..HEAD -- src/gmail/auth.ts` still empty; no
+  `accounts.json` / `credentials.json` / `tokens/` / `package.json` change; no new
+  deps; no push, deploy or `gh` write; no live API call of any kind; no AI
+  attribution.
+
+## Remaining — after W5
+
+W6 cold Fable validation. Read the W5 addendum at the end of
+`REVIEW-FINDINGS.md` alongside W4's findings.

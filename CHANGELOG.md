@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] — 2026-08-27
+
+### Fixed
+- **Unsubscribe SSRF: the URL guard judged IPv6 addresses by spelling.** `::ffff:7f00:1` is `::ffff:127.0.0.1` written in hex, and hex is what Node's resolver returns for a bracketed IPv4-mapped literal — so `https://[::ffff:127.0.0.1]/…` in a `List-Unsubscribe` header was allowed end to end. Addresses are now expanded to their 16 bytes before any judgement, and IPv4-mapped, IPv4-translated, IPv4-compatible, NAT64, 6to4 and Teredo forms are all covered.
+- **A long non-ASCII header could exceed the 998-octet line limit.** A 400-character accented subject produced a 1,097-octet `Subject:` line, because the whole value was emitted as one unsplittable RFC 2047 encoded-word. Long values now become several encoded-words, which fold normally.
+- **The advertised 25MB attachment allowance was unreachable.** The attachment budget was measured in MiB while the message ceiling was decimal MB, so a 25MB attachment died at the ceiling with "Assembled message is 34.2MB, over the 35MB ceiling". Every ceiling is now decimal MB, and the full 25MB fits.
+- **Autolinking ran through HTML entities.** `Visit "https://example.com" for details` produced a link whose href ended in `&quot` with a stray `;` outside it. A legitimate `&` in a query string still stays inside the link.
+- **`plain_text_only` silently discarded attachments** and skipped the size gate. It is now a refusal.
+- **`htmlToText`** no longer ends an anchor tag at a `>` inside a quoted attribute value, and its internal placeholder can no longer be forged by the source document.
+- **An attachment's content type is validated** as a MIME token instead of only being CR/LF-stripped, and non-ASCII filenames are fully percent-encoded per RFC 2231.
+- **A failed signature/display-name lookup is no longer cached for 50 minutes.** One transient error used to strip the signature and display name from every message sent for the rest of the window; a failure is now retried after a minute.
+- **`create_calendar_event` refuses an inverted or zero-length time range** before calling the API, the way `get_freebusy` already did.
+
 ## [1.4.0] — 2026-08-27
 
 ### Added
