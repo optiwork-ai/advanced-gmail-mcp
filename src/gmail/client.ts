@@ -20,6 +20,7 @@ import {
   sanitizeFilename,
 } from './mime.js';
 import { getSendAsProfile } from './settings.js';
+import { assertPublicHttpsUrl } from './url-guard.js';
 import type {
   Attachment,
   DraftPage,
@@ -734,6 +735,12 @@ export async function sendMessage(opts: {
 
   const sent = await dispatchSend(gmail, built);
 
+  log('info', 'send_email', {
+    account: resolved.alias,
+    message_id: sent.id || '',
+    thread_id: sent.threadId || '',
+  });
+
   return {
     id: sent.id || '',
     threadId: sent.threadId || '',
@@ -827,7 +834,10 @@ export async function trashMessage(opts: {
   messageId: string;
   account?: string;
 }): Promise<ModifyResult> {
-  const gmail = await getGmailClient(opts.account);
+  const resolved = resolveAccount(opts.account);
+  const gmail = await getGmailClient(resolved);
+
+  log('info', 'trash_email', { account: resolved.alias, message_id: opts.messageId });
 
   const response = await withRetry(() =>
     gmail.users.messages.trash({
@@ -1385,7 +1395,12 @@ interface ReplyOpts {
  */
 async function prepareReply(
   opts: ReplyOpts,
-): Promise<{ built: BuiltMessage; threadId: string | undefined; gmail: gmail_v1.Gmail }> {
+): Promise<{
+  built: BuiltMessage;
+  threadId: string | undefined;
+  gmail: gmail_v1.Gmail;
+  resolved: AccountConfig;
+}> {
   const resolved = resolveAccount(opts.account);
   const gmail = await getGmailClient(resolved);
 
@@ -1457,15 +1472,22 @@ async function prepareReply(
     block,
   });
 
-  return { built, threadId: original.data.threadId || undefined, gmail };
+  return { built, threadId: original.data.threadId || undefined, gmail, resolved };
 }
 
 /**
  * Send a reply to an existing message with proper threading headers.
  */
 export async function replyToMessage(opts: ReplyOpts): Promise<SendResult> {
-  const { built, threadId, gmail } = await prepareReply(opts);
+  const { built, threadId, gmail, resolved } = await prepareReply(opts);
   const sent = await dispatchSend(gmail, built, threadId);
+
+  log('info', 'reply_email', {
+    account: resolved.alias,
+    in_reply_to: opts.messageId,
+    message_id: sent.id || '',
+    thread_id: sent.threadId || '',
+  });
 
   return {
     id: sent.id || '',
@@ -1568,13 +1590,24 @@ export async function unsubscribeFromEmail(opts: {
   if (canOneClick) {
     for (const url of httpsUrls) {
       try {
-        const res = await fetch(url, {
+        // The URL comes from an attacker-controllable header. Validate scheme
+        // and resolved address before connecting, and never follow a redirect —
+        // a 302 to 127.0.0.1 would otherwise walk straight past the check.
+        const safeUrl = await assertPublicHttpsUrl(url);
+        const res = await fetch(safeUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: listUnsubPost,
+          redirect: 'error',
           signal: AbortSignal.timeout(10_000),
         });
         if (res.ok || res.status === 204) {
+          log('info', 'unsubscribe_https', {
+            account: resolved.alias,
+            message_id: opts.messageId,
+            host: safeUrl.host,
+            status: res.status,
+          });
           return {
             success: true,
             method: 'https',
@@ -1599,6 +1632,11 @@ export async function unsubscribeFromEmail(opts: {
       subject: mailto.subject,
       body: mailto.body,
       plain_text_only: true,
+    });
+
+    log('info', 'unsubscribe_mailto', {
+      account: resolved.alias,
+      message_id: opts.messageId,
     });
 
     await withRetry(() =>
@@ -1716,6 +1754,13 @@ export async function forwardMessage(opts: {
   });
 
   const sent = await dispatchSend(gmail, built);
+
+  log('info', 'forward_email', {
+    account: resolved.alias,
+    forwarded_message_id: opts.messageId,
+    message_id: sent.id || '',
+    attachments: attachments.length,
+  });
 
   return {
     id: sent.id || '',
@@ -2103,7 +2148,10 @@ export async function sendDraft(opts: {
   draftId: string;
   account?: string;
 }): Promise<SendResult> {
-  const gmail = await getGmailClient(opts.account);
+  const resolved = resolveAccount(opts.account);
+  const gmail = await getGmailClient(resolved);
+
+  log('info', 'send_draft', { account: resolved.alias, draft_id: opts.draftId });
 
   const response = await withRetry(() =>
     gmail.users.drafts.send({
