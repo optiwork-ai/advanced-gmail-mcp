@@ -710,9 +710,37 @@ function isAscii(s: string): boolean {
   return /^[\x00-\x7F]*$/.test(s);
 }
 
+/** RFC 2045 type/subtype, restricted to characters legal in a MIME token. */
+const MIME_TYPE_RE = /^[\w.+-]+\/[\w.+-]+$/;
+
+/**
+ * Reduce a caller- or API-supplied content type to a bare `type/subtype`.
+ *
+ * `forwardMessage` passes the original message's part type straight through, so
+ * this value is not always ours. CR/LF stripping alone left `text/plain X-Evil:
+ * 1; name="f"` — no new header line, but a corrupted parameter list. Anything
+ * that is not a clean token falls back to the safe default.
+ */
+function normalizeMimeType(raw: string | undefined): string {
+  const bare = sanitizeHeaderValue(raw ?? '').split(';')[0].trim().toLowerCase();
+  return MIME_TYPE_RE.test(bare) ? bare : 'application/octet-stream';
+}
+
+/**
+ * Percent-encode for an RFC 2231 ext-value. `encodeURIComponent` leaves
+ * `' ! ( ) *` unescaped; none of them is an attribute-char, and a literal `'`
+ * can confuse a parser splitting the value on its charset'language' delimiters.
+ */
+function encodeExtValue(value: string): string {
+  return encodeURIComponent(value).replace(
+    /['!()*]/g,
+    ch => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+}
+
 function attachmentPart(att: Attachment, boundary: string): string {
   const filename = sanitizeFilename(att.filename);
-  const mimeType = sanitizeHeaderValue(att.mimeType || 'application/octet-stream');
+  const mimeType = normalizeMimeType(att.mimeType);
 
   let contentType: string;
   let disposition: string;
@@ -722,7 +750,7 @@ function attachmentPart(att: Attachment, boundary: string): string {
   } else {
     // RFC 2231 for the disposition, RFC 2047 for the (display-only) name param.
     const fallback = filename.replace(/[^\x00-\x7F]/g, '_');
-    const encoded = encodeURIComponent(filename);
+    const encoded = encodeExtValue(filename);
     contentType = `Content-Type: ${mimeType}; name="${encodeHeaderValue(filename)}"`;
     disposition =
       `Content-Disposition: attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;

@@ -703,6 +703,55 @@ describe('buildMimeMessage', () => {
     expect(raw).toContain(`filename*=UTF-8''rapport-%C3%A9.pdf`);
   });
 
+  it("percent-encodes the RFC 2231 characters encodeURIComponent leaves alone", () => {
+    // encodeURIComponent leaves ' ! ( ) * unescaped. RFC 2231's ext-value
+    // requires anything outside attribute-char to be percent-encoded, and a
+    // literal ' in particular can confuse a parser splitting on the
+    // charset'language'value delimiters.
+    const raw = decode(
+      buildMimeMessage({
+        to: 'a@b.com',
+        subject: 'Hi',
+        body: 'x',
+        attachments: [
+          { filename: `o'brien (é)!*.pdf`, mimeType: 'application/pdf', content: Buffer.from('X') },
+        ],
+      }).rawBase64Url,
+    );
+    const extValue = raw.match(/filename\*=UTF-8''(\S+)/)?.[1] as string;
+    expect(extValue).not.toMatch(/['!()*]/);
+    expect(decodeURIComponent(extValue)).toBe(`o'brien (é)!*.pdf`);
+  });
+
+  it('refuses a mimeType that is not a MIME token rather than corrupting the part', () => {
+    const raw = decode(
+      buildMimeMessage({
+        to: 'a@b.com',
+        subject: 'Hi',
+        body: 'x',
+        attachments: [
+          { filename: 'ok.txt', mimeType: 'text/plain\r\nX-Evil: 1', content: Buffer.from('X') },
+        ],
+      }).rawBase64Url,
+    );
+    expect(raw).toContain('Content-Type: application/octet-stream; name="ok.txt"');
+    expect(raw).not.toContain('X-Evil');
+  });
+
+  it('keeps the type when a mimeType carries parameters', () => {
+    const raw = decode(
+      buildMimeMessage({
+        to: 'a@b.com',
+        subject: 'Hi',
+        body: 'x',
+        attachments: [
+          { filename: 'ok.txt', mimeType: 'text/plain; charset=utf-8', content: Buffer.from('X') },
+        ],
+      }).rawBase64Url,
+    );
+    expect(raw).toContain('Content-Type: text/plain; name="ok.txt"');
+  });
+
   it('rejects attachments totalling more than 25MB', () => {
     expect(() =>
       buildMimeMessage({
