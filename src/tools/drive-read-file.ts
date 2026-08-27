@@ -19,6 +19,30 @@ const GOOGLE_APPS_EXPORT: Record<string, string> = {
 };
 
 /**
+ * What each export silently loses.
+ *
+ * These were real data-loss cases returned with `contentNote: null`: a
+ * multi-tab workbook came back as its first sheet only, and a deck came back
+ * with its speaker notes and slide structure gone. Saying so is the fix; the
+ * export formats themselves are what the Drive API offers.
+ */
+const EXPORT_LIMITATIONS: Record<string, string> = {
+  'application/vnd.google-apps.spreadsheet':
+    'Drive\'s CSV export returns ONLY THE FIRST SHEET of a spreadsheet. If the workbook has '
+    + 'more tabs, their content is not in this response — open it in Sheets or export each '
+    + 'tab separately.',
+  'application/vnd.google-apps.presentation':
+    'The plain-text export of a presentation drops speaker notes and slide structure; only '
+    + 'the slide text is returned.',
+};
+
+/** Join the limitation note and the truncation note into one contentNote. */
+function composeNote(...parts: Array<string | null>): string | null {
+  const kept = parts.filter((p): p is string => !!p);
+  return kept.length > 0 ? kept.join(' ') : null;
+}
+
+/**
  * Decide whether a non-Workspace MIME type is safe to return as text.
  */
 function isTextMime(mimeType: string): boolean {
@@ -53,7 +77,11 @@ function capContent(text: string): { content: string; truncated: boolean } {
 export function registerReadDriveFile(server: McpServer): void {
   server.tool(
     'read_drive_file',
-    'Read a Google Drive file: returns metadata plus text content where possible. Read-only. Google Docs/Sheets/Slides are exported to plain text/CSV; other text files are read directly; binary/unknown types return metadata and a note (never raw bytes). Content is capped at ~1MB and truncation is flagged.',
+    'Read a Google Drive file: returns metadata plus text content where possible. Read-only. '
+    + 'Google Docs/Sheets/Slides are exported to plain text/CSV; other text files are read '
+    + 'directly; binary/unknown types return metadata and a note (never raw bytes). Content is '
+    + 'capped at ~1MB and truncation is flagged. Read contentNote before trusting the content: '
+    + 'a Sheets export returns ONLY the first sheet, and a Slides export drops speaker notes.',
     readDriveFileParams,
     async ({ file_id, account }) => {
       try {
@@ -86,11 +114,17 @@ export function registerReadDriveFile(server: McpServer): void {
                 { responseType: 'text' }
               )
             );
+            // Drive's export endpoint does not honour Range, so the bound here
+            // is capContent's: the export is fetched and then capped, and the
+            // truncation is always declared rather than left implicit.
             const { content, truncated } = capContent(String(resp.data ?? ''));
             result.content = content;
             result.truncated = truncated;
             result.exportedAs = exportMime;
-            if (truncated) result.contentNote = `Content truncated to ~${MAX_CONTENT_BYTES} bytes.`;
+            result.contentNote = composeNote(
+              EXPORT_LIMITATIONS[mimeType] ?? null,
+              truncated ? `Content truncated to ~${MAX_CONTENT_BYTES} bytes.` : null,
+            );
           }
         } else if (isTextMime(mimeType)) {
           // Bound the transfer with a Range header so an arbitrarily large

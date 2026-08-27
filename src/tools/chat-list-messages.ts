@@ -9,6 +9,15 @@ export const listChatMessagesParams = {
   account: z.string().optional().describe('Account alias or email address. Uses default account if not specified.'),
   filter: z.string().optional().describe('Optional Chat API filter, e.g. \'createTime > "2024-01-01T00:00:00Z"\'.'),
   max_results: z.number().optional().describe('Maximum number of messages to return (default: 500, max: 1000). Paginates automatically.'),
+  order_by: z
+    .string()
+    .optional()
+    .describe(
+      'Chat API ordering, default "createTime desc" (newest first). Pass "createTime asc" for '
+      + 'the oldest first. The Chat API itself defaults to ascending, which means max_results '
+      + 'would truncate a space to its OLDEST messages — the opposite of what capping a list '
+      + 'usually means — so this tool defaults to descending instead.',
+    ),
 };
 
 /**
@@ -25,13 +34,18 @@ function toSpaceParent(space: string): string {
 export function registerListChatMessages(server: McpServer): void {
   server.tool(
     'list_chat_messages',
-    'List messages in a Google Chat space. Read-only. Requires a space name/id. Returns message name, sender, createTime, and text.',
+    'List messages in a Google Chat space. Read-only. Requires a space name/id. Returns the raw '
+    + 'Chat message objects, newest first by default (order_by "createTime asc" for oldest '
+    + 'first).',
     listChatMessagesParams,
-    async ({ space, account, filter, max_results }) => {
+    async ({ space, account, filter, max_results, order_by }) => {
       try {
         const chat = await getChatClient(account ?? undefined);
         const parent = toSpaceParent(space);
         const maxResults = Math.min(max_results ?? 500, 1000);
+        // Newest-first: with the API's own ascending default, max_results would
+        // truncate the space to its oldest messages.
+        const orderBy = order_by || 'createTime desc';
 
         const messages: chat_v1.Schema$Message[] = [];
         let pageToken: string | undefined;
@@ -44,6 +58,7 @@ export function registerListChatMessages(server: McpServer): void {
               pageSize,
               pageToken,
               filter: filter || undefined,
+              orderBy,
             })
           );
 

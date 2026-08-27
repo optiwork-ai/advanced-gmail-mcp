@@ -24,8 +24,10 @@ function paragraphText(paragraph: docs_v1.Schema$Paragraph): string {
 /**
  * Recursively flatten a list of structural elements (paragraphs + tables)
  * into readable plain text. Table cells are joined with tabs, rows by newline.
+ *
+ * Exported for unit testing.
  */
-function flattenStructuralElements(elements: docs_v1.Schema$StructuralElement[] | undefined): string {
+export function flattenStructuralElements(elements: docs_v1.Schema$StructuralElement[] | undefined): string {
   if (!elements) return '';
   const out: string[] = [];
 
@@ -38,7 +40,11 @@ function flattenStructuralElements(elements: docs_v1.Schema$StructuralElement[] 
         for (const cell of row.tableCells || []) {
           cells.push(flattenStructuralElements(cell.content).trim());
         }
-        out.push(cells.join('\t'));
+        // The trailing newline is load-bearing: paragraphs carry their own
+        // (textRun.content ends in "\n") but table rows do not, and the parts
+        // are joined with ''. Without it a five-row table rendered as one
+        // unbroken line.
+        out.push(`${cells.join('\t')}\n`);
       }
     }
     // sectionBreak / tableOfContents contribute no body text.
