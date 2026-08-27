@@ -30,6 +30,15 @@ const PROFILE_CACHE = new Map<string, CachedProfile>();
 /** Mirrors the OAuth client cache TTL in client.ts. */
 const PROFILE_TTL_MS = 50 * 60 * 1000;
 
+/**
+ * A FAILED lookup is cached far more briefly. Caching a failure for the full 50
+ * minutes meant one transient error — a network blip, a momentary 5xx — stripped
+ * the display name and the signature from every message sent for the rest of the
+ * window, silently. A short negative TTL keeps a hard outage from re-querying on
+ * every single send without blinding the sender for an hour.
+ */
+const PROFILE_FAILURE_TTL_MS = 60 * 1000;
+
 /** Reset the cache. Test seam only. */
 export function clearSendAsCache(): void {
   PROFILE_CACHE.clear();
@@ -67,6 +76,7 @@ export async function getSendAsProfile(
   }
 
   let profile: SendAsProfile;
+  let failed = false;
   try {
     // Deliberately NOT inside withRetry — see the module comment.
     const response = await gmail.users.settings.sendAs.list({ userId: 'me' });
@@ -84,8 +94,10 @@ export async function getSendAsProfile(
       ?? (err as { response?: { status?: number } })?.response?.status;
     log('warn', 'sendas_unavailable', { account: account.alias, status });
     profile = emptyProfile(account.email);
+    failed = true;
   }
 
-  PROFILE_CACHE.set(key, { profile, expiresAt: Date.now() + PROFILE_TTL_MS });
+  const ttl = failed ? PROFILE_FAILURE_TTL_MS : PROFILE_TTL_MS;
+  PROFILE_CACHE.set(key, { profile, expiresAt: Date.now() + ttl });
   return profile;
 }

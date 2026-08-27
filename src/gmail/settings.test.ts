@@ -91,6 +91,34 @@ describe('getSendAsProfile', () => {
     });
   });
 
+  it('does not cache a FAILED lookup for the full success TTL', async () => {
+    // A single network blip used to strip the display name and the signature
+    // from every message sent for the next 50 minutes, silently.
+    vi.useFakeTimers();
+    const list = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('transient 503'))
+      .mockResolvedValue({
+        data: { sendAs: [{ sendAsEmail: account.email, displayName: 'Steve', isDefault: true }] },
+      });
+    const gmail = stubGmail(list);
+
+    expect((await getSendAsProfile(account, gmail)).displayName).toBe('');
+    vi.advanceTimersByTime(2 * 60 * 1000);
+    expect((await getSendAsProfile(account, gmail)).displayName).toBe('Steve');
+    expect(list).toHaveBeenCalledTimes(2);
+  });
+
+  it('still caches a failure briefly so a hard outage does not retry every send', async () => {
+    vi.useFakeTimers();
+    const list = vi.fn().mockRejectedValue(new Error('down'));
+    const gmail = stubGmail(list);
+    await getSendAsProfile(account, gmail);
+    vi.advanceTimersByTime(5 * 1000);
+    await getSendAsProfile(account, gmail);
+    expect(list).toHaveBeenCalledTimes(1);
+  });
+
   it('returns an empty profile when the account has no sendAs entries', async () => {
     const profile = await getSendAsProfile(account, stubGmail(ok([])));
     expect(profile).toEqual({
