@@ -6,8 +6,9 @@ A Gmail [MCP server](https://modelcontextprotocol.io) for [Claude Code](https://
 
 ## Features
 
-- **42 tools** spanning Gmail (read, compose, draft management, modify, attachments, thread and label management), Google Calendar, and read-only Google Chat, Drive, and Docs — see the [Tools](#tools) table
-- **Gmail-native outbound mail** — everything you send goes out as `multipart/alternative` (HTML plus a plain-text alternative), with your account's Gmail signature, quoted history on replies, and a proper `Name <address>` sender. Attachments supported on send, draft and reply; forwards re-attach the original's files
+- **44 tools** spanning Gmail (read, compose, draft management, modify, attachments, mailbox-change watching, thread and label management), Google Calendar, and read-only Google Chat, Drive, and Docs — see the [Tools](#tools) table
+- **Gmail-native outbound mail** — everything you send goes out as `multipart/alternative` (HTML plus a plain-text alternative), with your account's Gmail signature, quoted history on replies, and a proper `Name <address>` sender. Attachments supported on send, draft and reply; images can be embedded in the body with `inline_images` and referenced as `cid:filename`; forwards re-attach the original's files and keep its embedded images embedded
+- **Watch for new mail without polling the whole inbox** — `get_history_baseline` hands you a cursor, `get_mail_changes` tells you what arrived, was deleted or was relabelled since it. Stateless: you keep the cursor
 - **Multi-account** support with simple aliases
 - **OAuth2** authentication with interactive CLI flow
 - **Token auto-refresh** — re-authenticates transparently
@@ -120,8 +121,10 @@ Then use `/email` or `/checkemail` in Claude Code.
 | `read_email` | Read full email by ID |
 | `get_thread` | Get full thread with all messages, bodies and attachment metadata |
 | `get_labels` | List all labels (`include_counts` for message counts) |
-| `get_attachment` | Fetch an attachment: writes it to `save_dir`, or returns base64 for files up to 1MB |
-| `send_email` | Send a new email (Gmail-native HTML + text, signature, attachments) |
+| `get_history_baseline` | Get the mailbox's current change cursor (`historyId`) — the starting point for watching for new mail |
+| `get_mail_changes` | What arrived / was deleted / was relabelled since a cursor you supply, plus the next cursor. No server-side state |
+| `get_attachment` | Fetch an attachment — including an image embedded in the body: writes it to `save_dir`, or returns base64 for files up to 1MB |
+| `send_email` | Send a new email (Gmail-native HTML + text, signature, attachments, `inline_images` embedded via `cid:`) |
 | `draft_email` | Create a draft (same composition as `send_email`) |
 | `reply_email` | Reply with proper threading, `Reply-To` handling and quoted history |
 | `draft_reply` | Draft a reply (review in Gmail before sending) |
@@ -130,7 +133,7 @@ Then use `/email` or `/checkemail` in Claude Code.
 | `read_draft` | Read a draft's full content by ID |
 | `update_draft` | Replace a draft's contents (same composition as `draft_email`) |
 | `delete_draft` | Permanently delete a draft |
-| `forward_email` | Forward an email to new recipients, re-attaching the original's attachments |
+| `forward_email` | Forward an email to new recipients, re-attaching the original's attachments and keeping its embedded images embedded |
 | `archive_email` | Archive (remove INBOX label) |
 | `label_email` | Add/remove labels |
 | `trash_email` | Move one message to trash |

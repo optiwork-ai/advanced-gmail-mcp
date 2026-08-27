@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] — 2026-08-27
+
+### Added
+- **Mail-arrival watching (2 tools)**, bringing the roster to 44:
+  - `get_history_baseline` — the mailbox's current change cursor (`historyId`), plus the address and totals. One cheap call.
+  - `get_mail_changes` — everything that arrived, was deleted or was relabelled since a cursor you supply, with the arrivals carrying From/Subject/Date. Optional filters by change kind and label; `include_summaries: false` turns the whole thing into one API call.
+  - There is **no server-side state**: the caller keeps the cursor between polls, so any number of sessions, agents or scheduled jobs can watch the same mailbox without interfering.
+  - **An expired cursor is reported as a resync, not as an error.** Gmail keeps roughly a week of history and answers 404 beyond it; the message says to fetch a fresh baseline and treat the gap as a full resync rather than as "no new mail".
+  - **The cursor is not advanced while pages remain.** Gmail's response carries the mailbox's *current* cursor, not the end of the page, so storing it mid-pagination would skip everything unread. `complete` is false until the last page, and the note says to keep the old cursor until then.
+  - Arrivals are fetched up to 100 per call; beyond that they come back as ids and labels with a note saying so, rather than as a silent fan-out of hundreds of round trips.
+- **Inline images: `inline_images` on `send_email`, `draft_email`, `reply_email`, `draft_reply` and `update_draft`.** Absolute paths to images that live *in* the body instead of hanging off it. The message becomes `multipart/related` (nested inside `multipart/mixed` when there are attachments too), exactly as Gmail builds it.
+  - The reference is the file's own name — `/home/me/logo.png` is `cid:logo.png` — so a composing model can write `<img src="cid:logo.png">` without a round trip. Two files that would answer to the same reference are refused rather than one silently shadowing the other.
+  - Inline images count against the same 25MB budget as attachments, and `plain_text_only` refuses them for the same reason it refuses attachments.
+
+### Fixed
+- **Embedded images were invisible on the read side.** Attachment listing required a filename, and a pasted or `cid:`-referenced image usually has none — so `read_email` and `get_thread` reported no attachments while the body plainly referenced pictures, and `get_attachment` could not fetch one. Any downloadable part identifying itself as a file *or* an embedded image (filename, or Content-ID) is now listed, marked with `inline` and `contentId`. A large text body part that Gmail offloads is not affected: it has no Content-ID, so it stays the body.
+- **`forward_email` keeps embedded images embedded.** Now that they are listed, they are re-attached as inline parts carrying their original Content-ID, which is what the forwarded HTML still references — instead of becoming a broken image plus a stray file.
+
 ## [1.4.1] — 2026-08-27
 
 ### Fixed

@@ -22,9 +22,11 @@ Before using any tool, run `ToolSearch` with query `+gmail` to load them.
 | `read_email` | Read full email by ID (message_id, account) |
 | `get_thread` | Get full thread by ID (thread_id, account) |
 | `get_labels` | List all labels (account, include_counts?) |
-| `send_email` | Send new email (to, subject, body, account) |
-| `draft_email` | Create draft (to, subject, body, account) |
-| `reply_email` | Reply to email (message_id, body, account) |
+| `get_history_baseline` | Current mailbox change cursor (account) — store the `historyId` yourself |
+| `get_mail_changes` | What changed since a cursor (history_id, account, history_types?, label_id?, max_results?, page_token?, include_summaries?) — only store the returned `historyId` when `complete` is true |
+| `send_email` | Send new email (to, subject, body, account, attachments?, inline_images?) — `inline_images` needs `is_html: true` and `<img src="cid:FILENAME">` |
+| `draft_email` | Create draft (to, subject, body, account, attachments?, inline_images?) |
+| `reply_email` | Reply to email (message_id, body, account, attachments?, inline_images?) |
 | `draft_reply` | Draft a reply (review in Gmail before sending) |
 | `send_draft` | Send an existing draft by ID |
 | `archive_email` | Archive email (message_id, account) |
@@ -36,7 +38,7 @@ Before using any tool, run `ToolSearch` with query `+gmail` to load them.
 | `unsubscribe_email` | Process `List-Unsubscribe` header (one-click HTTPS or mailto) |
 | `mark_read` | Remove UNREAD label (message_id, account) |
 | `mark_unread` | Add UNREAD label (message_id, account) |
-| `get_attachment` | Fetch an attachment (message_id, attachment_id, account, save_dir?) — pass `save_dir` to write it to disk; inline base64 is capped at 1MB |
+| `get_attachment` | Fetch an attachment, embedded body images included (message_id, attachment_id, account, save_dir?) — pass `save_dir` to write it to disk; inline base64 is capped at 1MB |
 | `list_drafts` | List drafts with id + headers (account, max_results, page_token) — returns `{drafts, nextPageToken}` |
 | `read_draft` | Read a draft's content by ID (draft_id, account) |
 | `update_draft` | Replace a draft's contents (draft_id + the same params as `draft_email`) — Gmail REPLACES, so resend every field |
