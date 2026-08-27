@@ -8,6 +8,7 @@ import {
   attachmentsParam,
   includeQuoteParam,
   includeSignatureParam,
+  inlineImagesParam,
 } from './shared-params.js';
 
 export const replyEmailParams = {
@@ -21,6 +22,7 @@ export const replyEmailParams = {
   include_signature: includeSignatureParam,
   include_quote: includeQuoteParam,
   attachments: attachmentsParam,
+  inline_images: inlineImagesParam,
 };
 
 export function registerReplyEmail(server: McpServer): void {
@@ -30,7 +32,7 @@ export function registerReplyEmail(server: McpServer): void {
     + "References, threadId) and honours the original's Reply-To. Supports reply-all. "
     + GMAIL_NATIVE_CLAUSE,
     replyEmailParams,
-    async ({ message_id, body, account, is_html, reply_all, cc, bcc, include_signature, include_quote, attachments }) => {
+    async ({ message_id, body, account, is_html, reply_all, cc, bcc, include_signature, include_quote, attachments, inline_images }) => {
       try {
         const result = await replyToMessage({
           messageId: message_id,
@@ -43,6 +45,7 @@ export function registerReplyEmail(server: McpServer): void {
           include_signature: include_signature ?? undefined,
           include_quote: include_quote ?? undefined,
           attachments: attachments ?? undefined,
+          inline_images: inline_images ?? undefined,
         });
 
         return {

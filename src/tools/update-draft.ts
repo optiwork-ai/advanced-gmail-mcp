@@ -7,6 +7,7 @@ import {
   IS_HTML_DESCRIPTION,
   attachmentsParam,
   includeSignatureParam,
+  inlineImagesParam,
 } from './shared-params.js';
 
 export const updateDraftParams = {
@@ -20,6 +21,7 @@ export const updateDraftParams = {
   is_html: z.boolean().optional().describe(IS_HTML_DESCRIPTION),
   include_signature: includeSignatureParam,
   attachments: attachmentsParam,
+  inline_images: inlineImagesParam,
 };
 
 export function registerUpdateDraft(server: McpServer): void {
@@ -30,7 +32,7 @@ export function registerUpdateDraft(server: McpServer): void {
     + 'rewriting, or anything you omit is lost. The draft keeps its id and stays attached to its '
     + `thread. Returns the draft id and message info. ${GMAIL_NATIVE_CLAUSE}`,
     updateDraftParams,
-    async ({ draft_id, to, subject, body, account, cc, bcc, is_html, include_signature, attachments }) => {
+    async ({ draft_id, to, subject, body, account, cc, bcc, is_html, include_signature, attachments, inline_images }) => {
       try {
         const result = await updateDraft({
           draftId: draft_id,
@@ -43,6 +45,7 @@ export function registerUpdateDraft(server: McpServer): void {
           is_html: is_html ?? undefined,
           include_signature: include_signature ?? undefined,
           attachments: attachments ?? undefined,
+          inline_images: inline_images ?? undefined,
         });
 
         return {

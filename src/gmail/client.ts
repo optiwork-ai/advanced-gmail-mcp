@@ -17,6 +17,7 @@ import {
   formatFromHeader,
   htmlToText,
   loadAttachment,
+  loadInlineImage,
   sanitizeFilename,
 } from './mime.js';
 import { getSendAsProfile } from './settings.js';
@@ -27,6 +28,7 @@ import type {
   EmailSummary,
   HistoryBaseline,
   HistoryMessageRef,
+  InlineImage,
   MailChanges,
   EmailFull,
   EmailHeadersOnly,
@@ -370,6 +372,8 @@ interface OutboundOptions {
   include_signature?: boolean;
   /** Absolute paths, loaded from disk. */
   attachment_paths?: string[];
+  /** Absolute paths to images embedded in the body as `cid:` references. */
+  inline_image_paths?: string[];
   /** Already-loaded attachments (forwarded originals). */
   attachments?: Attachment[];
   /** Quoted history or forwarded-message block, appended after the signature. */
@@ -398,6 +402,11 @@ async function composeOutbound(opts: OutboundOptions): Promise<BuiltMessage> {
     attachments.push(await loadAttachment(filePath));
   }
 
+  const inlineImages: InlineImage[] = [];
+  for (const filePath of opts.inline_image_paths ?? []) {
+    inlineImages.push(await loadInlineImage(filePath));
+  }
+
   return buildMimeMessage({
     from: formatFromHeader(profile.displayName, opts.resolved.email),
     to: opts.to,
@@ -412,6 +421,7 @@ async function composeOutbound(opts: OutboundOptions): Promise<BuiltMessage> {
     html_suffix: signature.html + (opts.block?.html ?? ''),
     text_suffix: signature.text + (opts.block?.text ?? ''),
     attachments: attachments.length > 0 ? attachments : undefined,
+    inline_images: inlineImages.length > 0 ? inlineImages : undefined,
   });
 }
 
@@ -1009,6 +1019,7 @@ export async function sendMessage(opts: {
   is_html?: boolean;
   include_signature?: boolean;
   attachments?: string[];
+  inline_images?: string[];
 }): Promise<SendResult> {
   const resolved = resolveAccount(opts.account);
   const gmail = await getGmailClient(resolved);
@@ -1024,6 +1035,7 @@ export async function sendMessage(opts: {
     is_html: opts.is_html,
     include_signature: opts.include_signature,
     attachment_paths: opts.attachments,
+    inline_image_paths: opts.inline_images,
   });
 
   const sent = await dispatchSend(gmail, built);
@@ -1054,6 +1066,7 @@ export async function createDraft(opts: {
   is_html?: boolean;
   include_signature?: boolean;
   attachments?: string[];
+  inline_images?: string[];
 }): Promise<DraftResult> {
   const resolved = resolveAccount(opts.account);
   const gmail = await getGmailClient(resolved);
@@ -1069,6 +1082,7 @@ export async function createDraft(opts: {
     is_html: opts.is_html,
     include_signature: opts.include_signature,
     attachment_paths: opts.attachments,
+    inline_image_paths: opts.inline_images,
   });
 
   const draft = await dispatchDraft(gmail, built);
@@ -1679,6 +1693,7 @@ interface ReplyOpts {
   include_signature?: boolean;
   include_quote?: boolean;
   attachments?: string[];
+  inline_images?: string[];
 }
 
 /**
@@ -1762,6 +1777,7 @@ async function prepareReply(
     references: buildReferences(originalReferences, originalMessageId),
     include_signature: opts.include_signature,
     attachment_paths: opts.attachments,
+    inline_image_paths: opts.inline_images,
     block,
   });
 
@@ -2367,6 +2383,7 @@ export async function updateDraft(opts: {
   is_html?: boolean;
   include_signature?: boolean;
   attachments?: string[];
+  inline_images?: string[];
 }): Promise<DraftResult> {
   const resolved = resolveAccount(opts.account);
   const gmail = await getGmailClient(resolved);
@@ -2382,6 +2399,7 @@ export async function updateDraft(opts: {
     is_html: opts.is_html,
     include_signature: opts.include_signature,
     attachment_paths: opts.attachments,
+    inline_image_paths: opts.inline_images,
   });
 
   // The existing draft's threadId must be preserved or Gmail detaches a reply

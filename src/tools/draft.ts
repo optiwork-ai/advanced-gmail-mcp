@@ -7,6 +7,7 @@ import {
   IS_HTML_DESCRIPTION,
   attachmentsParam,
   includeSignatureParam,
+  inlineImagesParam,
 } from './shared-params.js';
 
 export const draftEmailParams = {
@@ -19,6 +20,7 @@ export const draftEmailParams = {
   is_html: z.boolean().optional().describe(IS_HTML_DESCRIPTION),
   include_signature: includeSignatureParam,
   attachments: attachmentsParam,
+  inline_images: inlineImagesParam,
 };
 
 export function registerDraftEmail(server: McpServer): void {
@@ -26,7 +28,7 @@ export function registerDraftEmail(server: McpServer): void {
     'draft_email',
     `Create a draft email. Returns the draft ID and message info. ${GMAIL_NATIVE_CLAUSE}`,
     draftEmailParams,
-    async ({ to, subject, body, account, cc, bcc, is_html, include_signature, attachments }) => {
+    async ({ to, subject, body, account, cc, bcc, is_html, include_signature, attachments, inline_images }) => {
       try {
         const result = await createDraft({
           to,
@@ -38,6 +40,7 @@ export function registerDraftEmail(server: McpServer): void {
           is_html: is_html ?? undefined,
           include_signature: include_signature ?? undefined,
           attachments: attachments ?? undefined,
+          inline_images: inline_images ?? undefined,
         });
 
         return {

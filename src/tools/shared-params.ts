@@ -35,6 +35,23 @@ export const attachmentsParam = z
   .optional()
   .describe('Absolute file paths to attach. 25MB total.');
 
+/**
+ * The cid convention is stated in full here because it is the only way a model
+ * can write a working `<img>` tag on the first try: the reference is the file's
+ * own name, not a server-minted identifier it would have to be told.
+ */
+export const inlineImagesParam = z
+  .array(z.string())
+  .optional()
+  .describe(
+    'Absolute file paths of images to embed IN the body rather than attach. Reference each '
+    + 'one from the HTML as <img src="cid:FILENAME"> where FILENAME is the file\'s name with '
+    + 'its extension — /home/me/logo.png is cid:logo.png. Characters outside letters, digits, '
+    + 'dot, dash and underscore become underscores, so prefer simple filenames, and no two '
+    + 'images may share a name. Requires is_html: true — a cid: reference means nothing in a '
+    + 'plain-text body. Counts against the same 25MB total as attachments.',
+  );
+
 export const includeQuoteParam = z
   .boolean()
   .optional()

@@ -69,6 +69,9 @@ const {
   getMailChanges,
   getMessage,
   getThread,
+  createDraft,
+  replyToMessage,
+  sendMessage,
   listDrafts,
   listLabels,
   listMessages,
@@ -1412,5 +1415,127 @@ describe('getMailChanges', () => {
 
     expect(changes.historyId).toBe('100');
     expect(changes.complete).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// inline_images end to end through the composing paths (Unit E)
+// ---------------------------------------------------------------------------
+
+describe('inline_images wiring', () => {
+  const created: string[] = [];
+
+  async function tmpImage(name: string, bytes = 'PNGDATA'): Promise<string> {
+    const { mkdtempSync, writeFileSync } = await import('fs');
+    const { tmpdir } = await import('os');
+    const { join } = await import('path');
+    const dir = mkdtempSync(join(tmpdir(), 'gmail-inline-'));
+    const full = join(dir, name);
+    writeFileSync(full, bytes);
+    created.push(full);
+    return full;
+  }
+
+  function sentRaw(): string {
+    const raw = api.messages.send.mock.calls[0][0].requestBody.raw as string;
+    return Buffer.from(raw, 'base64url').toString('utf8');
+  }
+
+  it('send_email embeds the image and references it by cid', async () => {
+    const file = await tmpImage('logo.png');
+    api.messages.send.mockResolvedValue(ok({ id: 'sent1', threadId: 't1', labelIds: ['SENT'] }));
+
+    await sendMessage({
+      to: 'a@b.com',
+      subject: 'Hi',
+      body: '<p><img src="cid:logo.png"></p>',
+      is_html: true,
+      inline_images: [file],
+    });
+
+    const raw = sentRaw();
+    expect(raw).toContain('multipart/related; type="multipart/alternative"');
+    expect(raw).toContain('Content-ID: <logo.png>');
+    expect(raw).toContain('Content-Disposition: inline; filename="logo.png"');
+    expect(raw).toContain(Buffer.from('PNGDATA').toString('base64'));
+  });
+
+  it('send_email without inline images is unchanged: no related container', async () => {
+    api.messages.send.mockResolvedValue(ok({ id: 'sent1', threadId: 't1', labelIds: ['SENT'] }));
+
+    await sendMessage({ to: 'a@b.com', subject: 'Hi', body: 'plain' });
+
+    expect(sentRaw()).not.toContain('multipart/related');
+  });
+
+  it('draft_email carries inline images the same way', async () => {
+    const file = await tmpImage('sig.png');
+    api.drafts.create.mockResolvedValue(ok({ id: 'd1', message: { id: 'm1', threadId: 't1' } }));
+
+    await createDraft({
+      to: 'a@b.com',
+      subject: 'Hi',
+      body: '<img src="cid:sig.png">',
+      is_html: true,
+      inline_images: [file],
+    });
+
+    const raw = api.drafts.create.mock.calls[0][0].requestBody.message.raw as string;
+    expect(Buffer.from(raw, 'base64url').toString('utf8')).toContain('Content-ID: <sig.png>');
+  });
+
+  it('reply_email carries inline images alongside the quoted original', async () => {
+    const file = await tmpImage('chart.png');
+    api.messages.get.mockResolvedValue(
+      ok({
+        id: 'orig',
+        threadId: 't9',
+        payload: {
+          mimeType: 'text/plain',
+          headers: [
+            { name: 'From', value: 'Cathy <cathy@example.com>' },
+            { name: 'Subject', value: 'Question' },
+            { name: 'Date', value: 'Fri, 21 Aug 2026 07:27:00 -0400' },
+            { name: 'Message-ID', value: '<abc@mail>' },
+          ],
+          body: { data: b64url('what do you think?') },
+        },
+      }),
+    );
+    api.messages.send.mockResolvedValue(ok({ id: 'sent1', threadId: 't9', labelIds: ['SENT'] }));
+
+    await replyToMessage({
+      messageId: 'orig',
+      body: '<p>Here: <img src="cid:chart.png"></p>',
+      is_html: true,
+      inline_images: [file],
+    });
+
+    const raw = sentRaw();
+    expect(raw).toContain('Content-ID: <chart.png>');
+    expect(raw).toContain('multipart/related');
+    expect(raw).toContain('In-Reply-To: <abc@mail>');
+  });
+
+  it('surfaces the duplicate-cid refusal instead of sending a broken message', async () => {
+    const one = await tmpImage('logo.png', 'ONE');
+    const { mkdtempSync, writeFileSync } = await import('fs');
+    const { tmpdir } = await import('os');
+    const { join } = await import('path');
+    const otherDir = mkdtempSync(join(tmpdir(), 'gmail-inline-'));
+    const two = join(otherDir, 'logo.png');
+    writeFileSync(two, 'TWO');
+    created.push(two);
+
+    await expect(
+      sendMessage({
+        to: 'a@b.com',
+        subject: 'Hi',
+        body: '<img src="cid:logo.png">',
+        is_html: true,
+        inline_images: [one, two],
+      }),
+    ).rejects.toThrow(/share the reference "cid:logo\.png"/);
+    expect(api.messages.send).not.toHaveBeenCalled();
   });
 });
