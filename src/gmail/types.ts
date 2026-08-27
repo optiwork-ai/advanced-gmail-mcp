@@ -15,6 +15,40 @@ export interface EmailSummary {
   isUnread: boolean;
 }
 
+/** One page of message summaries plus the cursor for the next one. */
+export interface MessagePage {
+  messages: EmailSummary[];
+  /** Pass back as `page_token` to fetch the next page. Absent on the last page. */
+  nextPageToken?: string;
+}
+
+/** One page of draft summaries plus the cursor for the next one. */
+export interface DraftPage {
+  drafts: DraftSummary[];
+  /** Pass back as `page_token` to fetch the next page. Absent on the last page. */
+  nextPageToken?: string;
+}
+
+/**
+ * Headers-only result for `read_email` with format 'metadata' or 'minimal'.
+ * Distinguished from EmailFull by the explicit `body_note`, so a caller can
+ * never mistake a body-free response for an empty message.
+ */
+export interface EmailHeadersOnly {
+  id: string;
+  threadId: string;
+  from: string;
+  to: string;
+  cc: string;
+  bcc: string;
+  subject: string;
+  date: string;
+  labels: string[];
+  snippet: string;
+  /** Always set. Explains why there is no body and how to get one. */
+  body_note: string;
+}
+
 /** Full email with body content. */
 export interface EmailFull {
   id: string;
@@ -79,9 +113,11 @@ export interface ThreadMessage {
   cc: string;
   subject: string;
   date: string;
+  /** Falls back to the flattened HTML when the message has no text/plain part. */
   body_text: string;
   snippet: string;
   labels: string[];
+  attachments: AttachmentInfo[];
 }
 
 /** Label metadata. */

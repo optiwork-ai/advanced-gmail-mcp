@@ -10,7 +10,9 @@ export const getThreadParams = {
 export function registerGetThread(server: McpServer): void {
   server.tool(
     'get_thread',
-    'Get a full email thread by thread ID. Returns all messages in the thread with from, subject, date, body, and labels.',
+    'Get a full email thread by thread ID. Returns every message in the thread with from, to, cc, '
+    + 'subject, date, body_text, snippet, labels and attachment metadata. An HTML-only message '
+    + 'has its HTML flattened into body_text rather than coming back empty.',
     getThreadParams,
     async ({ thread_id, account }) => {
       try {

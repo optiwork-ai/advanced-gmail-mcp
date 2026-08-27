@@ -22,8 +22,11 @@ import {
 import { getSendAsProfile } from './settings.js';
 import type {
   Attachment,
+  DraftPage,
   EmailSummary,
   EmailFull,
+  EmailHeadersOnly,
+  MessagePage,
   AttachmentInfo,
   AttachmentData,
   ThreadInfo,
@@ -261,7 +264,9 @@ function toEmailFull(msg: gmail_v1.Schema$Message): EmailFull {
  */
 function toThreadMessage(msg: gmail_v1.Schema$Message): ThreadMessage {
   const headers = msg.payload?.headers || [];
-  const { text } = msg.payload ? extractBody(msg.payload) : { text: '' };
+  const { html, text } = msg.payload
+    ? extractBody(msg.payload)
+    : { html: '', text: '' };
 
   return {
     id: msg.id || '',
@@ -270,9 +275,12 @@ function toThreadMessage(msg: gmail_v1.Schema$Message): ThreadMessage {
     cc: extractHeader(headers, 'Cc'),
     subject: extractHeader(headers, 'Subject'),
     date: extractHeader(headers, 'Date'),
-    body_text: text,
+    // An HTML-only message used to come back with an empty body while the
+    // description promised "body". Fall back to the flattened HTML.
+    body_text: text || (html ? htmlToText(html) : ''),
     snippet: msg.snippet || '',
     labels: msg.labelIds || [],
+    attachments: msg.payload ? extractAttachments(msg.payload) : [],
   };
 }
 
@@ -486,56 +494,142 @@ async function fetchMessageSummaries(
 }
 
 /**
- * List messages in a mailbox.
- * Paginates through all results up to maxResults (default 500, hard cap 1000).
+ * Default page size for the two message-list tools.
+ *
+ * It used to be 500, which meant an unparameterized `list_emails` issued ~501
+ * API round trips (one messages.list plus one messages.get PER message) and
+ * dumped 500 objects into the model's context. 50 is a page a model can
+ * actually read; `page_token` is there for the rest.
+ */
+export const DEFAULT_LIST_PAGE_SIZE = 50;
+
+/** Hard ceiling on one call, whatever the caller asks for. */
+export const MAX_LIST_PAGE_SIZE = 500;
+
+/**
+ * The shared pagination + hydration path behind listMessages and
+ * searchMessages.
+ *
+ * These were two copy-pasted loops that had already drifted apart (only one of
+ * them applied labelIds), which is exactly how the label/query interaction
+ * became invisible. One loop, two callers.
+ */
+async function collectMessagePage(
+  gmail: gmail_v1.Gmail,
+  params: { labelIds?: string[]; query?: string },
+  maxResults: number,
+  pageToken?: string,
+): Promise<MessagePage> {
+  const wanted = Math.min(Math.max(maxResults, 1), MAX_LIST_PAGE_SIZE);
+
+  const refs: Array<{ id: string }> = [];
+  let cursor: string | undefined = pageToken;
+
+  while (refs.length < wanted) {
+    const pageSize: number = wanted - refs.length;
+    const response: { data: gmail_v1.Schema$ListMessagesResponse } = await withRetry(() =>
+      gmail.users.messages.list({
+        userId: 'me',
+        ...(params.labelIds ? { labelIds: params.labelIds } : {}),
+        maxResults: pageSize,
+        q: params.query || undefined,
+        pageToken: cursor,
+      })
+    );
+
+    const messages = response.data.messages || [];
+    for (const msg of messages) {
+      if (msg.id) refs.push({ id: msg.id });
+    }
+
+    cursor = response.data.nextPageToken ?? undefined;
+    if (!cursor || messages.length === 0) break;
+  }
+
+  return {
+    messages: refs.length === 0 ? [] : await fetchMessageSummaries(gmail, refs),
+    ...(cursor ? { nextPageToken: cursor } : {}),
+  };
+}
+
+/**
+ * List messages in a mailbox (INBOX by default, or one label).
+ *
+ * `label` and `query` are ANDed, not alternatives — a query is confined to the
+ * chosen label. That is Gmail's behaviour for labelIds + q, and the tool
+ * description now says so.
  */
 export async function listMessages(opts: {
   account?: string;
   label?: string;
   maxResults?: number;
   query?: string;
-}): Promise<EmailSummary[]> {
+  pageToken?: string;
+}): Promise<MessagePage> {
   const gmail = await getGmailClient(opts.account);
-  const labelIds = opts.label ? [opts.label] : ['INBOX'];
-  const maxResults = Math.min(opts.maxResults ?? 500, 1000);
+  return collectMessagePage(
+    gmail,
+    { labelIds: [opts.label || 'INBOX'], query: opts.query },
+    opts.maxResults ?? DEFAULT_LIST_PAGE_SIZE,
+    opts.pageToken,
+  );
+}
 
-  const allMessageRefs: Array<{ id: string }> = [];
-  let pageToken: string | undefined;
-
-  while (allMessageRefs.length < maxResults) {
-    const pageSize = Math.min(maxResults - allMessageRefs.length, 500);
-    const response = await withRetry(() =>
-      gmail.users.messages.list({
-        userId: 'me',
-        labelIds,
-        maxResults: pageSize,
-        q: opts.query || undefined,
-        pageToken,
-      })
-    );
-
-    const messages = response.data.messages || [];
-    for (const msg of messages) {
-      if (msg.id) allMessageRefs.push({ id: msg.id });
-    }
-
-    pageToken = response.data.nextPageToken ?? undefined;
-    if (!pageToken || messages.length === 0) break;
-  }
-
-  if (allMessageRefs.length === 0) return [];
-
-  return fetchMessageSummaries(gmail, allMessageRefs);
+/**
+ * Build the headers-only result for a 'metadata' or 'minimal' fetch.
+ *
+ * Gmail's metadata/minimal formats never return a body. Running them through
+ * `toEmailFull` produced a structurally valid, silently EMPTY email — the model
+ * could not tell "this message has no text" from "you asked for a format that
+ * excludes text". The `body_note` makes the difference explicit.
+ */
+function toEmailHeadersOnly(
+  msg: gmail_v1.Schema$Message,
+  format: 'metadata' | 'minimal',
+): EmailHeadersOnly {
+  const headers = msg.payload?.headers || [];
+  return {
+    id: msg.id || '',
+    threadId: msg.threadId || '',
+    from: extractHeader(headers, 'From'),
+    to: extractHeader(headers, 'To'),
+    cc: extractHeader(headers, 'Cc'),
+    bcc: extractHeader(headers, 'Bcc'),
+    subject: extractHeader(headers, 'Subject'),
+    date: extractHeader(headers, 'Date'),
+    labels: msg.labelIds || [],
+    snippet: msg.snippet || '',
+    body_note:
+      format === 'minimal'
+        ? 'No body and no headers were requested: format "minimal" returns only ids, '
+          + 'labels and the snippet. Call read_email again with format "full" for the body.'
+        : 'No body was requested: format "metadata" returns headers only. '
+          + 'Call read_email again with format "full" for the body.',
+  };
 }
 
 /**
  * Get a single message by ID.
+ *
+ * With the default 'full' format this returns an EmailFull. With 'metadata' or
+ * 'minimal' it returns a headers-only shape carrying an explicit body_note —
+ * never a full-shaped result whose body silently came back empty.
  */
 export async function getMessage(opts: {
   messageId: string;
   account?: string;
+  format?: 'full';
+}): Promise<EmailFull>;
+export async function getMessage(opts: {
+  messageId: string;
+  account?: string;
   format?: 'full' | 'metadata' | 'minimal';
-}): Promise<EmailFull> {
+}): Promise<EmailFull | EmailHeadersOnly>;
+export async function getMessage(opts: {
+  messageId: string;
+  account?: string;
+  format?: 'full' | 'metadata' | 'minimal';
+}): Promise<EmailFull | EmailHeadersOnly> {
   const gmail = await getGmailClient(opts.account);
   const format = opts.format ?? 'full';
 
@@ -547,48 +641,27 @@ export async function getMessage(opts: {
     })
   );
 
-  return toEmailFull(response.data);
+  return format === 'full'
+    ? toEmailFull(response.data)
+    : toEmailHeadersOnly(response.data, format);
 }
 
 /**
- * Search messages using Gmail query syntax.
- * Paginates through all results up to maxResults (default 500, hard cap 1000).
+ * Search messages using Gmail query syntax, across every label.
  */
 export async function searchMessages(opts: {
   query: string;
   account?: string;
   maxResults?: number;
-}): Promise<EmailSummary[]> {
+  pageToken?: string;
+}): Promise<MessagePage> {
   const gmail = await getGmailClient(opts.account);
-  const maxResults = Math.min(opts.maxResults ?? 500, 1000);
-
-  // Paginate through messages.list to collect all message IDs
-  const allMessageRefs: Array<{ id: string }> = [];
-  let pageToken: string | undefined;
-
-  while (allMessageRefs.length < maxResults) {
-    const pageSize = Math.min(maxResults - allMessageRefs.length, 500);
-    const response = await withRetry(() =>
-      gmail.users.messages.list({
-        userId: 'me',
-        q: opts.query,
-        maxResults: pageSize,
-        pageToken,
-      })
-    );
-
-    const messages = response.data.messages || [];
-    for (const msg of messages) {
-      if (msg.id) allMessageRefs.push({ id: msg.id });
-    }
-
-    pageToken = response.data.nextPageToken ?? undefined;
-    if (!pageToken || messages.length === 0) break;
-  }
-
-  if (allMessageRefs.length === 0) return [];
-
-  return fetchMessageSummaries(gmail, allMessageRefs);
+  return collectMessagePage(
+    gmail,
+    { query: opts.query },
+    opts.maxResults ?? DEFAULT_LIST_PAGE_SIZE,
+    opts.pageToken,
+  );
 }
 
 /**
@@ -1655,16 +1728,36 @@ export async function getAttachment(opts: {
 export async function listDrafts(opts: {
   account?: string;
   maxResults?: number;
-}): Promise<DraftSummary[]> {
+  pageToken?: string;
+}): Promise<DraftPage> {
   const gmail = await getGmailClient(opts.account);
-  const maxResults = Math.min(opts.maxResults ?? 100, 500);
+  const wanted = Math.min(Math.max(opts.maxResults ?? 100, 1), MAX_LIST_PAGE_SIZE);
 
-  const response = await withRetry(() =>
-    gmail.users.drafts.list({ userId: 'me', maxResults })
-  );
+  // This was a single un-paginated drafts.list — the one list tool that broke
+  // the convention, so drafts past the first page were unreachable.
+  const refs: gmail_v1.Schema$Draft[] = [];
+  let cursor: string | undefined = opts.pageToken;
 
-  const drafts = (response.data.drafts || []).filter(d => d.id && d.message?.id);
-  if (drafts.length === 0) return [];
+  while (refs.length < wanted) {
+    const response: { data: gmail_v1.Schema$ListDraftsResponse } = await withRetry(() =>
+      gmail.users.drafts.list({
+        userId: 'me',
+        maxResults: wanted - refs.length,
+        pageToken: cursor,
+      })
+    );
+
+    const page = response.data.drafts || [];
+    refs.push(...page.filter(d => d.id && d.message?.id));
+
+    cursor = response.data.nextPageToken ?? undefined;
+    if (!cursor || page.length === 0) break;
+  }
+
+  const nextPageToken = cursor ? { nextPageToken: cursor } : {};
+
+  const drafts = refs;
+  if (drafts.length === 0) return { drafts: [], ...nextPageToken };
 
   // Fetch each draft's underlying message metadata in parallel.
   const results: DraftSummary[] = new Array(drafts.length);
@@ -1697,7 +1790,7 @@ export async function listDrafts(opts: {
     });
   }
 
-  return results;
+  return { drafts: results, ...nextPageToken };
 }
 
 /**
