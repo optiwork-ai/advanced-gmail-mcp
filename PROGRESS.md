@@ -509,3 +509,56 @@ which is the gate before ANY of the six new tools can be exercised live. For the
 live acceptance list, add: one small `upload_drive_file` to Drive root, one `list_filters`
 read, one `get_vacation` read — and note that `set_vacation` enabling is an outward act
 that should be tested only with an immediate disable, if at all.
+
+## W10 — Phase 2 adversarial first pass (2026-08-27)
+
+Review only; **no source file was modified by this pass**. Findings written to
+the ROUND 2 section of
+`shared/active-work/2026-08-27-gmail-mcp-upgrade/REVIEW-FINDINGS.md`.
+
+- Fresh run at `d5266f6`: `npm run typecheck` clean; `npm test` **12 files, 519
+  tests, 519 passing**. B10 acceptance gate re-run alone: 5 passed. Registration
+  smoke: **50 tools, no duplicates** — README's "50 tools" and CHANGELOG 1.6.0
+  are accurate. W9's reported counts reproduce exactly.
+- **Test integrity across `626523e..HEAD`:** every pre-existing test file is
+  additions-only (`mime.test.ts +283/-0`, `api.test.ts +614/-0`), and
+  `client.test.ts`, `acceptance.test.ts`, `log.test.ts`, `settings.test.ts`,
+  `config.test.ts`, `url-guard.test.ts`, `calendar/client.test.ts` and
+  `docs-get-document.test.ts` are byte-unchanged. Zero deleted lines in any test
+  file in the range.
+- **The SCOPES diff is exactly the two ratified entries** (`drive.file`,
+  `gmail.settings.basic`) plus the docstring correction W9 declared as QUESTIONS
+  item 25. No executable line of `auth.ts` moved.
+- **5 CONFIRMED**, each with an executed reproduction: `set_vacation` writes only
+  one body flavour and leaves the other stale, so changing an HTML responder's
+  text in plain text does not change what Gmail sends; `forward_email` now throws
+  instead of forwarding when a quoted chain repeats a Content-ID; `inline_images`
+  with a non-HTML body ships an image nothing references; `withScopeHint` reports
+  every 401/403 as a missing grant, including a full Drive and an exhausted rate
+  limit; and the ratified Option B reflow declines any paragraph containing a URL
+  or other long token (1 of 20 realistic business paragraphs at 70 columns —
+  always the URL one).
+- **7 PLAUSIBLE** (expired vacation window cannot be cleared; `body: ''` silently
+  ignored; the history cursor can move backwards on a future-dated cursor; the
+  404-to-resync conversion is `??`-fragile against a string error code;
+  `list_filters` drops size criteria; the read-side relaxation changes attachment
+  counts for callers outside this repo; the upload size gate is stat-then-stream).
+- **12 DROPPED** with evidence, including: the `multipart/related` nesting,
+  boundary and cid derivation checked byte-wise; the shared 25MB budget proven;
+  Q6's autolink closure independently re-verified; `upload_drive_file`'s path
+  refusals and name sanitation exercised; and six history edge cases (empty page,
+  label-only page, added-and-deleted, mid-pagination, numeric historyId, both 404
+  error shapes) all behaving correctly.
+- One design fork filed as QUESTIONS-FOR-FABLE item 32 — whether B1c gets a third
+  amendment so a wrap-explained short line stops vetoing its paragraph. Nothing
+  is downstream of it.
+
+This is a same-model first pass and is NOT validation. A cold Fable pass should
+re-derive the five CONFIRMED findings, and verify R2-C1 against the real API
+during the chair's post-re-auth run.
+
+## Remaining — after W10
+
+The contingent Phase-2 fix pass, then cold Fable validation, then the one
+re-auth round for all five aliases before any of the six new tools can be
+exercised live.
