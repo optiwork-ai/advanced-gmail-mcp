@@ -167,7 +167,7 @@ These need `gmail.settings.basic` (added 2026-08-27), so they **403 on any alias
 | `get_vacation` | Read the vacation-responder settings: on/off, subject, message, window, restrictions |
 | `set_vacation` | **Turn the vacation responder on or off.** While it is on, Gmail auto-replies from this account without any further call. Settings are merged, not replaced, so turning it off keeps the saved message |
 
-**On `set_vacation`:** enabling the responder is the one setting in this server that makes the account send mail on its own — anyone who writes in gets an automatic reply until it is switched off or its `end_time` passes. Prefer setting `end_time`. Omitted fields keep their saved values, so `enable: false` never erases the message and changing the subject never blanks the body. The result carries a `notice` stating exactly what is now switched on.
+**On `set_vacation`:** enabling the responder is the one setting in this server that makes the account send mail on its own — anyone who writes in gets an automatic reply until it is switched off or its `end_time` passes. Prefer setting `end_time`. Omitted fields keep their saved values, so `enable: false` never erases the message and changing the subject never blanks the body. The result carries a `notice` stating exactly what is now switched on. Gmail stores the reply in two forms, plain text and HTML, and sends the HTML one when both exist — so passing `body` rewrites **both**, and what you passed is what goes out whichever form Gmail picks.
 
 ### Chat / Drive / Docs
 

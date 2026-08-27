@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1] — 2026-08-27
+
+### Fixed
+- **`set_vacation` could report success while the auto-reply Gmail actually sends stayed the same.** Gmail keeps the out-of-office message in two forms, plain text and HTML, and sends the HTML one when both exist. Only the form the caller named was written, so changing the message of an HTML responder — which is what Gmail's own web UI writes — with a plain `body` returned success, echoed the new text, and left the account replying with the old one. A supplied `body` now rewrites both forms from what was passed, so they cannot disagree. Omitting `body` still keeps everything saved. A `body` that is supplied but blank is now refused instead of being read as "no body at all".
+- **`forward_email` refused to send a chain that repeated an embedded image.** A quoted Outlook or Gmail thread carries its signature logo at every level under one reference, and the second copy tripped the duplicate-reference check — a message that used to forward fine came back as an error telling the caller to rename a file they never named. Repeats are now taken once. Two genuinely different files sharing a reference are still refused.
+- **`inline_images` without `is_html` shipped a picture nothing pointed at.** The parameter always said it needed an HTML body and nothing enforced it, so the image rode along in a message whose body could not reference it, and the tool reported success. It is now refused, the way `plain_text_only` already refused it.
+- **Every permission error from the six newest tools claimed the account was missing a grant** — including "your Drive is full" and a rate limit that outlasted the retries. The real cause survived only in a tail after "Original error:". The re-consent message now fires only when Google actually says the token's scopes were insufficient; everything else comes through as itself. That message is right today for almost every failure, and would have become wrong for all of them the moment the accounts re-consent.
+- **`get_mail_changes` could hand back a cursor older than the one it was given.** A cursor from another mailbox is ahead of this one, and Gmail answers that with its own smaller position — which the tool returned as "store this", so the next poll replayed a window already seen, silently. The cursor now only moves forward, and the mismatch is reported instead. Separately, an expired cursor is recognised as expired even when the underlying client puts a word rather than a number in the error's code field.
+- **`list_filters` described a size-based filter as matching everything.** Gmail lets a rule match on message size; those two fields were dropped from the summary, so a size-only filter came back with empty criteria. They are now reported. `create_filter` still cannot set them.
+
 ## [1.6.0] — 2026-08-27
 
 ### Added
