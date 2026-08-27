@@ -164,3 +164,43 @@ Nothing. No questions filed.
 
 `git log 536a9be..HEAD` for what landed. `npm run typecheck && npm test` from the repo
 root. B10.5 (live sends) is the chair's, not a builder's.
+
+## W4 — adversarial first pass (2026-08-27)
+
+Review only; no source file was modified by this pass. Findings written to
+`shared/active-work/2026-08-27-gmail-mcp-upgrade/REVIEW-FINDINGS.md`.
+
+- Fresh run at `101614d`: `npm run typecheck` clean; `npm test` **10 files,
+  360 tests, 360 passing**. Both builders' reported counts reproduce exactly.
+  42 `server.tool(` registrations — README's "42 tools" is accurate.
+- **8 CONFIRMED**, each with an executed reproduction: SSRF guard bypass via the
+  hex form of an IPv4-mapped IPv6 address (`https://[::ffff:127.0.0.1]/` is
+  allowed end-to-end with the real resolver); the 998-octet limit still violated
+  by long non-ASCII headers (a 400-char subject emits a 1097-octet `Subject:`
+  line); `reflowPlainText` welding sign-off and address blocks; the 25MB
+  attachment allowance being unreachable behind a self-contradictory 35MB error;
+  autolinking overrunning escaped `<`/`"`; `plain_text_only` silently dropping
+  attachments; and two `htmlToText` parsing defects.
+- **10 PLAUSIBLE** (media-upload threshold measured pre-base64, unvalidated
+  attachment mimeType, 50-minute caching of a FAILED sendAs lookup, unencoded
+  non-ASCII recipient display names, destructive `log()` calls firing before the
+  API call, residual IPv6 SSRF surface + accepted DNS-rebinding risk, attachment
+  load/download ordering, missing end>start check on `create_calendar_event`,
+  RFC 2231 encoding, shared `withRetry` misreporting Calendar 403s).
+- **18 DROPPED** with evidence, including: a 13-input header-injection battery
+  (my own inputs, not the repo fixtures) that found no leak on any path; no
+  baseline test deleted, edited or loosened; the one edited acceptance-gate
+  assertion verified STRONGER than the one it replaced; attachment path handling
+  clean (`wx` atomic create, traversal-flattened filenames); and every remaining
+  Unit B and Unit C contract item checked off one by one.
+- One design fork filed as QUESTIONS-FOR-FABLE item 15 (the reflow rule — both
+  readings of B1c are wrong; a third is recommended but it rewrites the spec).
+
+This is a same-model first pass and is NOT validation. W6's cold Fable pass
+should re-derive C1 and independently re-run the B10 gate at `915a8c0` rather
+than trusting this report.
+
+## Remaining — after W4
+
+W5 fix pass on the confirmed findings (reflow gated on QUESTIONS item 15), then
+W6 cold validation.
