@@ -557,8 +557,62 @@ This is a same-model first pass and is NOT validation. A cold Fable pass should
 re-derive the five CONFIRMED findings, and verify R2-C1 against the real API
 during the chair's post-re-auth run.
 
-## Remaining — after W10
+## W11 — Phase 2 fix pass over the ROUND 2 findings (2026-08-27)
+
+Applied four of W10's five CONFIRMED findings and four PLAUSIBLE ones, one
+commit each, every one with a FAIL-before demonstration in real vitest output.
+Suite went 519 -> 539 tests across 13 files (`src/scope-error.test.ts` is new);
+`npm run typecheck` clean at every commit.
+
+| Finding | Commit | What changed |
+|---|---|---|
+| R2-C1 | `69f4213` | A supplied vacation `body` writes BOTH stored flavours (the named one verbatim, the other derived through `htmlToText`/`textToHtml`), so Gmail's HTML-wins rule can no longer send text the caller replaced. FAIL-before 3 failed / 31 passed. |
+| R2-C2 | `38957b6` | `forwardMessage` takes each Content-ID once, first wins, skipping the repeat before its bytes are downloaded. The mime-layer uniqueness check is untouched and still guards the caller-supplied case. FAIL-before 1 failed / 110 passed, throwing the exact uniqueness error with `messages.send` never called. |
+| R2-C3 | `2826e1c` | Caller-supplied `inline_images` are refused without `is_html: true`. Forward's own loaded inline parts are unaffected — their cid references live in the quoted block's HTML, not the caller's body. FAIL-before 2 failed / 111 passed. |
+| R2-C4 | `4664fca` | `isMissingScopeError` now requires a scope-shaped reason (`insufficientPermissions`, `ACCESS_TOKEN_SCOPE_INSUFFICIENT`, `insufficientScopes`, or the matching phrasing that survives `withRetry`'s rewrite). A full Drive and an exhausted rate limit come through as themselves. `googleErrorReasons` moved from `gmail/client.ts` to `scope-error.ts` — one implementation, in the module that imports nothing. FAIL-before 4 failed / 5 passed. |
+| R2-P4 | `042be99` | `historyStatus` is the shared `errorStatus`, so a truthy string in `err.code` cannot swallow the 404-to-resync conversion. |
+| R2-P5 | `16e63d0` | `list_filters` reports `size`/`sizeComparison`; a size-only filter no longer reads as "matches everything". |
+| R2-P3 | `2bf703a` | The history cursor never moves backwards. A cursor ahead of the mailbox keeps its value and the mismatch goes in the note, instead of silently replaying the window on the next poll. BigInt comparison. |
+| R2-P2 | `cca64c1` | A `body` that is supplied but blank is refused rather than read as "no body". |
+
+Docs: `d036479` — README's `set_vacation` note and a CHANGELOG 1.6.1 Fixed
+section covering all eight.
+
+**Not applied, deliberately** (full reasoning as QUESTIONS items 33-35):
+
+- **R2-C5** (Option B reflow declines any paragraph containing a long token) —
+  a third amendment to B1c, which the chair ratified. QUESTIONS item 32 carried
+  no ruling when this pass opened and none when it closed; the file was re-read
+  at both ends. Nothing is downstream of it.
+- **R2-P1** (an expired vacation window cannot be cleared) — needs a parameter
+  affordance the tool does not have, so it is a design call, not a repair.
+- **R2-P6** (read-side attachment counts, workspace-level callers) — the chair's
+  pre-merge sweep, with items 8 and 30.
+- **R2-P7** (stat-then-stream upload gate) — an honest trade, documented at the
+  call site.
+- **W4's P10** (`withRetry` misreports a Calendar 403) — same class as R2-C4 and
+  now divergent from it; still item 17, still wants a ruling.
+
+**One existing assertion was restated, not added:** `settings-api.test.ts`
+pinned `responseBodyPlainText` as undefined after an HTML write, which is R2-C1
+itself. Declared as QUESTIONS item 34. Every other test change in this pass is
+an addition.
+
+**Prohibitions honored:** no AI attribution; no push, deploy or `gh` write; no
+change to `accounts.json`, `credentials.json`, `tokens/`, `package.json` or the
+lockfile; no new dependency; `src/gmail/auth.ts` untouched by this pass; no live
+Google API call of any kind.
+
+## Remaining — after W11
+
+Cold Fable validation of the whole Phase-2 range, a ruling on QUESTIONS item 32
+(reflow) and item 17 (P10), then the one re-auth round for all five aliases
+before any of the six new tools can be exercised live. R2-C1's severity and
+R2-C2's trigger both want confirming against the real API in that post-re-auth
+run.
+
+### Superseded — the remaining list as it stood after W10
 
 The contingent Phase-2 fix pass, then cold Fable validation, then the one
 re-auth round for all five aliases before any of the six new tools can be
-exercised live.
+exercised live. (The fix pass is W11 above.)
