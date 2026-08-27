@@ -64,10 +64,15 @@ assertions). PASS-after on HEAD: 5 passed. Full suite: 185 passed, typecheck cle
       decoded through Node so the `=` padding is correct. `fetchAttachmentBytes` split out
       as the unbounded low-level path the forward re-attach uses. 18 tests.
 
-## Remaining — Unit B
+- [x] **Item 2 — thread ops** — `modify_thread` (add/remove label ids on every message in
+      the conversation; archive = remove INBOX; a no-op call is refused rather than reported
+      as success) and `trash_thread`, via `users.threads.modify`/`.trash`. Both logged.
+- [x] **Item 3 — draft ops** — `update_draft` rebuilds the MIME through Unit A's
+      `composeOutbound` and reuses `dispatchDraft` (now able to update as well as create, so
+      the >5MB media path is shared rather than forked), preserving the draft's threadId;
+      `delete_draft` is a permanent delete and is logged. 11 more tests.
 
-- [ ] Item 2 — `modify_thread` + `trash_thread`
-- [ ] Item 3 — `update_draft` + `delete_draft`
+## Remaining — Unit B
 - [ ] Item 4 — correctness repairs (#6, #16, #7, #11, #8, #9/#26/#19, #12, #13/#14, #18,
       #17, #10, #21, #1 SSRF, #27 logging)
 - [ ] Item 5 — README/CHANGELOG

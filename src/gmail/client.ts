@@ -400,30 +400,53 @@ async function dispatchSend(
   return response.data;
 }
 
-/** Draft counterpart of dispatchSend, with the same size-based transport rule. */
+/**
+ * Draft counterpart of dispatchSend, with the same size-based transport rule.
+ *
+ * With `draftId` it REPLACES that draft (drafts.update) instead of creating a
+ * new one, so update_draft goes through exactly the same transport choice as
+ * draft_email rather than growing a second one.
+ */
 async function dispatchDraft(
   gmail: gmail_v1.Gmail,
   built: BuiltMessage,
   threadId?: string,
+  draftId?: string,
 ): Promise<gmail_v1.Schema$Draft> {
+  const thread = threadId ? { threadId } : {};
+
   if (built.bytes <= MEDIA_UPLOAD_THRESHOLD_BYTES) {
+    const message = { raw: built.rawBase64Url, ...thread };
     const response = await withRetry(() =>
-      gmail.users.drafts.create({
-        userId: 'me',
-        requestBody: { message: { raw: built.rawBase64Url, ...(threadId ? { threadId } : {}) } },
-      })
+      draftId
+        ? gmail.users.drafts.update({
+            userId: 'me',
+            id: draftId,
+            requestBody: { id: draftId, message },
+          })
+        : gmail.users.drafts.create({ userId: 'me', requestBody: { message } })
     );
     return response.data;
   }
 
   const rawBuffer = Buffer.from(built.raw, 'utf8');
-  const response = await withRetry(() =>
-    gmail.users.drafts.create({
-      userId: 'me',
-      requestBody: { message: threadId ? { threadId } : {} },
-      media: { mimeType: 'message/rfc822', body: Readable.from(rawBuffer) },
-    })
-  );
+  // The stream is built INSIDE the retry closure: a retried attempt must not
+  // re-read an already-consumed stream.
+  const response = await withRetry(() => {
+    const media = { mimeType: 'message/rfc822', body: Readable.from(rawBuffer) };
+    return draftId
+      ? gmail.users.drafts.update({
+          userId: 'me',
+          id: draftId,
+          requestBody: { id: draftId, message: thread },
+          media,
+        })
+      : gmail.users.drafts.create({
+          userId: 'me',
+          requestBody: { message: thread },
+          media,
+        });
+  });
   return response.data;
 }
 
@@ -872,6 +895,81 @@ export async function getThread(opts: {
   return {
     id: response.data.id || '',
     messages,
+  };
+}
+
+/**
+ * Add and/or remove labels on every message in a thread.
+ *
+ * The thread-level counterpart of `modifyMessage`. Archiving one message of a
+ * conversation leaves the rest in the inbox, which is not what a model trained
+ * on Gmail's thread-first UI expects; this operates on the whole conversation.
+ */
+export async function modifyThread(opts: {
+  threadId: string;
+  addLabelIds?: string[];
+  removeLabelIds?: string[];
+  account?: string;
+}): Promise<ModifyResult> {
+  const add = opts.addLabelIds ?? [];
+  const remove = opts.removeLabelIds ?? [];
+  if (add.length === 0 && remove.length === 0) {
+    throw new Error(
+      'modify_thread needs at least one of add_labels or remove_labels; '
+      + 'with neither it would be a no-op reported as a success.'
+    );
+  }
+
+  const resolved = resolveAccount(opts.account);
+  const gmail = await getGmailClient(resolved);
+
+  log('info', 'modify_thread', {
+    account: resolved.alias,
+    thread_id: opts.threadId,
+    add: add.length,
+    remove: remove.length,
+  });
+
+  const response = await withRetry(() =>
+    gmail.users.threads.modify({
+      userId: 'me',
+      id: opts.threadId,
+      requestBody: { addLabelIds: add, removeLabelIds: remove },
+    })
+  );
+
+  // threads.modify returns the thread, whose messages carry the new labels.
+  const labels = new Set<string>();
+  for (const msg of response.data.messages || []) {
+    for (const id of msg.labelIds || []) labels.add(id);
+  }
+
+  return {
+    success: true,
+    id: response.data.id || opts.threadId,
+    labels: [...labels],
+  };
+}
+
+/**
+ * Move an entire thread to Trash.
+ */
+export async function trashThread(opts: {
+  threadId: string;
+  account?: string;
+}): Promise<ModifyResult> {
+  const resolved = resolveAccount(opts.account);
+  const gmail = await getGmailClient(resolved);
+
+  log('info', 'trash_thread', { account: resolved.alias, thread_id: opts.threadId });
+
+  const response = await withRetry(() =>
+    gmail.users.threads.trash({ userId: 'me', id: opts.threadId })
+  );
+
+  return {
+    success: true,
+    id: response.data.id || opts.threadId,
   };
 }
 
@@ -1628,6 +1726,94 @@ export async function readDraft(opts: {
     draft_id: response.data.id || '',
     message: toEmailFull(msg),
   };
+}
+
+/**
+ * Replace a draft's contents.
+ *
+ * The message is rebuilt through the same `composeOutbound` path as
+ * `createDraft` — signature, multipart/alternative, attachments and header
+ * sanitation all included — so an updated draft is byte-for-byte the same kind
+ * of message a freshly created one would be. `drafts.update` REPLACES the
+ * draft, so every field has to be supplied again; that is Gmail's semantics,
+ * not a shortcut, and the tool description says so.
+ */
+export async function updateDraft(opts: {
+  draftId: string;
+  to: string;
+  subject: string;
+  body: string;
+  account?: string;
+  cc?: string;
+  bcc?: string;
+  is_html?: boolean;
+  include_signature?: boolean;
+  attachments?: string[];
+}): Promise<DraftResult> {
+  const resolved = resolveAccount(opts.account);
+  const gmail = await getGmailClient(resolved);
+
+  const built = await composeOutbound({
+    resolved,
+    gmail,
+    to: opts.to,
+    subject: opts.subject,
+    body: opts.body,
+    cc: opts.cc,
+    bcc: opts.bcc,
+    is_html: opts.is_html,
+    include_signature: opts.include_signature,
+    attachment_paths: opts.attachments,
+  });
+
+  // The existing draft's threadId must be preserved or Gmail detaches a reply
+  // draft from its conversation.
+  let threadId: string | undefined;
+  try {
+    const existing = await withRetry(() =>
+      gmail.users.drafts.get({ userId: 'me', id: opts.draftId, format: 'minimal' })
+    );
+    threadId = existing.data.message?.threadId || undefined;
+  } catch (err: unknown) {
+    const status = (err as { code?: number; response?: { status?: number } })?.code
+      ?? (err as { response?: { status?: number } })?.response?.status;
+    if (status === 404) {
+      throw new Error(
+        `Draft ${opts.draftId} was not found in account "${resolved.alias}" `
+        + `(${resolved.email}). If it lives in another account, pass that account's alias.`
+      );
+    }
+    throw err;
+  }
+
+  const draft = await dispatchDraft(gmail, built, threadId, opts.draftId);
+
+  return {
+    draft_id: draft.id || opts.draftId,
+    message: {
+      id: draft.message?.id || '',
+      threadId: draft.message?.threadId || '',
+    },
+  };
+}
+
+/**
+ * Permanently delete a draft. The draft is gone — this is not a trash.
+ */
+export async function deleteDraft(opts: {
+  draftId: string;
+  account?: string;
+}): Promise<{ success: boolean; draft_id: string }> {
+  const resolved = resolveAccount(opts.account);
+  const gmail = await getGmailClient(resolved);
+
+  log('info', 'delete_draft', { account: resolved.alias, draft_id: opts.draftId });
+
+  await withRetry(() =>
+    gmail.users.drafts.delete({ userId: 'me', id: opts.draftId })
+  );
+
+  return { success: true, draft_id: opts.draftId };
 }
 
 /**
