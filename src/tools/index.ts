@@ -6,6 +6,8 @@ import { registerGetThread } from './thread.js';
 import { registerModifyThread } from './modify-thread.js';
 import { registerTrashThread } from './trash-thread.js';
 import { registerGetLabels } from './labels.js';
+import { registerGetHistoryBaseline } from './history-baseline.js';
+import { registerGetMailChanges } from './mail-changes.js';
 import { registerSendEmail } from './send.js';
 import { registerDraftEmail } from './draft.js';
 import { registerReplyEmail } from './reply.js';
@@ -51,6 +53,11 @@ export function registerAllTools(server: McpServer): void {
   registerReadEmail(server);
   registerGetThread(server);
   registerGetLabels(server);
+
+  // Mail-arrival watching: a cursor to poll from, and what changed since it.
+  // Stateless — the caller stores the cursor between polls.
+  registerGetHistoryBaseline(server);
+  registerGetMailChanges(server);
 
   // Write tools
   registerSendEmail(server);
