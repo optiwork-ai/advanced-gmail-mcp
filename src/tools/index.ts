@@ -35,6 +35,11 @@ import { registerGetChatMessage } from './chat-get-message.js';
 import { registerSearchDriveFiles } from './drive-search-files.js';
 import { registerReadDriveFile } from './drive-read-file.js';
 import { registerGetGoogleDoc } from './docs-get-document.js';
+// Calendar tools (three read-only + create_calendar_event)
+import { registerListCalendars } from './calendar-list-calendars.js';
+import { registerListCalendarEvents } from './calendar-list-events.js';
+import { registerGetFreebusy } from './calendar-freebusy.js';
+import { registerCreateCalendarEvent } from './calendar-create-event.js';
 
 /**
  * Register all Gmail MCP tools with the server.
@@ -82,4 +87,11 @@ export function registerAllTools(server: McpServer): void {
   registerSearchDriveFiles(server);
   registerReadDriveFile(server);
   registerGetGoogleDoc(server);
+
+  // Calendar: three read-only tools plus create_calendar_event, whose
+  // send_updates defaults to 'none' so the default path emails nobody.
+  registerListCalendars(server);
+  registerListCalendarEvents(server);
+  registerGetFreebusy(server);
+  registerCreateCalendarEvent(server);
 }
