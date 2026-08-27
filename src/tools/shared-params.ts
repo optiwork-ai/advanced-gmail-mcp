@@ -48,8 +48,9 @@ export const inlineImagesParam = z
     + 'one from the HTML as <img src="cid:FILENAME"> where FILENAME is the file\'s name with '
     + 'its extension — /home/me/logo.png is cid:logo.png. Characters outside letters, digits, '
     + 'dot, dash and underscore become underscores, so prefer simple filenames, and no two '
-    + 'images may share a name. Requires is_html: true — a cid: reference means nothing in a '
-    + 'plain-text body. Counts against the same 25MB total as attachments.',
+    + 'images may share a name. Requires is_html: true and is REFUSED without it — a cid: '
+    + 'reference means nothing in a plain-text body. Counts against the same 25MB total as '
+    + 'attachments.',
   );
 
 export const includeQuoteParam = z
