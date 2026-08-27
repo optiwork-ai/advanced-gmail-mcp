@@ -9,9 +9,17 @@
  *    `withRetry`, which rewrites any 401/403 into a fatal re-auth error — a
  *    signature lookup on a narrowly-scoped token would otherwise kill an
  *    otherwise-valid message (review-outbound.md defect R4).
- * 2. **It needs no new scopes.** `sendAs.list` was verified working against the
- *    tokens already on disk under the scopes granted in `auth.ts`. Do not add
- *    `gmail.settings.basic` and do not force a re-consent.
+ * 2. **It works with or without the settings scope.** `sendAs.list` is
+ *    documented as a settings call, but it was verified working against the
+ *    tokens already on disk under the Gmail scopes alone — which is why Phase 1
+ *    shipped the signature feature without asking anyone to re-consent.
+ *    `gmail.settings.basic` IS now requested (auth.ts, 2026-08-27) for the mail
+ *    rule and vacation tools, so once an alias re-consents this lookup stops
+ *    leaning on observed behaviour and becomes properly scoped. Nothing about
+ *    the call or the fallback changes either way: a 403 costs a signature, never
+ *    a send. Do not move it inside `withRetry`, and do not make composition
+ *    depend on the new grant — accounts that have not re-consented must keep
+ *    sending exactly as they do today.
  */
 import type { gmail_v1 } from 'googleapis';
 import type { AccountConfig } from '../config.js';
@@ -78,7 +86,10 @@ export async function getSendAsProfile(
   let profile: SendAsProfile;
   let failed = false;
   try {
-    // Deliberately NOT inside withRetry — see the module comment.
+    // Deliberately NOT inside withRetry — see the module comment. The call is
+    // unchanged now that gmail.settings.basic is requested: it already works on
+    // the existing grants, and once an alias re-consents it is simply covered by
+    // the scope it is documented under.
     const response = await gmail.users.settings.sendAs.list({ userId: 'me' });
     const entry = pickSendAs(response.data.sendAs ?? [], account.email);
     profile = entry
