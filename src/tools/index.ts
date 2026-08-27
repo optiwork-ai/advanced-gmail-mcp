@@ -36,6 +36,7 @@ import { registerListChatMessages } from './chat-list-messages.js';
 import { registerGetChatMessage } from './chat-get-message.js';
 import { registerSearchDriveFiles } from './drive-search-files.js';
 import { registerReadDriveFile } from './drive-read-file.js';
+import { registerUploadDriveFile } from './drive-upload-file.js';
 import { registerGetGoogleDoc } from './docs-get-document.js';
 // Calendar tools (three read-only + create_calendar_event)
 import { registerListCalendars } from './calendar-list-calendars.js';
@@ -87,12 +88,15 @@ export function registerAllTools(server: McpServer): void {
   registerUpdateLabel(server);
   registerDeleteLabel(server);
 
-  // Read-only Chat / Drive / Docs tools (no send/post/create/update/delete)
+  // Chat / Drive / Docs. Chat and Docs stay strictly read-only; Drive gains
+  // exactly one write — upload_drive_file — under the narrow drive.file scope,
+  // which reaches only the files this server creates.
   registerListChatSpaces(server);
   registerListChatMessages(server);
   registerGetChatMessage(server);
   registerSearchDriveFiles(server);
   registerReadDriveFile(server);
+  registerUploadDriveFile(server);
   registerGetGoogleDoc(server);
 
   // Calendar: three read-only tools plus create_calendar_event, whose
