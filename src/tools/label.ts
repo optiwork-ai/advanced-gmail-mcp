@@ -12,7 +12,9 @@ export const labelEmailParams = {
 export function registerLabelEmail(server: McpServer): void {
   server.tool(
     'label_email',
-    'Add or remove labels on an email. Returns success status, message ID, and current labels.',
+    'Add or remove labels on ONE message. Labels are IDs, not names (get_labels). At least one of '
+    + 'add_labels/remove_labels is required. To act on the whole conversation instead, use '
+    + 'modify_thread. Returns success status, message ID, and current labels.',
     labelEmailParams,
     async ({ message_id, add_labels, remove_labels, account }) => {
       try {

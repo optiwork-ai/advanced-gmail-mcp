@@ -6,14 +6,17 @@ export const updateLabelParams = {
   label_id: z.string().describe('The label ID to update (from get_labels)'),
   account: z.string().optional().describe('Account alias or email address. Uses default account if not specified.'),
   name: z.string().optional().describe('New name for the label (omit to keep existing name)'),
-  text_color: z.string().optional().describe('Hex color for label text (omit to keep existing)'),
-  background_color: z.string().optional().describe('Hex color for label background (omit to keep existing)'),
+  text_color: z.string().optional().describe('Hex color for label text (omit to keep the existing one — the other half of the pair is fetched and preserved)'),
+  background_color: z.string().optional().describe('Hex color for label background (omit to keep the existing one — the other half of the pair is fetched and preserved)'),
 };
 
 export function registerUpdateLabel(server: McpServer): void {
   server.tool(
     'update_label',
-    'Update an existing Gmail label (rename and/or recolor). At least one of name/text_color/background_color must be provided.',
+    'Update an existing Gmail label (rename and/or recolor). At least one of '
+    + 'name/text_color/background_color must be provided — a call with none of them is refused '
+    + 'rather than reported as a successful no-op. Supplying only one colour keeps the other: '
+    + 'the label\'s current colour is read first and the untouched half is preserved.',
     updateLabelParams,
     async ({ label_id, account, name, text_color, background_color }) => {
       try {

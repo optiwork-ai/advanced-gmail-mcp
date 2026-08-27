@@ -5,14 +5,16 @@ import { createLabel } from '../gmail/client.js';
 export const createLabelParams = {
   name: z.string().describe('Label name. Use "/" to nest (e.g. "Receipts/2026")'),
   account: z.string().optional().describe('Account alias or email address. Uses default account if not specified.'),
-  text_color: z.string().optional().describe('Hex color for label text (e.g. "#ffffff"). Must be one of Gmail\'s allowed palette values.'),
-  background_color: z.string().optional().describe('Hex color for label background. Must be one of Gmail\'s allowed palette values.'),
+  text_color: z.string().optional().describe('Hex color for label text (e.g. "#ffffff"). Must be one of Gmail\'s allowed palette values, and must be given together with background_color.'),
+  background_color: z.string().optional().describe('Hex color for label background. Must be one of Gmail\'s allowed palette values, and must be given together with text_color.'),
 };
 
 export function registerCreateLabel(server: McpServer): void {
   server.tool(
     'create_label',
-    'Create a new Gmail label. Returns the new label\'s id and name. Use "/" in the name to nest labels.',
+    'Create a new Gmail label. Returns the new label\'s id and name. Use "/" in the name to nest '
+    + 'labels. Colours are a PAIR in Gmail: pass text_color and background_color together or '
+    + 'neither — passing one alone is refused rather than silently inventing the other.',
     createLabelParams,
     async ({ name, account, text_color, background_color }) => {
       try {

@@ -120,13 +120,22 @@ export interface ThreadMessage {
   attachments: AttachmentInfo[];
 }
 
-/** Label metadata. */
+/**
+ * Label metadata.
+ *
+ * The counts are OPTIONAL on purpose: `labels.list` never returns them, and
+ * coercing their absence to `0` made every label report 0/0 while the tool
+ * description promised real counts. They appear only when actually fetched
+ * (get_labels with include_counts).
+ */
 export interface LabelInfo {
   id: string;
   name: string;
   type: string;
-  messagesTotal: number;
-  messagesUnread: number;
+  messagesTotal?: number;
+  messagesUnread?: number;
+  textColor?: string;
+  backgroundColor?: string;
 }
 
 /** A file attached to an outbound message, already loaded into memory. */

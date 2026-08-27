@@ -753,6 +753,15 @@ export async function modifyMessage(opts: {
   removeLabelIds?: string[];
   account?: string;
 }): Promise<ModifyResult> {
+  const add = opts.addLabelIds ?? [];
+  const remove = opts.removeLabelIds ?? [];
+  if (add.length === 0 && remove.length === 0) {
+    throw new Error(
+      'label_email needs at least one of add_labels or remove_labels; '
+      + 'with neither it would be a no-op reported as a success.'
+    );
+  }
+
   const gmail = await getGmailClient(opts.account);
 
   const response = await withRetry(() =>
@@ -760,8 +769,8 @@ export async function modifyMessage(opts: {
       userId: 'me',
       id: opts.messageId,
       requestBody: {
-        addLabelIds: opts.addLabelIds || [],
-        removeLabelIds: opts.removeLabelIds || [],
+        addLabelIds: add,
+        removeLabelIds: remove,
       },
     })
   );
@@ -824,11 +833,33 @@ export async function batchModify(opts: {
   };
 }
 
+/** Shape a labels.list / labels.get entry into LabelInfo. */
+function toLabelInfo(label: gmail_v1.Schema$Label, fallbackId = ''): LabelInfo {
+  const info: LabelInfo = {
+    id: label.id || fallbackId,
+    name: label.name || '',
+    type: label.type || 'user',
+  };
+  // labels.list does not return counts. Reporting 0 in that case was a lie the
+  // description repeated; the fields are now simply absent unless real.
+  if (typeof label.messagesTotal === 'number') info.messagesTotal = label.messagesTotal;
+  if (typeof label.messagesUnread === 'number') info.messagesUnread = label.messagesUnread;
+  if (label.color?.textColor) info.textColor = label.color.textColor;
+  if (label.color?.backgroundColor) info.backgroundColor = label.color.backgroundColor;
+  return info;
+}
+
 /**
  * List all labels for an account.
+ *
+ * `includeCounts` costs one `labels.get` per label (fanned out 10 at a time),
+ * because `labels.list` never returns `messagesTotal`/`messagesUnread` — the
+ * old code coerced their absence to `0` and the description promised counts,
+ * so every label reported 0/0 including INBOX (verified live).
  */
 export async function listLabels(opts?: {
   account?: string;
+  includeCounts?: boolean;
 }): Promise<LabelInfo[]> {
   const gmail = await getGmailClient(opts?.account);
 
@@ -837,18 +868,41 @@ export async function listLabels(opts?: {
   );
 
   const labels = response.data.labels || [];
+  if (!opts?.includeCounts) {
+    return labels.map(l => toLabelInfo(l));
+  }
 
-  return labels.map(label => ({
-    id: label.id || '',
-    name: label.name || '',
-    type: label.type || '',
-    messagesTotal: label.messagesTotal || 0,
-    messagesUnread: label.messagesUnread || 0,
-  }));
+  const detailed: LabelInfo[] = new Array(labels.length);
+  for (let i = 0; i < labels.length; i += FETCH_CONCURRENCY) {
+    const chunk = labels.slice(i, i + FETCH_CONCURRENCY);
+    const results = await Promise.all(
+      chunk.map(async (label) => {
+        if (!label.id) return toLabelInfo(label);
+        try {
+          const full = await withRetry(() =>
+            gmail.users.labels.get({ userId: 'me', id: label.id! })
+          );
+          return toLabelInfo(full.data, label.id);
+        } catch {
+          // One unreadable label must not sink the whole listing.
+          return toLabelInfo(label);
+        }
+      }),
+    );
+    results.forEach((info, idx) => {
+      detailed[i + idx] = info;
+    });
+  }
+
+  return detailed;
 }
 
 /**
  * Create a new Gmail label.
+ *
+ * Gmail's color object requires BOTH fields, so supplying one used to silently
+ * invent the other (#000000 / #ffffff): asking for a red background quietly
+ * forced black text. Now one-without-the-other is an error that says so.
  */
 export async function createLabel(opts: {
   name: string;
@@ -858,11 +912,15 @@ export async function createLabel(opts: {
 }): Promise<LabelInfo> {
   const gmail = await getGmailClient(opts.account);
 
-  const color = (opts.textColor || opts.backgroundColor)
-    ? {
-        textColor: opts.textColor || '#000000',
-        backgroundColor: opts.backgroundColor || '#ffffff',
-      }
+  if (!!opts.textColor !== !!opts.backgroundColor) {
+    throw new Error(
+      'Gmail stores a label colour as a pair: create_label needs both text_color and '
+      + 'background_color, or neither. Supplying one would mean inventing the other.'
+    );
+  }
+
+  const color = opts.textColor && opts.backgroundColor
+    ? { textColor: opts.textColor, backgroundColor: opts.backgroundColor }
     : undefined;
 
   const response = await withRetry(() =>
@@ -877,18 +935,16 @@ export async function createLabel(opts: {
     })
   );
 
-  const label = response.data;
-  return {
-    id: label.id || '',
-    name: label.name || opts.name,
-    type: label.type || 'user',
-    messagesTotal: label.messagesTotal || 0,
-    messagesUnread: label.messagesUnread || 0,
-  };
+  return toLabelInfo(response.data);
 }
 
 /**
  * Update an existing label (rename and/or recolor).
+ *
+ * "Omit to keep existing" is now true for colours: supplying only one half of
+ * the pair fetches the label and preserves the other half, instead of
+ * overwriting it with #ffffff. With no colour supplied at all, no `color` is
+ * sent, so the existing colour is untouched.
  */
 export async function updateLabel(opts: {
   labelId: string;
@@ -897,14 +953,34 @@ export async function updateLabel(opts: {
   textColor?: string;
   backgroundColor?: string;
 }): Promise<LabelInfo> {
+  if (!opts.name && !opts.textColor && !opts.backgroundColor) {
+    throw new Error(
+      'update_label needs at least one of name, text_color or background_color; '
+      + 'with none of them it would be a no-op reported as a success.'
+    );
+  }
+
   const gmail = await getGmailClient(opts.account);
 
-  const color = (opts.textColor || opts.backgroundColor)
-    ? {
-        textColor: opts.textColor || '#000000',
-        backgroundColor: opts.backgroundColor || '#ffffff',
-      }
-    : undefined;
+  let color: { textColor: string; backgroundColor: string } | undefined;
+  if (opts.textColor && opts.backgroundColor) {
+    color = { textColor: opts.textColor, backgroundColor: opts.backgroundColor };
+  } else if (opts.textColor || opts.backgroundColor) {
+    // Fetch and preserve the half the caller did not supply.
+    const current = await withRetry(() =>
+      gmail.users.labels.get({ userId: 'me', id: opts.labelId })
+    );
+    const existing = current.data.color;
+    const textColor = opts.textColor || existing?.textColor;
+    const backgroundColor = opts.backgroundColor || existing?.backgroundColor;
+    if (!textColor || !backgroundColor) {
+      throw new Error(
+        `Label ${opts.labelId} has no colour set, so only one half of the pair cannot be `
+        + 'changed. Supply both text_color and background_color.'
+      );
+    }
+    color = { textColor, backgroundColor };
+  }
 
   const response = await withRetry(() =>
     gmail.users.labels.patch({
@@ -917,14 +993,7 @@ export async function updateLabel(opts: {
     })
   );
 
-  const label = response.data;
-  return {
-    id: label.id || opts.labelId,
-    name: label.name || '',
-    type: label.type || 'user',
-    messagesTotal: label.messagesTotal || 0,
-    messagesUnread: label.messagesUnread || 0,
-  };
+  return toLabelInfo(response.data, opts.labelId);
 }
 
 /**
@@ -934,7 +1003,10 @@ export async function deleteLabel(opts: {
   labelId: string;
   account?: string;
 }): Promise<{ success: boolean; labelId: string }> {
-  const gmail = await getGmailClient(opts.account);
+  const resolved = resolveAccount(opts.account);
+  const gmail = await getGmailClient(resolved);
+
+  log('info', 'delete_label', { account: resolved.alias, label_id: opts.labelId });
 
   await withRetry(() =>
     gmail.users.labels.delete({
