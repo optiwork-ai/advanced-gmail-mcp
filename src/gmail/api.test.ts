@@ -10,6 +10,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // --- stub the Gmail API surface -------------------------------------------
 
 const api = {
+  getProfile: vi.fn(),
+  history: { list: vi.fn() },
   messages: {
     get: vi.fn(),
     list: vi.fn(),
@@ -53,6 +55,9 @@ const {
   ATTACHMENT_INLINE_LIMIT_BYTES,
   DEFAULT_LIST_PAGE_SIZE,
   MAX_LIST_PAGE_SIZE,
+  MAX_HISTORY_PAGE_SIZE,
+  DEFAULT_HISTORY_PAGE_SIZE,
+  HISTORY_SUMMARY_CAP,
   BATCH_MODIFY_CHUNK,
   batchModify,
   batchTrash,
@@ -60,6 +65,8 @@ const {
   deleteDraft,
   deleteLabel,
   getAttachment,
+  getHistoryBaseline,
+  getMailChanges,
   getMessage,
   getThread,
   listDrafts,
@@ -1070,5 +1077,340 @@ describe('unsubscribeFromEmail SSRF guard', () => {
     await expect(unsubscribeFromEmail({ messageId: 'm1' })).resolves.toMatchObject({
       method: 'none',
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Mailbox history — get_history_baseline / get_mail_changes (Unit D)
+// ---------------------------------------------------------------------------
+
+function metaMessage(id: string, subject: string) {
+  return ok({
+    id,
+    threadId: `t-${id}`,
+    labelIds: ['INBOX', 'UNREAD'],
+    snippet: `snippet ${id}`,
+    payload: {
+      headers: [
+        { name: 'From', value: 'sender@example.com' },
+        { name: 'Subject', value: subject },
+        { name: 'Date', value: 'Fri, 21 Aug 2026 07:27:00 -0400' },
+      ],
+    },
+  });
+}
+
+function apiError(status: number, message = 'boom') {
+  const err = new Error(message) as Error & { code: number };
+  err.code = status;
+  return err;
+}
+
+describe('getHistoryBaseline', () => {
+  it('returns the mailbox cursor as a string', async () => {
+    api.getProfile.mockResolvedValue(
+      ok({ emailAddress: 'me@example.com', historyId: '9876543210', messagesTotal: 12, threadsTotal: 7 }),
+    );
+
+    const baseline = await getHistoryBaseline({ account: 'work' });
+
+    expect(api.getProfile).toHaveBeenCalledWith({ userId: 'me' });
+    expect(baseline).toEqual({
+      account: 'work',
+      emailAddress: 'me@example.com',
+      historyId: '9876543210',
+      messagesTotal: 12,
+      threadsTotal: 7,
+    });
+  });
+
+  it('keeps a cursor past 2^53 exact, because a rounded cursor skips mail', async () => {
+    // Real Gmail history ids already run into this range; Number() would round.
+    api.getProfile.mockResolvedValue(ok({ emailAddress: 'me@example.com', historyId: '9007199254740993' }));
+
+    const baseline = await getHistoryBaseline();
+
+    expect(baseline.historyId).toBe('9007199254740993');
+    expect(typeof baseline.historyId).toBe('string');
+  });
+
+  it('omits the totals Gmail did not send rather than inventing zeros', async () => {
+    api.getProfile.mockResolvedValue(ok({ emailAddress: 'me@example.com', historyId: '5' }));
+
+    const baseline = await getHistoryBaseline();
+
+    expect(baseline).not.toHaveProperty('messagesTotal');
+    expect(baseline).not.toHaveProperty('threadsTotal');
+  });
+
+  it('errors when Gmail returns no historyId at all', async () => {
+    api.getProfile.mockResolvedValue(ok({ emailAddress: 'me@example.com' }));
+
+    await expect(getHistoryBaseline({ account: 'work' })).rejects.toThrow(/no historyId/i);
+  });
+});
+
+describe('getMailChanges', () => {
+  beforeEach(() => {
+    api.history.list.mockResolvedValue(ok({ historyId: '200' }));
+  });
+
+  it('rejects a cursor that is not a history id, and says where to get one', async () => {
+    await expect(getMailChanges({ historyId: 'latest' })).rejects.toThrow(
+      /get_history_baseline/,
+    );
+    expect(api.history.list).not.toHaveBeenCalled();
+  });
+
+  it('passes the cursor, filters and page size through', async () => {
+    await getMailChanges({
+      historyId: '100',
+      historyTypes: ['messageAdded'],
+      labelId: 'INBOX',
+      maxResults: 25,
+      pageToken: 'p2',
+    });
+
+    expect(api.history.list).toHaveBeenCalledWith({
+      userId: 'me',
+      startHistoryId: '100',
+      maxResults: 25,
+      pageToken: 'p2',
+      historyTypes: ['messageAdded'],
+      labelId: 'INBOX',
+    });
+  });
+
+  it('defaults the page size and omits the optional filters', async () => {
+    await getMailChanges({ historyId: '100' });
+
+    expect(api.history.list).toHaveBeenCalledWith({
+      userId: 'me',
+      startHistoryId: '100',
+      maxResults: DEFAULT_HISTORY_PAGE_SIZE,
+    });
+  });
+
+  it('clamps the page size to Gmail’s ceiling', async () => {
+    await getMailChanges({ historyId: '100', maxResults: 5000 });
+
+    expect(api.history.list.mock.calls[0][0].maxResults).toBe(MAX_HISTORY_PAGE_SIZE);
+  });
+
+  it('turns the expired-cursor 404 into a resync instruction', async () => {
+    api.history.list.mockRejectedValue(apiError(404, 'Requested entity was not found.'));
+
+    await expect(getMailChanges({ historyId: '100', account: 'work' })).rejects.toThrow(
+      /too old.*get_history_baseline.*resync/is,
+    );
+  });
+
+  it('does not disguise a non-404 failure as an expired cursor', async () => {
+    // 400, not 500: a retryable status would spend the retry budget in real sleeps.
+    api.history.list.mockRejectedValue(apiError(400, 'Invalid startHistoryId'));
+
+    const err = await getMailChanges({ historyId: '100' }).catch((e: Error) => e);
+    expect((err as Error).message).toMatch(/Invalid startHistoryId/);
+    expect((err as Error).message).not.toMatch(/too old/);
+  });
+
+  it('groups arrivals, deletions and label changes', async () => {
+    api.history.list.mockResolvedValue(
+      ok({
+        historyId: '250',
+        history: [
+          { id: '201', messagesAdded: [{ message: { id: 'm1', threadId: 't1', labelIds: ['INBOX'] } }] },
+          { id: '202', labelsAdded: [{ message: { id: 'm2', threadId: 't2' }, labelIds: ['STARRED'] }] },
+          { id: '203', labelsRemoved: [{ message: { id: 'm3', threadId: 't3' }, labelIds: ['UNREAD'] }] },
+          { id: '204', messagesDeleted: [{ message: { id: 'm4', threadId: 't4' } }] },
+        ],
+      }),
+    );
+    api.messages.get.mockResolvedValue(metaMessage('m1', 'Hello'));
+
+    const changes = await getMailChanges({ historyId: '200', account: 'work' });
+
+    expect(changes.account).toBe('work');
+    expect(changes.fromHistoryId).toBe('200');
+    expect(changes.historyId).toBe('250');
+    expect(changes.complete).toBe(true);
+    expect(changes.added).toHaveLength(1);
+    expect(changes.added[0]).toMatchObject({ id: 'm1', subject: 'Hello', isUnread: true });
+    expect(changes.labelsAdded).toEqual([{ id: 'm2', threadId: 't2', labelIds: ['STARRED'] }]);
+    expect(changes.labelsRemoved).toEqual([{ id: 'm3', threadId: 't3', labelIds: ['UNREAD'] }]);
+    expect(changes.deleted).toEqual([{ id: 'm4', threadId: 't4' }]);
+  });
+
+  it('returns empty categories, not nulls, for a quiet mailbox', async () => {
+    api.history.list.mockResolvedValue(ok({ historyId: '200' }));
+
+    const changes = await getMailChanges({ historyId: '200' });
+
+    expect(changes).toMatchObject({
+      historyId: '200',
+      complete: true,
+      added: [],
+      deleted: [],
+      labelsAdded: [],
+      labelsRemoved: [],
+    });
+    expect(changes.note).toBeUndefined();
+    expect(api.messages.get).not.toHaveBeenCalled();
+  });
+
+  it('deduplicates one message named by several records and unions its labels', async () => {
+    api.history.list.mockResolvedValue(
+      ok({
+        historyId: '250',
+        history: [
+          { id: '201', labelsAdded: [{ message: { id: 'm2', threadId: 't2' }, labelIds: ['STARRED'] }] },
+          { id: '202', labelsAdded: [{ message: { id: 'm2', threadId: 't2' }, labelIds: ['IMPORTANT'] }] },
+          { id: '203', messagesAdded: [{ message: { id: 'm1', threadId: 't1' } }] },
+          { id: '204', messagesAdded: [{ message: { id: 'm1', threadId: 't1' } }] },
+        ],
+      }),
+    );
+    api.messages.get.mockResolvedValue(metaMessage('m1', 'Hello'));
+
+    const changes = await getMailChanges({ historyId: '200' });
+
+    expect(changes.labelsAdded).toEqual([
+      { id: 'm2', threadId: 't2', labelIds: ['STARRED', 'IMPORTANT'] },
+    ]);
+    expect(changes.added).toHaveLength(1);
+    expect(api.messages.get).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not fetch a message that arrived and was deleted in the same window', async () => {
+    api.history.list.mockResolvedValue(
+      ok({
+        historyId: '250',
+        history: [
+          { id: '201', messagesAdded: [{ message: { id: 'm9', threadId: 't9' } }] },
+          { id: '202', messagesDeleted: [{ message: { id: 'm9', threadId: 't9' } }] },
+        ],
+      }),
+    );
+
+    const changes = await getMailChanges({ historyId: '200' });
+
+    expect(api.messages.get).not.toHaveBeenCalled();
+    expect(changes.added).toEqual([]);
+    expect(changes.deleted).toEqual([{ id: 'm9', threadId: 't9' }]);
+  });
+
+  it('degrades one unfetchable arrival to its history record instead of failing the poll', async () => {
+    api.history.list.mockResolvedValue(
+      ok({
+        historyId: '250',
+        history: [
+          {
+            id: '201',
+            messagesAdded: [
+              { message: { id: 'gone', threadId: 't1', labelIds: ['INBOX', 'UNREAD'] } },
+              { message: { id: 'm2', threadId: 't2' } },
+            ],
+          },
+        ],
+      }),
+    );
+    api.messages.get.mockImplementation(async ({ id }: { id: string }) => {
+      if (id === 'gone') throw apiError(404, 'Requested entity was not found.');
+      return metaMessage('m2', 'Still here');
+    });
+
+    const changes = await getMailChanges({ historyId: '200' });
+
+    expect(changes.added).toHaveLength(2);
+    expect(changes.added[0]).toMatchObject({
+      id: 'gone',
+      threadId: 't1',
+      subject: '',
+      labels: ['INBOX', 'UNREAD'],
+      isUnread: true,
+    });
+    expect(changes.added[1]).toMatchObject({ id: 'm2', subject: 'Still here' });
+  });
+
+  it('refuses to advance the cursor while pages remain', async () => {
+    api.history.list.mockResolvedValue(
+      ok({
+        historyId: '900',
+        nextPageToken: 'page2',
+        history: [{ id: '201', messagesAdded: [{ message: { id: 'm1', threadId: 't1' } }] }],
+      }),
+    );
+    api.messages.get.mockResolvedValue(metaMessage('m1', 'Hello'));
+
+    const changes = await getMailChanges({ historyId: '200' });
+
+    expect(changes.complete).toBe(false);
+    expect(changes.nextPageToken).toBe('page2');
+    expect(changes.note).toMatch(/SAME history_id/);
+    expect(changes.note).toMatch(/complete is true/);
+  });
+
+  it('skips every metadata fetch when include_summaries is false', async () => {
+    api.history.list.mockResolvedValue(
+      ok({
+        historyId: '250',
+        history: [
+          { id: '201', messagesAdded: [{ message: { id: 'm1', threadId: 't1', labelIds: ['INBOX'] } }] },
+        ],
+      }),
+    );
+
+    const changes = await getMailChanges({ historyId: '200', includeSummaries: false });
+
+    expect(api.messages.get).not.toHaveBeenCalled();
+    expect(changes.added).toEqual([
+      {
+        id: 'm1',
+        threadId: 't1',
+        from: '',
+        to: '',
+        subject: '',
+        date: '',
+        snippet: '',
+        labels: ['INBOX'],
+        isUnread: false,
+      },
+    ]);
+    expect(changes.note).toMatch(/ids and labels only/);
+  });
+
+  it('hydrates only up to the cap and says so, instead of a silent fan-out', async () => {
+    const overflow = HISTORY_SUMMARY_CAP + 5;
+    api.history.list.mockResolvedValue(
+      ok({
+        historyId: '250',
+        history: [
+          {
+            id: '201',
+            messagesAdded: Array.from({ length: overflow }, (_v, i) => ({
+              message: { id: `m${i}`, threadId: `t${i}` },
+            })),
+          },
+        ],
+      }),
+    );
+    api.messages.get.mockImplementation(async ({ id }: { id: string }) => metaMessage(id, `Subject ${id}`));
+
+    const changes = await getMailChanges({ historyId: '200' });
+
+    expect(api.messages.get).toHaveBeenCalledTimes(HISTORY_SUMMARY_CAP);
+    expect(changes.added).toHaveLength(overflow);
+    expect(changes.added[HISTORY_SUMMARY_CAP - 1].subject).not.toBe('');
+    expect(changes.added[HISTORY_SUMMARY_CAP].subject).toBe('');
+    expect(changes.note).toMatch(new RegExp(`only the first ${HISTORY_SUMMARY_CAP}`));
+  });
+
+  it('falls back to the polled cursor when the response omits historyId', async () => {
+    api.history.list.mockResolvedValue(ok({}));
+
+    const changes = await getMailChanges({ historyId: '100' });
+
+    expect(changes.historyId).toBe('100');
+    expect(changes.complete).toBe(true);
   });
 });

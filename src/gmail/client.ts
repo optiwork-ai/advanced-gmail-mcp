@@ -25,6 +25,9 @@ import type {
   Attachment,
   DraftPage,
   EmailSummary,
+  HistoryBaseline,
+  HistoryMessageRef,
+  MailChanges,
   EmailFull,
   EmailHeadersOnly,
   MessagePage,
@@ -701,6 +704,296 @@ export async function searchMessages(opts: {
     opts.maxResults ?? DEFAULT_LIST_PAGE_SIZE,
     opts.pageToken,
   );
+}
+
+// ---------------------------------------------------------------------------
+// Mailbox history — the mail-arrival watcher
+// ---------------------------------------------------------------------------
+
+/** The four change kinds `users.history.list` can report. */
+export const HISTORY_TYPES = [
+  'messageAdded',
+  'messageDeleted',
+  'labelAdded',
+  'labelRemoved',
+] as const;
+
+export type HistoryType = (typeof HISTORY_TYPES)[number];
+
+/** History records per call when the caller does not say. */
+export const DEFAULT_HISTORY_PAGE_SIZE = 100;
+
+/** Hard ceiling on history records per call — Gmail's own maximum. */
+export const MAX_HISTORY_PAGE_SIZE = 500;
+
+/**
+ * How many added messages get a metadata fetch.
+ *
+ * One history page can name far more messages than it has records, and each
+ * hydrated message is an API round trip. Past this cap the remaining arrivals
+ * come back as ids/threadIds/labels with empty headers, and `note` says so —
+ * a truncated but honest answer rather than a hundred silent round trips.
+ */
+export const HISTORY_SUMMARY_CAP = 100;
+
+/**
+ * Read the mailbox's current history cursor.
+ *
+ * This is the starting point for a watcher: store the `historyId`, then poll
+ * `getMailChanges` with it. Cheap — one `users.getProfile` call.
+ */
+export async function getHistoryBaseline(opts: {
+  account?: string;
+} = {}): Promise<HistoryBaseline> {
+  const resolved = resolveAccount(opts.account);
+  const gmail = await getGmailClient(resolved);
+
+  const response = await withRetry(() => gmail.users.getProfile({ userId: 'me' }));
+  const historyId = response.data.historyId;
+  if (!historyId) {
+    throw new Error(
+      `Gmail returned no historyId for account "${resolved.alias}" (${resolved.email}); `
+      + 'without one there is no cursor to watch from.',
+    );
+  }
+
+  return {
+    account: resolved.alias,
+    emailAddress: response.data.emailAddress || resolved.email,
+    historyId: String(historyId),
+    ...(typeof response.data.messagesTotal === 'number'
+      ? { messagesTotal: response.data.messagesTotal }
+      : {}),
+    ...(typeof response.data.threadsTotal === 'number'
+      ? { threadsTotal: response.data.threadsTotal }
+      : {}),
+  };
+}
+
+/** A history id is a uint64; it stays a string and must look like one. */
+function assertHistoryId(value: string): string {
+  const trimmed = String(value ?? '').trim();
+  if (!/^\d+$/.test(trimmed)) {
+    throw new Error(
+      `history_id must be the digits of a Gmail history cursor, got "${value}". `
+      + 'Call get_history_baseline to obtain one.',
+    );
+  }
+  return trimmed;
+}
+
+function historyStatus(err: unknown): number | undefined {
+  return (err as { code?: number })?.code
+    ?? (err as { response?: { status?: number } })?.response?.status;
+}
+
+function refFrom(message: gmail_v1.Schema$Message | undefined): HistoryMessageRef | null {
+  if (!message?.id) return null;
+  return { id: message.id, threadId: message.threadId || '' };
+}
+
+/** Merge a ref into a map, unioning the label ids the events carried. */
+function mergeRef(
+  into: Map<string, HistoryMessageRef>,
+  ref: HistoryMessageRef,
+  labelIds?: string[] | null,
+): void {
+  const existing = into.get(ref.id);
+  const target = existing ?? { id: ref.id, threadId: ref.threadId };
+  if (labelIds && labelIds.length > 0) {
+    const merged = new Set([...(target.labelIds ?? []), ...labelIds]);
+    target.labelIds = [...merged];
+  }
+  if (!existing) into.set(ref.id, target);
+}
+
+/**
+ * The summary shape for a message we deliberately did not fetch: everything the
+ * history record itself told us, and empty headers rather than invented ones.
+ */
+function bareSummary(ref: HistoryMessageRef): EmailSummary {
+  return {
+    id: ref.id,
+    threadId: ref.threadId,
+    from: '',
+    to: '',
+    subject: '',
+    date: '',
+    snippet: '',
+    labels: ref.labelIds ?? [],
+    isUnread: (ref.labelIds ?? []).includes('UNREAD'),
+  };
+}
+
+/**
+ * Metadata-fetch the arrivals, tolerating the ones that no longer exist.
+ *
+ * A message can be added and then deleted inside one polling window; asking
+ * Gmail for it answers 404. That must not fail the whole poll, so a failed
+ * fetch degrades to the ids and labels the history record already carried.
+ */
+async function hydrateArrivals(
+  gmail: gmail_v1.Gmail,
+  refs: HistoryMessageRef[],
+): Promise<EmailSummary[]> {
+  const out: EmailSummary[] = new Array(refs.length);
+  for (let i = 0; i < refs.length; i += FETCH_CONCURRENCY) {
+    const chunk = refs.slice(i, i + FETCH_CONCURRENCY);
+    const results = await Promise.all(
+      chunk.map(async ref => {
+        try {
+          const full = await withRetry(() =>
+            gmail.users.messages.get({
+              userId: 'me',
+              id: ref.id,
+              format: 'metadata',
+              metadataHeaders: ['From', 'To', 'Subject', 'Date'],
+            })
+          );
+          return toEmailSummary(full.data);
+        } catch {
+          return bareSummary(ref);
+        }
+      })
+    );
+    results.forEach((summary, idx) => {
+      out[i + idx] = summary;
+    });
+  }
+  return out;
+}
+
+/**
+ * List what changed in the mailbox since a caller-supplied cursor.
+ *
+ * Stateless by design: the caller (a session, an agent, a scheduled job) owns
+ * the cursor. Pass the `historyId` from `getHistoryBaseline` — or from the last
+ * COMPLETE page of this function — and get back the arrivals, deletions and
+ * label changes since then, plus the cursor for next time.
+ *
+ * Two things the API makes easy to get wrong, handled here:
+ *
+ * 1. **The cursor expires.** Gmail keeps roughly a week of history and answers
+ *    404 for anything older. That is not a transport failure, it is "resync",
+ *    and it is reported as such rather than as a generic API error.
+ * 2. **A page is not the whole answer.** `historyId` in the response is the
+ *    mailbox's CURRENT cursor, not the end of this page. Storing it while
+ *    `nextPageToken` is set skips everything on the pages not read yet, so
+ *    `complete` is false until the last page and the note says to keep the old
+ *    cursor until then.
+ */
+export async function getMailChanges(opts: {
+  historyId: string;
+  account?: string;
+  historyTypes?: HistoryType[];
+  labelId?: string;
+  maxResults?: number;
+  pageToken?: string;
+  includeSummaries?: boolean;
+}): Promise<MailChanges> {
+  const startHistoryId = assertHistoryId(opts.historyId);
+  const resolved = resolveAccount(opts.account);
+  const gmail = await getGmailClient(resolved);
+
+  const maxResults = Math.min(
+    Math.max(1, opts.maxResults ?? DEFAULT_HISTORY_PAGE_SIZE),
+    MAX_HISTORY_PAGE_SIZE,
+  );
+
+  let response;
+  try {
+    response = await withRetry(() =>
+      gmail.users.history.list({
+        userId: 'me',
+        startHistoryId,
+        maxResults,
+        ...(opts.pageToken ? { pageToken: opts.pageToken } : {}),
+        ...(opts.historyTypes && opts.historyTypes.length > 0
+          ? { historyTypes: opts.historyTypes }
+          : {}),
+        ...(opts.labelId ? { labelId: opts.labelId } : {}),
+      })
+    );
+  } catch (err: unknown) {
+    if (historyStatus(err) === 404) {
+      throw new Error(
+        `The cursor ${startHistoryId} is too old for account "${resolved.alias}" `
+        + `(${resolved.email}) — Gmail keeps only about a week of history. `
+        + 'Call get_history_baseline for a fresh cursor, and treat the gap as a full '
+        + 'resync (list_emails or search_emails) rather than as "no new mail".',
+      );
+    }
+    throw err;
+  }
+
+  const added = new Map<string, HistoryMessageRef>();
+  const deleted = new Map<string, HistoryMessageRef>();
+  const labelsAdded = new Map<string, HistoryMessageRef>();
+  const labelsRemoved = new Map<string, HistoryMessageRef>();
+
+  for (const record of response.data.history ?? []) {
+    for (const entry of record.messagesAdded ?? []) {
+      const ref = refFrom(entry.message ?? undefined);
+      if (ref) mergeRef(added, ref, entry.message?.labelIds);
+    }
+    for (const entry of record.messagesDeleted ?? []) {
+      const ref = refFrom(entry.message ?? undefined);
+      if (ref) mergeRef(deleted, ref, entry.message?.labelIds);
+    }
+    for (const entry of record.labelsAdded ?? []) {
+      const ref = refFrom(entry.message ?? undefined);
+      if (ref) mergeRef(labelsAdded, ref, entry.labelIds);
+    }
+    for (const entry of record.labelsRemoved ?? []) {
+      const ref = refFrom(entry.message ?? undefined);
+      if (ref) mergeRef(labelsRemoved, ref, entry.labelIds);
+    }
+  }
+
+  // A message added and then deleted in the same window is not an arrival to
+  // read; it stays in `deleted`, where it is true, and out of the fetch queue.
+  const arrivals = [...added.values()].filter(ref => !deleted.has(ref.id));
+
+  const notes: string[] = [];
+  const nextPageToken = response.data.nextPageToken || undefined;
+  if (nextPageToken) {
+    notes.push(
+      'More pages remain: call get_mail_changes again with the SAME history_id and this '
+      + 'page_token. Do not store the returned history_id until complete is true.',
+    );
+  }
+
+  let summaries: EmailSummary[];
+  if (opts.includeSummaries === false) {
+    summaries = arrivals.map(bareSummary);
+    if (arrivals.length > 0) {
+      notes.push('include_summaries was false: arrivals carry ids and labels only.');
+    }
+  } else if (arrivals.length > HISTORY_SUMMARY_CAP) {
+    const head = await hydrateArrivals(gmail, arrivals.slice(0, HISTORY_SUMMARY_CAP));
+    const tail = arrivals.slice(HISTORY_SUMMARY_CAP).map(bareSummary);
+    summaries = [...head, ...tail];
+    notes.push(
+      `${arrivals.length} messages arrived; only the first ${HISTORY_SUMMARY_CAP} carry `
+      + 'headers. Read the rest with read_email, or narrow the window with a smaller '
+      + 'max_results.',
+    );
+  } else {
+    summaries = await hydrateArrivals(gmail, arrivals);
+  }
+
+  return {
+    account: resolved.alias,
+    fromHistoryId: startHistoryId,
+    historyId: String(response.data.historyId ?? startHistoryId),
+    complete: !nextPageToken,
+    ...(nextPageToken ? { nextPageToken } : {}),
+    added: summaries,
+    deleted: [...deleted.values()],
+    labelsAdded: [...labelsAdded.values()],
+    labelsRemoved: [...labelsRemoved.values()],
+    ...(notes.length > 0 ? { note: notes.join(' ') } : {}),
+  };
 }
 
 /**

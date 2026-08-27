@@ -30,6 +30,64 @@ export interface DraftPage {
 }
 
 /**
+ * The mailbox cursor a mail-arrival watcher stores between polls.
+ *
+ * `historyId` is a uint64 and is kept as a STRING on purpose: live values
+ * already exceed what a JS number represents exactly, and a rounded cursor
+ * silently skips or replays mail.
+ */
+export interface HistoryBaseline {
+  /** The alias the cursor belongs to. A cursor is meaningless on another account. */
+  account: string;
+  emailAddress: string;
+  historyId: string;
+  messagesTotal?: number;
+  threadsTotal?: number;
+}
+
+/** A message named by a history record, without a metadata fetch. */
+export interface HistoryMessageRef {
+  id: string;
+  threadId: string;
+  /**
+   * For the label categories, the label ids the event added or removed, unioned
+   * across every record in the page. For deletions, whatever labels the record
+   * carried.
+   */
+  labelIds?: string[];
+}
+
+/**
+ * One page of mailbox changes since a caller-supplied cursor.
+ *
+ * There is no server-side state: the caller stores `historyId` and passes it
+ * back on the next poll.
+ */
+export interface MailChanges {
+  /** The alias these changes came from. */
+  account: string;
+  /** The cursor that was polled. */
+  fromHistoryId: string;
+  /**
+   * The cursor for the NEXT poll. Store it only when `complete` is true — while
+   * pages remain, the mailbox has already moved past what this page reports.
+   */
+  historyId: string;
+  /** True when this is the last page for `fromHistoryId`. */
+  complete: boolean;
+  /** Present when more pages remain. Call again with the SAME `history_id`. */
+  nextPageToken?: string;
+  /** Messages that arrived (or were inserted) since the cursor. */
+  added: EmailSummary[];
+  /** Messages deleted since the cursor. They cannot be fetched, so ids only. */
+  deleted: HistoryMessageRef[];
+  labelsAdded: HistoryMessageRef[];
+  labelsRemoved: HistoryMessageRef[];
+  /** Set when something about this page needs saying (an unhydrated tail). */
+  note?: string;
+}
+
+/**
  * Headers-only result for `read_email` with format 'metadata' or 'minimal'.
  * Distinguished from EmailFull by the explicit `body_note`, so a caller can
  * never mistake a body-free response for an empty message.
