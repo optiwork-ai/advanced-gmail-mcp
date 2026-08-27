@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] — 2026-08-27
+
+### Added
+- **Google Calendar tools (4)**, bringing the roster to 42:
+  - `list_calendars` — the calendars the account can see, with id, summary, timeZone, accessRole and which one is primary. Read-only.
+  - `list_calendar_events` — events on a calendar, with recurring events expanded into their instances and returned in start-time order. Optional `time_min` / `time_max` / `query`; 50 per page, ceiling 250, `page_token` for the rest. Read-only.
+  - `get_freebusy` — busy intervals across one or more calendars in a time window. A calendar the account cannot read comes back with an `errors` entry rather than failing the whole query. Read-only.
+  - `create_calendar_event` — the only Calendar tool that writes.
+- **`create_calendar_event` will not email anyone by default.** `send_updates` defaults to `"none"`; adding attendees puts the event on their calendar without sending mail. `"all"` makes Google email every attendee an invitation — an outward-facing act — and the parameter description says so plainly. Every created event returns a `notice` stating which happened, and the creation is logged with account, calendar id, event id, attendee count and the `send_updates` value — never attendee addresses or the event body.
+- **`create_calendar_event` refuses ambiguous times rather than guessing.** A date-only `start` for a timed event errors with an instruction to pass a full timestamp or set `all_day`; a timestamp passed with `all_day: true` errors the other way. The all-day end date is documented as exclusive, as Google defines it.
+
+### Notes
+- No new scopes: the Calendar scopes have been in the requested set since 2026-05-20. An alias whose token predates that grant must be re-authenticated (`npm run auth -- <alias>`) before the Calendar tools work.
+- The Google Calendar API must be enabled on the Cloud project; the README setup steps now say so.
+
 ## [1.3.0] — 2026-08-27
 
 ### Added

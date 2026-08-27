@@ -6,7 +6,7 @@ A Gmail [MCP server](https://modelcontextprotocol.io) for [Claude Code](https://
 
 ## Features
 
-- **38 tools** spanning Gmail (read, compose, draft management, modify, attachments, thread and label management) plus read-only Google Chat, Drive, and Docs — see the [Tools](#tools) table
+- **42 tools** spanning Gmail (read, compose, draft management, modify, attachments, thread and label management), Google Calendar, and read-only Google Chat, Drive, and Docs — see the [Tools](#tools) table
 - **Gmail-native outbound mail** — everything you send goes out as `multipart/alternative` (HTML plus a plain-text alternative), with your account's Gmail signature, quoted history on replies, and a proper `Name <address>` sender. Attachments supported on send, draft and reply; forwards re-attach the original's files
 - **Multi-account** support with simple aliases
 - **OAuth2** authentication with interactive CLI flow
@@ -31,12 +31,14 @@ npm install
 3. Enable the APIs:
    - APIs & Services → Enable APIs → search "Gmail API" → Enable
    - For the read-only Chat/Drive/Docs tools, also enable the **Google Chat API**, **Google Drive API**, and **Google Docs API**
+   - For the Calendar tools, also enable the **Google Calendar API**
 4. Configure the **OAuth consent screen**:
    - APIs & Services → OAuth consent screen
    - User type: External (or Internal if using Google Workspace)
    - Add your email address(es) as test users
    - Add scopes: `gmail.readonly`, `gmail.modify`, `gmail.send`, `gmail.compose`
    - For read-only Chat/Drive/Docs, also add: `chat.spaces.readonly`, `chat.messages.readonly`, `drive.readonly`, `documents.readonly`, then re-run the auth flow for each alias (`npm run auth -- <alias>`) so the new scopes are granted
+   - For Calendar, also add: `calendar.events`, `calendar.freebusy`, `calendar.calendarlist.readonly`
 5. Create **OAuth credentials**:
    - APIs & Services → Credentials → Create Credentials → OAuth client ID
    - Application type: **Desktop app**
@@ -158,6 +160,19 @@ These tools are **strictly read-only** — nothing is sent, posted, created, upd
 | `search_drive_files` | Search Drive files with Drive `q` query syntax |
 | `read_drive_file` | Read a Drive file's metadata + text (Docs/Sheets/Slides exported to text; binary types return metadata only; ~1MB cap; read `contentNote` — a Sheets export is first-sheet-only) |
 | `get_google_doc` | Read a Google Doc as title + flattened plain text |
+
+### Calendar
+
+Three read-only tools plus one that writes. The Calendar scopes (`calendar.events`, `calendar.freebusy`, `calendar.calendarlist.readonly`) are already in the scope list; an alias whose token predates them must be re-authenticated before these work.
+
+| Tool | Description |
+|------|-------------|
+| `list_calendars` | List the calendars the account can see (id, summary, timeZone, accessRole, primary) |
+| `list_calendar_events` | List events on a calendar — recurring events expanded, start-time order, 50 per page (max 250), `page_token` for more |
+| `get_freebusy` | Busy intervals across one or more calendars in a time window (no event titles) |
+| `create_calendar_event` | **Creates an event.** `send_updates` defaults to `"none"` — nobody is emailed. Passing `"all"` makes Google email every attendee an invitation |
+
+**On `create_calendar_event` and invitation email:** adding attendees does not notify them. `send_updates` decides that, and its default is `"none"`, so the default path sends no mail at all. `"all"` is an outward-facing act — Google mails every attendee — and `"externalOnly"` mails only attendees outside your Workspace domain. The tool's result carries a `notice` stating which happened.
 
 All tools accept an optional `account` parameter (alias or email). Defaults to the account set in `accounts.json`.
 
