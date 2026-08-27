@@ -17,10 +17,12 @@ adds: CRLF/header-injection sanitation and `resolveAccount` hardening).
       buildQuoteBlock, buildForwardBlock, loadAttachment + MIME table, buildMimeMessage
       (multipart/alternative, multipart/mixed, base64 CTE, size gates). 95 unit tests, all green.
       `types.ts` gained Attachment / SendAsProfile / ComposeOptions.
+- [x] **B3 `src/gmail/settings.ts` + `settings.test.ts`** — cached sendAs profile (50-min TTL),
+      picked isDefault -> isPrimary -> email match, deliberately OUTSIDE withRetry so a 403
+      degrades to an empty profile instead of killing the send. 8 tests, all green.
 
 ## Remaining
 
-- [ ] B3 `settings.ts` sendAs profile (cached, never inside withRetry)
 - [ ] B4 attachments + size gates + media transport
 - [ ] B5 forward rebuild
 - [ ] `client.ts` rewrite: buildRawMessage, prepareReply, buildReplyRecipients,
