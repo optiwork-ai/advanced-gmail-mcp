@@ -126,6 +126,48 @@ describe('reflowPlainText', () => {
     expect(reflowPlainText('')).toBe('');
     expect(reflowPlainText('just one line')).toBe('just one line');
   });
+
+  // Whole-paragraph classification (chair ruling Q2+Q15, Option B). A paragraph
+  // reflows only when EVERY line except the last clears the threshold and no
+  // per-line guard vetoes a seam; otherwise it is left byte-for-byte alone.
+  const signOff = [
+    'Thanks for sending over the updated appraisal report yesterday afternoon.',
+    'Steve Angelo',
+    'Appraisal Host',
+    '555-1234',
+  ].join('\n');
+
+  it('leaves a typed sign-off block verbatim under a long line', () => {
+    expect(reflowPlainText(signOff)).toBe(signOff);
+  });
+
+  it('is idempotent on a paragraph it declines to reflow', () => {
+    const once = reflowPlainText(signOff);
+    expect(reflowPlainText(once)).toBe(once);
+  });
+
+  it('leaves the whole paragraph verbatim when an interior line is short', () => {
+    const long = 'x'.repeat(70);
+    const input = `${long}\nshort\n${long}\ntail`;
+    expect(reflowPlainText(input)).toBe(input);
+  });
+
+  it('reflows when only the final line is short', () => {
+    const long = 'x'.repeat(70);
+    expect(reflowPlainText(`${long}\n${long}\ntail`)).toBe(`${long} ${long} tail`);
+  });
+
+  it('lets one vetoed seam block the whole paragraph, not just that seam', () => {
+    const long = 'x'.repeat(70);
+    const input = `${long}\n${long}\n- item`;
+    expect(reflowPlainText(input)).toBe(input);
+  });
+
+  it('classifies each paragraph independently', () => {
+    const long = 'x'.repeat(70);
+    const out = reflowPlainText(`${long}\n${long}\ntail\n\n${signOff}`);
+    expect(out).toBe(`${long} ${long} tail\n\n${signOff}`);
+  });
 });
 
 describe('escapeHtml', () => {

@@ -246,6 +246,11 @@ const LIST_ITEM_RE = /^\s*([-*•–—]|\d+[.)]|[A-Za-z][.)])\s/;
 const QUOTED_RE = /^\s*>/;
 const INDENTED_RE = /^\s{2,}\S/;
 
+/**
+ * Whether the seam between two ORIGINAL adjacent lines of a paragraph looks like
+ * a composer's hard wrap rather than an authored line break. A single false seam
+ * disqualifies the whole paragraph — see `reflowPlainText`.
+ */
 function canJoin(current: string, next: string): boolean {
   const trimmed = current.trimEnd();
   if (trimmed.length < REFLOW_MIN_JOIN_LEN) return false;
@@ -258,7 +263,25 @@ function canJoin(current: string, next: string): boolean {
 
 /**
  * Join lines that were hard-wrapped by a composing model back into paragraphs.
- * Blank lines are preserved verbatim as paragraph separators. Idempotent.
+ *
+ * The unit of decision is the PARAGRAPH, not the individual seam (review-
+ * outbound.md §B1c as amended by the chair ruling of 2026-08-27, Q2+Q15). A
+ * paragraph collapses to one line only when EVERY seam in it passes `canJoin` —
+ * i.e. every line but the last clears `REFLOW_MIN_JOIN_LEN`, none of them ends
+ * in a colon, and no following line is a list item, a quote or indented.
+ * Otherwise the paragraph is emitted byte-for-byte as authored.
+ *
+ * Classifying pairwise instead welds authored structure onto the sentence above
+ * it: a typed sign-off under a full-width line ("…yesterday afternoon." /
+ * "Steve Angelo" / "Appraisal Host" / "555-1234") became one run-on line,
+ * because each accumulated line was long enough to swallow the next. All-or-
+ * nothing keeps the 70-column composer wrap fully joined — that is the feature's
+ * purpose, and such a paragraph passes every seam — while leaving anything with
+ * a short interior line alone.
+ *
+ * Blank lines are preserved verbatim as paragraph separators. Idempotent by
+ * construction: a reflowed paragraph is a single line and has no seams left, and
+ * a declined paragraph is unchanged input, so it classifies identically again.
  */
 export function reflowPlainText(text: string): string {
   const lines = normalizeNewlines(text).split('\n');
@@ -272,18 +295,21 @@ export function reflowPlainText(text: string): string {
       continue;
     }
 
-    let current = lines[i];
-    i++;
-    while (i < lines.length && lines[i].trim() !== '') {
-      if (canJoin(current, lines[i])) {
-        current = `${current.trimEnd()} ${lines[i].trim()}`;
-      } else {
-        out.push(current);
-        current = lines[i];
-      }
-      i++;
+    const start = i;
+    while (i < lines.length && lines[i].trim() !== '') i++;
+    const paragraph = lines.slice(start, i);
+
+    const reflowable = paragraph.every(
+      (line, idx) => idx === paragraph.length - 1 || canJoin(line, paragraph[idx + 1]),
+    );
+
+    if (reflowable && paragraph.length > 1) {
+      out.push(
+        paragraph.map((line, idx) => (idx === 0 ? line.trimEnd() : line.trim())).join(' '),
+      );
+    } else {
+      out.push(...paragraph);
     }
-    out.push(current);
   }
 
   return out.join('\n');
