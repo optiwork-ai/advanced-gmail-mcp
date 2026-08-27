@@ -1160,3 +1160,36 @@ describe('buildMimeMessage — inline images', () => {
     expect(raw.split(`--${alternative}--`)).toHaveLength(2);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Chair ruling Q6 — a URL must not absorb a trailing entity
+// ---------------------------------------------------------------------------
+
+describe('autolink entity boundaries (chair ruling Q6)', () => {
+  // Q6 asked for the tightening "exclude & from the terminating class, or
+  // autolink before escaping". The former shipped with C5; these cases pin the
+  // entities C5's own tests did not name, so the ruling is closed by evidence
+  // rather than by inheritance.
+  it.each([
+    ['Visit "https://example.com" now', '&quot;'],
+    ["Visit 'https://example.com' now", '&#39;'],
+    ['see <https://example.com> ok', '&lt;'],
+  ])('leaves the entity around %j outside the anchor', (input, entity) => {
+    const out = textToHtml(input);
+    expect(out).toContain('<a href="https://example.com">https://example.com</a>');
+    expect(out).toContain(entity);
+    // The href must not have swallowed any part of an entity.
+    const href = out.match(/href="([^"]*)"/)?.[1] as string;
+    expect(href).toBe('https://example.com');
+  });
+
+  it('ends the link before a full stop that precedes a quote', () => {
+    const out = textToHtml('trailing https://example.com."');
+    expect(out).toContain('<a href="https://example.com">https://example.com</a>.&quot;');
+  });
+
+  it('still keeps an escaped ampersand inside a query string', () => {
+    const href = textToHtml('q https://example.com/s?a=1&b=2 end').match(/href="([^"]*)"/)?.[1];
+    expect(href).toBe('https://example.com/s?a=1&amp;b=2');
+  });
+});
