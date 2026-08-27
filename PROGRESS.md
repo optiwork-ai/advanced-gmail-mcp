@@ -415,3 +415,97 @@ contingent fix pass and cold Fable validation. For the chair's live acceptance:
 add one `[TEST]` send with an embedded image — the `multipart/related` structure
 is asserted byte-wise but only a real client proves the image renders in the
 body rather than as an attachment.
+
+## Phase 2 — Units F + G (builder W9, 2026-08-27)
+
+Baseline at `fe054f8`: 467 tests, 44 tools. HEAD: **519 tests**, typecheck clean,
+**50 tools**.
+
+### The scope edit — the one authorized change to `auth.ts`
+
+- [x] **`0a16f26` — `drive.file` + `gmail.settings.basic` added to `SCOPES`.** Exactly
+      two entries, which is the whole of the Phase-2 authorization. The docstring above
+      the array gained a paragraph naming which tools each scope backs, and its claim
+      that the Chat/Drive/Docs grants leave the server read-only "in those services" was
+      narrowed to Chat and Docs, because `upload_drive_file` makes it false for Drive. No
+      other line of that file changed; `getAuthClient`, the consent flow and
+      `checkAuthStatus` are byte-unchanged.
+- **The reality this creates:** no stored token carries either scope. Until each alias
+  re-consents (`npm run auth -- <alias>`), all six new tools 403. That is not a defect
+  to be worked around; it is stated in every new tool's description, in each one's error
+  message, in the README setup section and in the CHANGELOG.
+
+### Unit F — Drive save
+
+- [x] **`23fac87` — `upload_drive_file`.** `uploadFile` lives in `src/drive/client.ts`
+      alongside the read factory it reuses (`getDriveClient`, unchanged); the module
+      header now names the one mutating call and why `drive.file` bounds it. Refusals all
+      happen before the network: relative path, empty path, missing path, not a regular
+      file, over `MAX_DRIVE_UPLOAD_BYTES` (100,000,000 — decimal MB, matching every other
+      ceiling in the codebase). The media body is `fs.createReadStream` created INSIDE the
+      retried call, so a retry re-reads the file rather than replaying a consumed stream —
+      a 5xx retry can therefore duplicate a file in Drive, which is documented rather than
+      hidden. A `name` override is basenamed and control-stripped so it cannot smuggle a
+      directory; the content type falls back to the local extension when the override has
+      none. Logged like every mutating path: account, file id, folder id, byte count,
+      content type — never the local path. 21 tests in the new
+      `src/drive/client.test.ts` (stubbed `drive_v3`).
+- [x] **`src/scope-error.ts`** (new, shared with Unit G): a 401/403 from a call needing a
+      not-yet-granted scope becomes an instruction naming the tool, the scope and the
+      exact re-consent command. It recovers the status from BOTH the raw Google error and
+      the message `withRetry` rewrites it into, and it re-throws every other failure
+      untouched.
+
+### Unit G — mail rules, vacation, signature swap
+
+- [x] **`a660606` — five tools on `users.settings.*`.** `src/gmail/settings-api.ts` is a
+      new module, deliberately not `settings.ts`: that one must never fail a send and
+      needs no scope, these must fail loudly and all need `gmail.settings.basic`.
+      `list_filters` / `create_filter` / `delete_filter` in `src/tools/filters.ts`,
+      `get_vacation` / `set_vacation` in `src/tools/vacation.ts` (grouped registration,
+      following `star.ts`). 31 tests in `src/gmail/settings-api.test.ts`.
+      - **`create_filter` cannot set a forwarding action** — a tool that can would be a
+        quiet mailbox-exfiltration path, and forwarding needs a verified address and a
+        wider scope anyway. `list_filters` still REPORTS an existing forwarding filter.
+      - No-op filters refused (no criteria = matches everything; no label action = does
+        nothing), matching the existing no-op refusals on `label_email`, `update_label`,
+        `modify_thread` and `batch_modify`.
+      - **`set_vacation` fetches and merges** rather than replacing, because Gmail's
+        `updateVacation` is a full replace: without it, "turn it off" erases the saved
+        message and "change the subject" blanks the body. Same fetch-and-preserve rule as
+        the label colour tools. Enabling with no reply text anywhere, an unparseable
+        date, or an inverted window are all refused before the write.
+      - Enabling is treated as the outward act it is: logged before the call, flags only,
+        and the result carries a notice saying what is now switched on.
+- [x] **`167c4c5` — the signature-source swap, which is a COMMENT change by design.**
+      `getSendAsProfile` keeps its current call, its arguments and its graceful
+      degradation exactly as they were; only the module rule that said "do not add
+      `gmail.settings.basic`" was rewritten, since that scope is now requested. Making the
+      code depend on the new grant would break composition for every alias that has not
+      re-consented — and a signature lookup must never be able to fail a send. The 10
+      existing settings tests pass untouched.
+
+### W9 verification (2026-08-27)
+
+- `npm run typecheck` clean. `npm test`: **12 files, 519 tests, all passing** (baseline
+  after W8 was 467; +52, all in the two NEW test files — no pre-existing test file was
+  edited, weakened or removed).
+- Registration smoke run: **50 tools**, including all six new ones.
+- Prohibitions: `git diff 536a9be..HEAD -- src/gmail/auth.ts` is now NON-EMPTY by
+  authorization — it is exactly the two scope entries plus the docstring correction, and
+  nothing else in that file moved. No `accounts.json` / `credentials.json` / `tokens/` /
+  `package.json` change; no new deps; no push, deploy or `gh` write; **no live Google API
+  call of any kind** (none is even possible for these paths until re-consent); no live
+  send and no outward state change; no AI attribution.
+- The heredoc/control-character trap recorded as QUESTIONS item 13 bit twice during this
+  unit and was caught both times by `file <path>` before committing. Worth keeping that
+  check in the loop.
+
+## Remaining — after W9
+
+The Phase-2 adversarial opus pass, the contingent fix pass, and cold Fable validation.
+Then the **one re-auth round for all five aliases** (BUILD-CONTRACT's closing section),
+which is the gate before ANY of the six new tools can be exercised live. For the chair's
+live acceptance list, add: one small `upload_drive_file` to Drive root, one `list_filters`
+read, one `get_vacation` read — and note that `set_vacation` enabling is an outward act
+that should be tested only with an immediate disable, if at all.

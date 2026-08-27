@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] — 2026-08-27
+
+### Added
+- **Drive upload (1 tool)** and **mailbox settings (5 tools)**, bringing the roster to 50:
+  - `upload_drive_file` — a local file goes to Drive and comes back as an id, a name, a size and a `webViewLink`. Optional target folder and name override. It always creates a new file; it never overwrites or updates an existing one.
+  - `list_filters` / `create_filter` / `delete_filter` — the account's mail rules.
+  - `get_vacation` / `set_vacation` — the out-of-office responder.
+- **Two new OAuth scopes, and every account must re-consent to use these six tools.** `drive.file` and `gmail.settings.basic` were added to the requested set. A token carries the permissions it was issued with, so **every alias authenticated before 2026-08-27 gets a 403 from the six new tools until it runs `npm run auth -- <alias>` again**. Each of those tools says exactly that in its own error message rather than reporting a generic authentication failure. Nothing else is affected: sending, reading, labels, Calendar and the Gmail signature all keep working on the existing grants.
+- **`drive.file`, not full Drive write.** It is the narrow scope: it reaches only the files this server itself creates and can never touch anything else in the user's Drive. Reading the rest of Drive still goes through `search_drive_files` / `read_drive_file` under `drive.readonly`.
+- **`upload_drive_file` refuses before it uploads.** A relative path, a path that does not exist, anything that is not a regular file, and anything over 100MB are all rejected without a network call. The body is streamed rather than buffered, and the stream is created inside the retried call so a retried attempt re-reads the file instead of sending nothing.
+- **`create_filter` cannot create a forwarding filter.** Gmail filters can forward matching mail to another address; a tool able to create one could quietly route a mailbox off-site, and forwarding needs a separately verified address anyway. Existing forwarding filters are still reported by `list_filters` — the read side tells the truth about what is configured. A filter with no criteria (it would match everything) or with no label action (it would do nothing) is refused, as no-op label calls already are elsewhere.
+- **`set_vacation` merges rather than replaces.** Gmail's `updateVacation` overwrites the whole settings object, so turning the responder off would have erased the message the user wrote, and changing the subject would have blanked the body. Current settings are fetched and the supplied fields merged over them — the same fetch-and-preserve rule the label tools follow. Enabling with no reply text anywhere, an unparseable date, or an inverted window are all refused.
+- **Enabling the vacation responder is flagged as the outward act it is.** While it is on, the account replies automatically to anyone who writes in, with no further call to this server. The tool description says so, the switch is logged before it happens (flags only — never the auto-reply text), and the result carries a notice stating exactly what is now on.
+
+### Changed
+- **The Gmail signature lookup is now a properly scoped call.** `users.settings.sendAs.list` was verified working under the Gmail scopes alone, which is why the signature feature shipped without a re-consent. `gmail.settings.basic` is now requested, so once an alias re-consents the lookup stops leaning on observed behaviour. The call, its arguments and its graceful degradation are all unchanged — an account that has not re-consented sends exactly as it did before, and a failed signature lookup still costs a signature and never a send.
+
 ## [1.5.0] — 2026-08-27
 
 ### Added

@@ -49,6 +49,14 @@ Before using any tool, run `ToolSearch` with query `+gmail` to load them.
 | `create_label` | Create a label (name, text_color?, background_color?, account) |
 | `update_label` | Rename/recolor a label (label_id, name?, colors?, account) |
 | `delete_label` | Delete a label (label_id, account) — confirm with user first |
+| `list_filters` | List the account's mail rules (account) — read-only |
+| `create_filter` | Create a mail rule (from?, to?, subject?, query?, negated_query?, has_attachment?, exclude_chats?, add_label_ids?, remove_label_ids?, account) — future mail only; `TRASH` deletes, removing `INBOX` archives; cannot forward |
+| `delete_filter` | Delete a mail rule permanently (filter_id, account) — confirm with user first |
+| `get_vacation` | Read the vacation-responder settings (account) — read-only |
+| `set_vacation` | Turn the vacation responder on/off (enable, subject?, body?, is_html?, start_time?, end_time?, restrict_to_contacts?, restrict_to_domain?, account) — while ON the account auto-replies to everyone; confirm first |
+| `upload_drive_file` | Upload a local file to Drive (file_path absolute, folder_id?, name?, account) — always creates a NEW file; 100MB cap |
+
+> The five settings tools and `upload_drive_file` need scopes added on 2026-08-27 (`gmail.settings.basic`, `drive.file`). An account authenticated before then answers **403** until it re-runs `npm run auth -- <alias>`; the error message says so.
 
 ## Actions
 

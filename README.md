@@ -6,7 +6,7 @@ A Gmail [MCP server](https://modelcontextprotocol.io) for [Claude Code](https://
 
 ## Features
 
-- **44 tools** spanning Gmail (read, compose, draft management, modify, attachments, mailbox-change watching, thread and label management), Google Calendar, and read-only Google Chat, Drive, and Docs — see the [Tools](#tools) table
+- **50 tools** spanning Gmail (read, compose, draft management, modify, attachments, mailbox-change watching, thread and label management, mail rules and the vacation responder), Google Calendar, Google Drive (read plus upload), and read-only Google Chat and Docs — see the [Tools](#tools) table
 - **Gmail-native outbound mail** — everything you send goes out as `multipart/alternative` (HTML plus a plain-text alternative), with your account's Gmail signature, quoted history on replies, and a proper `Name <address>` sender. Attachments supported on send, draft and reply; images can be embedded in the body with `inline_images` and referenced as `cid:filename`; forwards re-attach the original's files and keep its embedded images embedded
 - **Watch for new mail without polling the whole inbox** — `get_history_baseline` hands you a cursor, `get_mail_changes` tells you what arrived, was deleted or was relabelled since it. Stateless: you keep the cursor
 - **Multi-account** support with simple aliases
@@ -40,6 +40,8 @@ npm install
    - Add scopes: `gmail.readonly`, `gmail.modify`, `gmail.send`, `gmail.compose`
    - For read-only Chat/Drive/Docs, also add: `chat.spaces.readonly`, `chat.messages.readonly`, `drive.readonly`, `documents.readonly`, then re-run the auth flow for each alias (`npm run auth -- <alias>`) so the new scopes are granted
    - For Calendar, also add: `calendar.events`, `calendar.freebusy`, `calendar.calendarlist.readonly`
+   - For `upload_drive_file`, also add: `drive.file` — the narrow Drive scope, which reaches only the files this server itself creates
+   - For the mail-rule and vacation-responder tools, also add: `gmail.settings.basic`
 5. Create **OAuth credentials**:
    - APIs & Services → Credentials → Create Credentials → OAuth client ID
    - Application type: **Desktop app**
@@ -80,6 +82,8 @@ npm run auth:check
 ```
 
 The auth flow opens a browser window for each account. Tokens are saved to `./tokens/`.
+
+> **Adding a scope means re-consenting.** A token carries exactly the permissions that were granted when it was issued — editing the scope list does nothing to a token already on disk. **`drive.file` and `gmail.settings.basic` were added on 2026-08-27**, so on any account authenticated before then, `upload_drive_file`, `list_filters`, `create_filter`, `delete_filter`, `get_vacation` and `set_vacation` answer **403 until that alias runs `npm run auth -- <alias>` again**. Those tools say so in their own error messages. Everything else keeps working untouched in the meantime — nothing about sending, reading or the Gmail signature depends on the new grants.
 
 ### 5. Add to Claude Code
 
@@ -151,9 +155,23 @@ Then use `/email` or `/checkemail` in Claude Code.
 | `update_label` | Rename or recolor a label |
 | `delete_label` | Delete a label (removes it from every message) |
 
-### Read-only Chat / Drive / Docs
+### Mailbox settings — mail rules and the vacation responder
 
-These tools are **strictly read-only** — nothing is sent, posted, created, updated, or deleted. They require the extra scopes above; re-run the auth flow per alias after adding them.
+These need `gmail.settings.basic` (added 2026-08-27), so they **403 on any alias that has not re-consented** — see the note in step 4.
+
+| Tool | Description |
+|------|-------------|
+| `list_filters` | List the account's filters: what each matches and which labels it adds or removes. Read-only, and it reports an existing forwarding filter even though `create_filter` cannot make one |
+| `create_filter` | Create a mail rule. Affects future mail only. At least one criterion and one label action required; adding `TRASH` is how a filter deletes and removing `INBOX` is how it archives. **Cannot create a forwarding filter** — deliberately |
+| `delete_filter` | Delete a filter permanently (no undo; existing mail is unaffected) |
+| `get_vacation` | Read the vacation-responder settings: on/off, subject, message, window, restrictions |
+| `set_vacation` | **Turn the vacation responder on or off.** While it is on, Gmail auto-replies from this account without any further call. Settings are merged, not replaced, so turning it off keeps the saved message |
+
+**On `set_vacation`:** enabling the responder is the one setting in this server that makes the account send mail on its own — anyone who writes in gets an automatic reply until it is switched off or its `end_time` passes. Prefer setting `end_time`. Omitted fields keep their saved values, so `enable: false` never erases the message and changing the subject never blanks the body. The result carries a `notice` stating exactly what is now switched on.
+
+### Chat / Drive / Docs
+
+Chat and Docs are **strictly read-only** — nothing is posted, created, updated, or deleted. Drive is read-only except `upload_drive_file`, which creates new files under the narrow `drive.file` scope (it reaches only files this server itself created, never the rest of your Drive). These tools require the extra scopes above; re-run the auth flow per alias after adding them.
 
 | Tool | Description |
 |------|-------------|
@@ -162,6 +180,7 @@ These tools are **strictly read-only** — nothing is sent, posted, created, upd
 | `get_chat_message` | Read a single Chat message by resource name |
 | `search_drive_files` | Search Drive files with Drive `q` query syntax |
 | `read_drive_file` | Read a Drive file's metadata + text (Docs/Sheets/Slides exported to text; binary types return metadata only; ~1MB cap; read `contentNote` — a Sheets export is first-sheet-only) |
+| `upload_drive_file` | **Uploads a local file to Drive** (absolute path, optional `folder_id` and `name`; 100MB ceiling) and returns its id, name, size and `webViewLink`. Always creates a new file — it never overwrites one. Needs `drive.file` |
 | `get_google_doc` | Read a Google Doc as title + flattened plain text |
 
 ### Calendar
