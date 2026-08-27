@@ -325,3 +325,93 @@ applied. This unit applies it and nothing else.
 A cold re-check of this unit, then the chair's live acceptance sends (B10.5,
 P1 raw-band media upload, P4 non-ASCII recipient display names, C4's 25,000,000
 byte attachment). Nothing else from W6's verdict is a code blocker.
+
+## Phase 2 — Units D + E (builder W8, 2026-08-27)
+
+Baseline at `8597ab2`: 419 tests. HEAD: **467 tests**, typecheck clean, 44 tools
+registered (was 42).
+
+### Unit D — mail-arrival watcher
+
+- [x] **`c22c353` — the client layer.** `getHistoryBaseline` reads the mailbox's
+      current cursor from `users.getProfile`; `getMailChanges` lists what changed
+      since a caller-supplied cursor via `users.history.list`. No server-side
+      state — the caller owns the cursor. History ids stay STRINGS (live values
+      already exceed exact JS number range).
+      Two API traps handled explicitly: an expired cursor's 404 becomes a resync
+      instruction naming `get_history_baseline`, and `complete` stays false while
+      `nextPageToken` is set because the response's `historyId` is the mailbox's
+      CURRENT cursor, not the end of the page — storing it mid-pagination skips
+      every unread page. Arrivals are hydrated to 100 (`HISTORY_SUMMARY_CAP`),
+      the overflow returns in the same shape with empty headers plus a note; a
+      message added and deleted in one window is not fetched and stays in
+      `deleted`; an arrival that 404s degrades to its history record instead of
+      failing the poll. 19 tests.
+- [x] **`8381ca0` — the two tools.** `get_history_baseline` and
+      `get_mail_changes` registered (42 -> 44). Their descriptions carry the two
+      rules a caller cannot infer from the shape: a cursor belongs to ONE account
+      and expires after about a week, and the returned cursor is only safe to
+      store once `complete` is true. Registration smoke run: 44 tools.
+
+### Unit E — inline images
+
+- [x] **`c09d63e` — `multipart/related` in mime.ts.** The container is built from
+      the inside out as Gmail builds it: `alternative` alone, `related
+      [alternative, images]` with inline images, `mixed [that, files]` with
+      attachments. The cid convention is the file's basename with anything
+      outside `[A-Za-z0-9._-]` folded to `_`, so a model that knows the path
+      knows the reference with no round trip; two files answering to the same cid
+      are refused. Inline images share the 25MB budget; `plain_text_only` refuses
+      them. Attachment parts are byte-identical to before. 14 tests.
+- [x] **`de811c1` — `inline_images` on the composing tools.** send, draft, reply,
+      draft_reply — and `update_draft`, which the contract did not name (filed as
+      QUESTIONS item 19: `drafts.update` replaces from the params supplied, so
+      without it this unit creates a draft shape `update_draft` cannot
+      reproduce). 5 integration tests through the real composition path.
+- [x] **`3ed1243` — read side.** `extractAttachments` no longer requires a
+      filename: a part counts when it is downloadable AND has a filename or a
+      Content-ID, so `cid:` images are listed (with `inline` + `contentId`) and
+      `get_attachment` can fetch them. Content-ID rather than the disposition is
+      the marker because a large text BODY part also arrives with an
+      `attachmentId` and sometimes an inline disposition. `forward_email` now
+      re-attaches an inline part AS an inline part with its ORIGINAL Content-ID,
+      because the forwarded HTML still references it — the relaxation without
+      this would have made every embedded image a broken image plus a stray file.
+      **FAIL-before** with the old filter restored: `3 failed | 2 passed` of the
+      five new tests. 5 tests.
+- [x] **`29e8d1c` — chair ruling Q6, closed on evidence.** The tightening Q6
+      asked for (exclude `&` from the terminating class) ALREADY shipped as W5's
+      C5 fix at `43d2867`. Verified rather than re-fixed: `&quot;`, `&#39;`,
+      `&lt;`, a full stop before a quote, and a query-string `&amp;` all behave
+      correctly. Five cases added for the entities C5's own tests did not name.
+      **No source change.**
+- [x] **`476c38b` — docs.** README 42 -> 44 with the two new rows and the
+      `inline_images` param; CHANGELOG 1.5.0; the bundled
+      `.claude/commands/email.md` tool table updated.
+
+### W8 verification (2026-08-27)
+
+- `npm run typecheck` clean. `npm test`: **10 files, 467 tests, all passing**
+  (baseline after W7 was 419; +48, no pre-existing test edited, weakened or
+  removed — `mime.test.ts` and `api.test.ts` gain `it` blocks only, and
+  `client.test.ts`, `acceptance.test.ts`, `log.test.ts`, `settings.test.ts`,
+  `config.test.ts`, `url-guard.test.ts` and the calendar/docs suites are
+  byte-unchanged by this unit).
+- Registration smoke run: **44 tools**.
+- Prohibitions: `git diff 536a9be..HEAD -- src/gmail/auth.ts` still EMPTY (Units
+  D and E need no new scope — `gmail.readonly` already covers `getProfile` and
+  `history.list`); no `accounts.json` / `credentials.json` / `tokens/` /
+  `package.json` change; no new deps; no push, deploy or `gh` write; no live API
+  call of any kind; no AI attribution.
+- 6 items filed to `QUESTIONS-FOR-FABLE.md` (19-24). **Items 19 and 20 want a
+  look**: two files gained behaviour the addendum did not name, both as
+  consequences of the named work rather than scope I went looking for.
+
+## Remaining — after W8
+
+Phase 2 Units F (Drive save, new `drive.file` scope) and G (filters / vacation /
+signature swap, new `gmail.settings.basic` scope), then the adversarial pass,
+contingent fix pass and cold Fable validation. For the chair's live acceptance:
+add one `[TEST]` send with an embedded image — the `multipart/related` structure
+is asserted byte-wise but only a real client proves the image renders in the
+body rather than as an attachment.
