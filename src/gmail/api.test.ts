@@ -1431,6 +1431,27 @@ describe('getMailChanges', () => {
     expect(changes.historyId).toBe('100');
     expect(changes.complete).toBe(true);
   });
+
+  // R2-P3: a cursor from ANOTHER account can be ahead of this mailbox. Gmail
+  // answers 200 with its own, smaller historyId; handing that back as the next
+  // cursor walks the caller BACKWARDS and the next poll replays the window.
+  it('never hands back a cursor older than the one it was given', async () => {
+    api.history.list.mockResolvedValue(ok({ historyId: '500' }));
+
+    const changes = await getMailChanges({ historyId: '9000' });
+
+    expect(changes.historyId).toBe('9000');
+    expect(changes.note).toMatch(/9000.*500|older|behind/i);
+  });
+
+  it('advances normally when the mailbox has moved forward', async () => {
+    api.history.list.mockResolvedValue(ok({ historyId: '9001' }));
+
+    const changes = await getMailChanges({ historyId: '9000' });
+
+    expect(changes.historyId).toBe('9001');
+    expect(changes.note).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------

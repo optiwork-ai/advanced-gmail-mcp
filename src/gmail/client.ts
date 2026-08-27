@@ -992,6 +992,23 @@ export async function getMailChanges(opts: {
     );
   }
 
+  // A cursor can be AHEAD of the mailbox — one pasted from another account, as
+  // the tool's own description warns. Gmail answers that with 200 and its own,
+  // smaller historyId, and handing that back as the next cursor walks the
+  // caller BACKWARDS: the following poll replays a window it has already seen,
+  // silently, because complete was true and nothing said otherwise. The cursor
+  // only ever moves forward, and a rewind is reported rather than performed.
+  let nextHistoryId = String(response.data.historyId ?? startHistoryId);
+  if (/^\d+$/.test(nextHistoryId) && BigInt(nextHistoryId) < BigInt(startHistoryId)) {
+    notes.push(
+      `The mailbox is at history ${nextHistoryId}, BEHIND the cursor ${startHistoryId} that `
+      + 'was polled with — that cursor does not belong to this account. history_id was kept '
+      + 'rather than rewound, so no window is replayed; call get_history_baseline for a '
+      + `cursor that belongs to "${resolved.alias}".`,
+    );
+    nextHistoryId = startHistoryId;
+  }
+
   let summaries: EmailSummary[];
   if (opts.includeSummaries === false) {
     summaries = arrivals.map(bareSummary);
@@ -1014,7 +1031,7 @@ export async function getMailChanges(opts: {
   return {
     account: resolved.alias,
     fromHistoryId: startHistoryId,
-    historyId: String(response.data.historyId ?? startHistoryId),
+    historyId: nextHistoryId,
     complete: !nextPageToken,
     ...(nextPageToken ? { nextPageToken } : {}),
     added: summaries,
