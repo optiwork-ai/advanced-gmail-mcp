@@ -293,8 +293,20 @@ export function reflowPlainText(text: string): string {
 // text <-> html
 // ---------------------------------------------------------------------------
 
-const URL_RE = /\bhttps?:\/\/[^\s<>"]+[^\s<>".,;:!?)\]]/g;
-const WWW_RE = /\bwww\.[^\s<>"]+[^\s<>".,;:!?)\]]/g;
+/**
+ * Autolinking runs on text that has ALREADY been HTML-escaped, so excluding the
+ * literal characters `<`, `>` and `"` is not enough: by the time these regexes
+ * run those characters are `&lt;`, `&gt;` and `&quot;`, and every character of
+ * an entity is URL-legal. `Visit "https://example.com" now` used to produce an
+ * href ending in `&quot` with a stray `;` left outside the anchor.
+ *
+ * So the character class excludes `&` as well, and re-admits exactly one
+ * entity: `&amp;`, which is what a legitimate query-string `&` escapes to.
+ */
+const URL_CHAR = '(?:&amp;|[^\\s<>"&])';
+const URL_LAST = '(?:&amp;|[^\\s<>"&.,;:!?)\\]])';
+const URL_RE = new RegExp(`\\bhttps?:\\/\\/${URL_CHAR}+${URL_LAST}`, 'g');
+const WWW_RE = new RegExp(`\\bwww\\.${URL_CHAR}+${URL_LAST}`, 'g');
 const EMAIL_RE = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
 const ANCHOR_SPLIT_RE = /(<a\b[^>]*>[\s\S]*?<\/a>)/g;
 

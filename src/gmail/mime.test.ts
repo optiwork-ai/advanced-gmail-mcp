@@ -180,6 +180,35 @@ describe('textToHtml', () => {
     const out = textToHtml('https://example.com/u/alice@example.com done');
     expect(out.match(/<a /g)).toHaveLength(1);
   });
+
+  it('stops the link at a quote instead of swallowing the entity', () => {
+    // Escaping runs before autolinking, so by the time the URL regex sees the
+    // text the excluded characters are `&quot;` / `&lt;` — every character of
+    // which the regex used to accept. `Visit "https://x.com" now` produced an
+    // href ending in `&quot` with a stray `;` outside the anchor.
+    const out = textToHtml('Visit "https://example.com" now');
+    expect(out).toContain('<a href="https://example.com">https://example.com</a>');
+    expect(out).not.toContain('&quot<');
+    expect(out).not.toContain('&quot"');
+  });
+
+  it('stops the link at an escaped angle bracket', () => {
+    const out = textToHtml('see http://x.com<b>bold</b> and done');
+    expect(out).toContain('<a href="http://x.com">http://x.com</a>&lt;b&gt;');
+  });
+
+  it('keeps a query string with an ampersand inside the link', () => {
+    const out = textToHtml('open https://example.com/s?a=1&b=2 now');
+    expect(out).toContain(
+      '<a href="https://example.com/s?a=1&amp;b=2">https://example.com/s?a=1&amp;b=2</a>',
+    );
+  });
+
+  it('stops a www. link at a quote too', () => {
+    const out = textToHtml('Visit "www.example.com" now');
+    expect(out).toContain('<a href="http://www.example.com">www.example.com</a>');
+    expect(out).not.toContain('&quot<');
+  });
 });
 
 describe('htmlToText', () => {
