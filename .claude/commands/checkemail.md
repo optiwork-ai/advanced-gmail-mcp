@@ -19,7 +19,7 @@ Determine accounts: if user specified one, use it. Otherwise all configured acco
 
 ## Phase 1 — Fetch + Classify
 
-1. `list_emails` for each account (max_results=25, parallel)
+1. `list_emails` for each account (max_results=25, parallel). It returns `{messages, nextPageToken}` — classify `messages`; ignore `nextPageToken` unless the user asks to go deeper than one page.
 2. For every email with a threadId, check if user already replied:
    - `get_thread` for each thread (parallel, batch by account)
    - If any message in thread has `from:` matching the account's address, mark as **already handled**
@@ -66,7 +66,7 @@ Wait for user confirmation. User may exclude items from archive or add items to 
 
 ## Phase 2 — Archive
 
-On approval, `batch_modify` per account (archive action). Report count.
+On approval, `batch_modify` per account (archive action). It returns the IDs that actually succeeded plus a `failures` list — report `modified_count`, and surface any failures rather than reporting a clean sweep.
 
 If user excluded items, move them to triage queue.
 

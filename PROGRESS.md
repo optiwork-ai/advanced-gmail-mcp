@@ -99,6 +99,21 @@ assertions). PASS-after on HEAD: 5 passed. Full suite: 185 passed, typecheck cle
 
 Nothing. Live acceptance (B10.5) is the chair's.
 
+### Unit B verification (2026-08-27)
+
+- `npm run typecheck` clean. `npm test`: **9 files, 326 tests, all passing** (baseline after
+  Unit A was 185).
+- Registration smoke run: **38 tools**, including all four new ones.
+- Every Unit A test file (`acceptance`, `mime`, `client`, `settings`, `config`, `log`) is
+  byte-unchanged by W2 — no baseline test was edited or loosened. The five B10 gates still
+  pass when run alone.
+- Prohibitions: no `accounts.json` / `credentials.json` / `tokens/` / `package.json` /
+  `auth.ts` change (`git diff 536a9be..HEAD -- src/gmail/auth.ts` is empty), no new deps, no
+  push/deploy, no live API call of any kind, no AI attribution.
+- 14 items filed to `QUESTIONS-FOR-FABLE.md`; items 8, 9 and 12 want a decision. **Item 8 is
+  the one to read first: three tools changed their return shape, which is breaking for
+  callers outside this repo.**
+
 ## How to resume
 
 `git log 536a9be..HEAD` for what landed. `npm run typecheck && npm test` from the repo
