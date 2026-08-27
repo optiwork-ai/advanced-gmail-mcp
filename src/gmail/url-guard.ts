@@ -11,7 +11,11 @@
  * The rules, deliberately narrow:
  *   - https only (no http, no other scheme)
  *   - the hostname must resolve, and EVERY address it resolves to must be
- *     public — one private answer refuses the whole URL
+ *     public — one private answer refuses the whole URL. Addresses are judged
+ *     by value, not by spelling: an IPv6 address is expanded to its 16 bytes
+ *     first, so the hex form of an IPv4-mapped address (`::ffff:7f00:1`, which
+ *     is what Node's resolver actually returns for `[::ffff:127.0.0.1]`) is
+ *     judged as the loopback address it is
  *   - redirects are never followed (a 302 to 127.0.0.1 is the obvious bypass)
  *   - 10 second ceiling on the request
  *
@@ -69,21 +73,110 @@ function isPrivateIPv4(address: string): boolean {
   return false;
 }
 
-/** True for any IPv6 address that is not routable public internet. */
+/**
+ * Expand any spelling of an IPv6 address into its 16 bytes, or null if it is
+ * not a valid address.
+ *
+ * Matching on the text form is what let `::ffff:7f00:1` — the hex spelling of
+ * `::ffff:127.0.0.1`, and the spelling Node's own resolver returns for a
+ * bracketed IPv4-mapped literal — past the guard. An address has one value and
+ * many spellings, so the comparison has to happen on the value.
+ */
+function parseIPv6(address: string): number[] | null {
+  let addr = address.toLowerCase().split('%')[0]; // drop any zone index
+  if (addr.length === 0) return null;
+
+  // A trailing dotted quad (::ffff:127.0.0.1) becomes the last two hextets.
+  const lastColon = addr.lastIndexOf(':');
+  if (lastColon === -1) return null;
+  const tail = addr.slice(lastColon + 1);
+  if (tail.includes('.')) {
+    const quad = parseIPv4(tail);
+    if (!quad) return null;
+    const hi = ((quad[0] << 8) | quad[1]).toString(16);
+    const lo = ((quad[2] << 8) | quad[3]).toString(16);
+    addr = `${addr.slice(0, lastColon + 1)}${hi}:${lo}`;
+  }
+
+  const halves = addr.split('::');
+  if (halves.length > 2) return null;
+
+  const groupsOf = (segment: string): number[] | null => {
+    if (segment === '') return [];
+    const out: number[] = [];
+    for (const group of segment.split(':')) {
+      if (!/^[0-9a-f]{1,4}$/.test(group)) return null;
+      out.push(parseInt(group, 16));
+    }
+    return out;
+  };
+
+  let hextets: number[];
+  if (halves.length === 2) {
+    const head = groupsOf(halves[0]);
+    const rest = groupsOf(halves[1]);
+    if (!head || !rest) return null;
+    const missing = 8 - head.length - rest.length;
+    if (missing < 1) return null; // "::" must stand for at least one group
+    hextets = [...head, ...new Array<number>(missing).fill(0), ...rest];
+  } else {
+    const only = groupsOf(halves[0]);
+    if (!only || only.length !== 8) return null;
+    hextets = only;
+  }
+
+  const bytes: number[] = [];
+  for (const hextet of hextets) bytes.push(hextet >> 8, hextet & 0xff);
+  return bytes;
+}
+
+const dotted = (octets: number[]): string => octets.join('.');
+
+/**
+ * True for any IPv6 address that is not routable public internet.
+ *
+ * An unparseable address is treated as private: the only caller is a security
+ * gate, and refusing something we cannot understand is the safe direction.
+ */
 function isPrivateIPv6(address: string): boolean {
-  const addr = address.toLowerCase().split('%')[0]; // drop any zone index
+  const b = parseIPv6(address);
+  if (!b) return true;
 
-  if (addr === '::' || addr === '::1') return true;
+  const zeros = (upTo: number): boolean => b.slice(0, upTo).every(byte => byte === 0);
 
-  // IPv4-mapped (::ffff:1.2.3.4) and IPv4-compatible (::1.2.3.4) forms carry a
-  // v4 address inside a v6 one — judge them by the v4 rules.
-  const embedded = addr.match(/^::(?:ffff:)?(\d{1,3}(?:\.\d{1,3}){3})$/);
-  if (embedded) return isPrivateIPv4(embedded[1]);
+  // ::ffff:a.b.c.d — IPv4-mapped (RFC 4291). This is what Node hands back for a
+  // bracketed IPv4-mapped literal, in hex.
+  if (zeros(10) && b[10] === 0xff && b[11] === 0xff) {
+    return isPrivateIPv4(dotted(b.slice(12)));
+  }
 
-  if (/^f[cd]/.test(addr)) return true;              // fc00::/7 unique local
-  if (/^fe[89ab]/.test(addr)) return true;           // fe80::/10 link-local
-  if (/^ff/.test(addr)) return true;                 // ff00::/8 multicast
-  if (addr.startsWith('2001:db8')) return true;      // 2001:db8::/32 documentation
+  // ::ffff:0:a.b.c.d — IPv4-translated (RFC 6052).
+  if (zeros(8) && b[8] === 0xff && b[9] === 0xff && b[10] === 0 && b[11] === 0) {
+    return isPrivateIPv4(dotted(b.slice(12)));
+  }
+
+  // ::a.b.c.d — IPv4-compatible (deprecated), plus :: and ::1 themselves. The
+  // whole /96 is dead space, so none of it is a legitimate request target.
+  if (zeros(12)) return true;
+
+  // 64:ff9b::/32 — the NAT64 translation prefixes.
+  if (b[0] === 0x00 && b[1] === 0x64 && b[2] === 0xff && b[3] === 0x9b) {
+    // 64:ff9b::/96 (well-known) carries the destination v4 in the low 32 bits.
+    if (b.slice(4, 12).every(byte => byte === 0)) return isPrivateIPv4(dotted(b.slice(12)));
+    // 64:ff9b:1::/48 (local-use) and the rest of the /32 embed the v4 address
+    // at prefix-dependent offsets. A translation prefix is never something this
+    // guard can vouch for, so refuse the lot rather than guess the layout.
+    return true;
+  }
+
+  // 2002::/16 — 6to4 carries the v4 address in bytes 2-5.
+  if (b[0] === 0x20 && b[1] === 0x02) return isPrivateIPv4(dotted(b.slice(2, 6)));
+
+  if ((b[0] & 0xfe) === 0xfc) return true;                       // fc00::/7 unique local
+  if (b[0] === 0xfe && (b[1] & 0xc0) === 0x80) return true;      // fe80::/10 link-local
+  if (b[0] === 0xff) return true;                                // ff00::/8 multicast
+  if (b[0] === 0x20 && b[1] === 0x01 && b[2] === 0x0d && b[3] === 0xb8) return true; // 2001:db8::/32
+  if (b[0] === 0x20 && b[1] === 0x01 && b[2] === 0x00 && b[3] === 0x00) return true; // 2001::/32 Teredo
 
   return false;
 }
