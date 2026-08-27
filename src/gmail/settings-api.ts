@@ -333,7 +333,21 @@ export async function setVacation(opts: SetVacationOptions): Promise<VacationSta
   const current = currentResp.data ?? {};
 
   const isHtml = opts.isHtml === true;
-  const body = opts.body?.trim() ? opts.body : undefined;
+
+  // Omitting body means "keep what is saved". Passing a BLANK one meant the
+  // same thing, silently: a caller clearing the auto-reply got success back
+  // and the old message stayed live. There is no way to store an empty
+  // responder either — enabling one is refused below, and an empty message is
+  // worse than none — so this is a caller mistake with two honest readings and
+  // no safe guess between them.
+  if (opts.body !== undefined && opts.body.trim() === '') {
+    throw new Error(
+      'set_vacation: body was supplied but is empty. Omit body to keep the saved message, '
+      + 'or pass the text you want the responder to send. An empty automatic reply cannot '
+      + 'be stored.',
+    );
+  }
+  const body = opts.body;
 
   const merged: gmail_v1.Schema$VacationSettings = {
     ...current,

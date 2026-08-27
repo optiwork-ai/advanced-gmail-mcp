@@ -442,6 +442,16 @@ describe('setVacation', () => {
     expect(v.updateVacation).not.toHaveBeenCalled();
   });
 
+  // R2-P2: a blank body used to be treated as "not supplied", so a caller
+  // deliberately clearing the auto-reply got success and the OLD text stayed.
+  it('refuses a blank body rather than silently keeping the old text', async () => {
+    v.getVacation.mockResolvedValueOnce({ data: { responseBodyPlainText: 'OLD' } });
+
+    await expect(setVacation({ enable: true, body: '   ' }))
+      .rejects.toThrow(/body was supplied but is empty/);
+    expect(v.updateVacation).not.toHaveBeenCalled();
+  });
+
   it('refuses an unparseable start_time before writing anything', async () => {
     v.getVacation.mockResolvedValueOnce({ data: { responseBodyPlainText: 'Away' } });
 
