@@ -28,10 +28,12 @@ adds: CRLF/header-injection sanitation and `resolveAccount` hardening).
       buildReplyRecipients replaces the reply-all Cc folding; forward re-attaches the original's
       attachments. Unsubscribe pinned to plain_text_only. Full suite 173 green — the five B10
       acceptance gates now PASS.
+- [x] **`resolveAccount` hardening** — pure `selectAccount` split out and unit-tested (12 tests);
+      substring email matching removed (exact alias or exact email, case-insensitive both sides);
+      the default lookup throws a named config error instead of a non-null assertion.
 
 ## Remaining
 
-- [ ] `resolveAccount` hardening (`src/config.ts`)
 - [ ] B6 tool params/descriptions (5 files)
 - [ ] B7 docs (README, CHANGELOG)
 - [ ] B8 tests (mime.test.ts, settings.test.ts, client.test.ts extension)
