@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.2] — 2026-08-27
+
+### Fixed
+- **A recipient name with an accent in it went out as gibberish.** `To: José Müller <steve@optiwork.ai>` was written into the header as raw 8-bit bytes, which the mail standard forbids, so the recipient's name arrived mangled. Names in `to`, `cc` and `bcc` are now encoded the same way the subject line already was — and only the name half: the address itself is never rewritten, and a list made entirely of plain ASCII goes out byte-for-byte as it did before. A name containing a comma (`"Angelo, Steve" <a@b.c>`) is still one recipient, not two.
+- **A Calendar permission error told you to re-authenticate when that was not the problem.** The retry helper is shared with Gmail, where a 403 usually is a token problem; for Calendar the two common ones are "the Google Calendar API was never switched on for this project" and "this account was never granted the calendar permissions" — neither fixed by logging in again, and the real cause survived only in a tail of the message. Each now says what it actually is: the missing permission is named along with the exact command that grants it, the switched-off API points at the Cloud console and says re-authenticating will not help, and a rate limit reports itself as a rate limit.
+
+### Changed
+- **Turning the vacation responder ON now takes an explicit confirmation, and refuses a stale window.** A responder saved in 2016 was found switched back on by something outside this server. Two guards close that door here: `set_vacation` refuses `enable: true` unless `confirm: true` is passed with it — enabling makes the account send mail outward on its own, and one flag cannot be reached without the user having actually asked for it — and it refuses to enable a responder whose saved end date has already passed, naming the dates it found and asking for the window you actually mean. **Turning the responder OFF is unchanged and needs neither**: the safe direction is never harder than the dangerous one.
+
 ## [1.6.1] — 2026-08-27
 
 ### Fixed

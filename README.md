@@ -165,9 +165,9 @@ These need `gmail.settings.basic` (added 2026-08-27), so they **403 on any alias
 | `create_filter` | Create a mail rule. Affects future mail only. At least one criterion and one label action required; adding `TRASH` is how a filter deletes and removing `INBOX` is how it archives. **Cannot create a forwarding filter** — deliberately |
 | `delete_filter` | Delete a filter permanently (no undo; existing mail is unaffected) |
 | `get_vacation` | Read the vacation-responder settings: on/off, subject, message, window, restrictions |
-| `set_vacation` | **Turn the vacation responder on or off.** While it is on, Gmail auto-replies from this account without any further call. Settings are merged, not replaced, so turning it off keeps the saved message |
+| `set_vacation` | **Turn the vacation responder on or off.** While it is on, Gmail auto-replies from this account without any further call. Turning it ON requires `confirm: true` and is refused if the saved window already ended; turning it OFF needs neither. Settings are merged, not replaced, so turning it off keeps the saved message |
 
-**On `set_vacation`:** enabling the responder is the one setting in this server that makes the account send mail on its own — anyone who writes in gets an automatic reply until it is switched off or its `end_time` passes. Prefer setting `end_time`. Omitted fields keep their saved values, so `enable: false` never erases the message and changing the subject never blanks the body. The result carries a `notice` stating exactly what is now switched on. Gmail stores the reply in two forms, plain text and HTML, and sends the HTML one when both exist — so passing `body` rewrites **both**, and what you passed is what goes out whichever form Gmail picks.
+**On `set_vacation`, two rules govern enabling.** `enable: true` is refused unless `confirm: true` is passed with it, and it is refused when the responder's saved window has already ended — an old responder is never silently brought back to life, so pass a new `start_time` and `end_time` for the absence you actually mean. `enable: false` needs neither: the safe direction is never harder than the dangerous one. Enabling the responder is the one setting in this server that makes the account send mail on its own — anyone who writes in gets an automatic reply until it is switched off or its `end_time` passes. Prefer setting `end_time`. Omitted fields keep their saved values, so `enable: false` never erases the message and changing the subject never blanks the body. The result carries a `notice` stating exactly what is now switched on. Gmail stores the reply in two forms, plain text and HTML, and sends the HTML one when both exist — so passing `body` rewrites **both**, and what you passed is what goes out whichever form Gmail picks.
 
 ### Chat / Drive / Docs
 
@@ -193,6 +193,8 @@ Three read-only tools plus one that writes. The Calendar scopes (`calendar.event
 | `list_calendar_events` | List events on a calendar — recurring events expanded, start-time order, 50 per page (max 250), `page_token` for more |
 | `get_freebusy` | Busy intervals across one or more calendars in a time window (no event titles) |
 | `create_calendar_event` | **Creates an event.** `send_updates` defaults to `"none"` — nobody is emailed. Passing `"all"` makes Google email every attendee an invitation |
+
+**On Calendar permission errors:** a Calendar 403 says what is actually wrong. A missing calendar scope names that scope and the exact `npm run auth -- <alias>` command; a project with the Google Calendar API switched off says to enable it in the Cloud console and states plainly that re-authenticating will not help; a rate limit reports itself as a rate limit. None of them tell you to redo a login that is working.
 
 **On `create_calendar_event` and invitation email:** adding attendees does not notify them. `send_updates` decides that, and its default is `"none"`, so the default path sends no mail at all. `"all"` is an outward-facing act — Google mails every attendee — and `"externalOnly"` mails only attendees outside your Workspace domain. The tool's result carries a `notice` stating which happened.
 

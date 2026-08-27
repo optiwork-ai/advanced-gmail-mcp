@@ -640,3 +640,103 @@ is in the verdict file.
 The chair's: three open rulings, the one re-auth round for all five aliases,
 the live-acceptance checklist in VALIDATION-VERDICT-2.md, the cross-repo shape
 sweep, then Steve's merge/push decision.
+
+## W13 — final fixes (2026-08-27)
+
+Three fixes, one commit each, every one with a FAIL-before run recorded against
+HEAD before the fix landed. Baseline at `353cc25` was 539 tests across 13 files;
+HEAD is **578**, typecheck clean, **50 tools** registered (unchanged).
+
+- [x] **`ad84625` — non-ASCII recipient display names (acceptance P4).** New
+      `encodeAddressList` in `mime.ts` splits `to`/`cc`/`bcc` on the commas that
+      actually separate mailboxes — respecting quoted display names
+      (`"Angelo, Steve" <a@b.c>`) and angle-addrs — and RFC 2047-encodes ONLY the
+      display-name half, only when that name is itself non-ASCII. The angle-addr
+      is never rewritten. Two rules hold the delivery risk at zero: a pure-ASCII
+      list returns byte-identical BEFORE any parsing happens (so every existing
+      send emits exactly the header it emitted before), and an already-encoded
+      word, a bare address, an ASCII quoted-string or a non-ASCII bare address
+      passes through verbatim even when a sibling mailbox needs encoding. The
+      module already had an `isAscii` helper; it is reused rather than
+      duplicated. **FAIL-before at HEAD: `6 failed | 145 passed (151)` in
+      `mime.test.ts`** (the To header carrying raw `José <j@x.com>`).
+      PASS-after: full suite 555. 16 tests added.
+- [x] **`fa6d6dd` — Calendar 403 honesty (chair-queued item 17 / W4-P10).**
+      `translateCalendarError` threads a per-call context (tool + the scope THAT
+      call needs) through all four calendar call sites. A missing scope becomes
+      the shared `scopeError` — same instruction the six Phase-2 tools produce;
+      an `accessNotConfigured` 403 says to enable the API in the Cloud console
+      and states that re-authenticating will not help; a rate-limit 403 is
+      returned UNTOUCHED so `withRetry` still retries it and Google's own words
+      reach the caller; every other status, 401 included, propagates unchanged.
+      The translation runs INSIDE `withRetry` because the reason codes that tell
+      these cases apart do not survive its rewrite. `isRateLimit403` is exported
+      from `gmail/client.ts` (a one-word change, no behaviour) rather than
+      duplicating its reason set. **FAIL-before at HEAD: `6 failed | 38 passed
+      (44)`**, the failures reading `Authentication error (403): Google Calendar
+      API has not been used in project 12345…`. PASS-after: full suite 566.
+      11 tests added.
+- [x] **`25bac29` — vacation-responder enable guards** (today's live incident: a
+      2016 saved responder re-enabled by something outside this tooling). Both
+      guards run before the `log()` line and before the write:
+      - **stale window** — `updateVacation` merges, so "turn it on" with no
+        window supplied restores whatever start/end was saved. When the MERGED
+        `endTime` is in the past the call is refused, naming the dates it found
+        and asking for the window the caller means. A fresh `end_time` proceeds.
+      - **confirm** — `enable: true` is refused without `confirm: true`, a new
+        optional field on `SetVacationOptions` and on the tool schema. `enable`
+        alone is a value a model can produce while paraphrasing a question; the
+        consequence is the account auto-replying to everyone who writes in.
+      `enable: false` needs neither guard. Tool description states both rules.
+      **FAIL-before at HEAD: `6 failed | 42 passed (48)` in
+      `settings-api.test.ts`**, plus `tsc` rejecting `confirm` as unknown on
+      `SetVacationOptions`. PASS-after: full suite 578. 12 tests added.
+- [x] **`__DOCS_SHA__` — docs.** README `set_vacation` row + a rewritten
+      enabling note, a new Calendar permission-errors note; CHANGELOG 1.6.2
+      (two Fixed, one Changed); the bundled `.claude/commands/email.md`
+      `set_vacation` row carries `confirm?` and both rules.
+
+### W13 test integrity — one declared restatement
+
+`src/gmail/mime.test.ts` (+176/-0) and `src/calendar/client.test.ts` (+132/-0)
+are pure additions. `src/gmail/settings-api.test.ts` is +139/-8: **nine
+pre-existing enable-path tests were RESTATED, not loosened** — each gained
+`confirm: true` at its call site, because the contract now requires it. Every
+deletion in that diff is one of those ten call lines; no assertion changed, no
+test was removed, and the two refusal tests it touches (`refuses to enable with
+no body anywhere`, `refuses an inverted window`) still assert their own original
+refusal. `client.test.ts`, `acceptance.test.ts`, `log.test.ts`,
+`settings.test.ts`, `config.test.ts`, `url-guard.test.ts`, `api.test.ts`,
+`scope-error.test.ts`, `drive/client.test.ts` and `docs-get-document.test.ts`
+are byte-unchanged by this unit. The five B10 acceptance gates still pass.
+
+### W13 verification
+
+- `npm run typecheck` clean and `npm test` green at EVERY commit in the range
+  (539 → 555 → 566 → 578).
+- Registration smoke run: **50 tools**, `set_vacation` present.
+- Prohibitions honored: no AI attribution; no push, deploy or `gh` write; no
+  change to `accounts.json`, `credentials.json`, `tokens/`, `package.json` or
+  the lockfile; no new dependency; `src/gmail/auth.ts` untouched by this pass
+  (`git diff 353cc25..HEAD -- src/gmail/auth.ts` empty) and SCOPES unedited; **no
+  live Google API call of any kind, no live send and no live settings write** —
+  every test runs against the stubbed clients.
+
+### Note for the chair
+
+The chair's ROUND 2 ruling parked R2-P1 (stale vacation window) as "LEAVE AS
+SHIPPED … queue the refuse-if-past guard as a polish item if vacation tooling
+gets real use". Today's incident is that trigger, and this unit's task named the
+guard explicitly, so it is now applied. `Reply-To` is the one remaining address
+header whose display name is not RFC 2047-encoded; the task scoped fix 1 to
+`To`/`Cc`/`Bcc`, so it was left alone rather than widened unasked.
+
+## Remaining — after W13
+
+Unchanged from W12, minus item 17 (now fixed): the chair's re-auth round for all
+five aliases, the live-acceptance checklist in `VALIDATION-VERDICT-2.md`, the
+cross-repo shape sweep, then Steve's merge/push decision. Two live checks to add
+to that list: one `[TEST]` send to a non-ASCII display name (fix 1 is asserted
+byte-wise but only a real client proves the name renders), and — only if the
+chair wants it — a `set_vacation` enable/disable pair to confirm the two new
+refusals fire against the real API.
