@@ -1,3 +1,5 @@
+import { promises as fsp } from 'fs';
+import * as path from 'path';
 import { Readable } from 'stream';
 import { google } from 'googleapis';
 import type { gmail_v1 } from 'googleapis';
@@ -1315,15 +1317,18 @@ export async function forwardMessage(opts: {
   const attachments: Attachment[] = [];
   if (opts.include_attachments !== false) {
     for (const info of original.attachments) {
-      const data = await getAttachment({
+      // The low-level fetch, not getAttachment: a forward re-attaches the
+      // original's files whatever their size, so the 1MB inline gate that
+      // protects the model's context must not apply here.
+      const content = await fetchAttachmentBytes({
         messageId: opts.messageId,
         attachmentId: info.attachmentId,
-        account: resolved.email,
+        account: resolved,
       });
       attachments.push({
         filename: sanitizeFilename(info.filename),
         mimeType: info.mimeType,
-        content: Buffer.from(data.data_base64, 'base64'),
+        content,
       });
     }
   }
@@ -1361,15 +1366,61 @@ export async function forwardMessage(opts: {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Attachments
+// ---------------------------------------------------------------------------
+
 /**
- * Fetch the raw bytes of an attachment.
- * Returns data as standard base64 (not base64url), suitable for direct decoding.
+ * Above this decoded size an attachment is never inlined as base64 — the caller
+ * must supply `save_dir` instead. A 25MB attachment inlines to ~34MB of base64
+ * inside a JSON string, which is a context-window bomb, not a result.
  */
-export async function getAttachment(opts: {
+export const ATTACHMENT_INLINE_LIMIT_BYTES = 1_000_000;
+
+/**
+ * Reduce a message part's filename to something safe to join onto a directory.
+ *
+ * The filename comes from the message, i.e. from whoever sent it, so it is
+ * hostile input: `../../.ssh/authorized_keys` must not escape `save_dir`.
+ * Exported for unit testing.
+ */
+export function safeAttachmentFilename(filename: string): string {
+  const flattened = (filename || '').replace(/[\r\n"\0]/g, '').replace(/\\/g, '/');
+  const base = path.basename(flattened).replace(/^\.+$/, '').trim();
+  if (base.length === 0) return 'attachment';
+  return base.slice(0, 200);
+}
+
+/**
+ * Locate an attachment's part metadata (filename, mimeType, decoded size)
+ * inside its message. Gmail's `attachments.get` returns neither the filename
+ * nor the MIME type, so the part table is the only place to get them.
+ */
+async function findAttachmentInfo(
+  gmail: gmail_v1.Gmail,
+  messageId: string,
+  attachmentId: string,
+): Promise<AttachmentInfo | undefined> {
+  const response = await withRetry(() =>
+    gmail.users.messages.get({ userId: 'me', id: messageId, format: 'full' })
+  );
+  const payload = response.data.payload;
+  if (!payload) return undefined;
+  return extractAttachments(payload).find(a => a.attachmentId === attachmentId);
+}
+
+/**
+ * Download an attachment's bytes.
+ *
+ * The low-level half of `getAttachment`, split out so internal callers (the
+ * forward path re-attaching the original's files) get the bytes without going
+ * through the size gate or the base64 round trip.
+ */
+export async function fetchAttachmentBytes(opts: {
   messageId: string;
   attachmentId: string;
-  account?: string;
-}): Promise<AttachmentData> {
+  account?: string | AccountConfig;
+}): Promise<Buffer> {
   const gmail = await getGmailClient(opts.account);
 
   const response = await withRetry(() =>
@@ -1380,12 +1431,123 @@ export async function getAttachment(opts: {
     })
   );
 
-  // Gmail returns base64url; convert to standard base64 for downstream consumers.
-  const data = (response.data.data || '').replace(/-/g, '+').replace(/_/g, '/');
+  // Gmail returns base64url. Node decodes that directly, which also disposes of
+  // the missing-'=' padding problem the old string-surgery version had.
+  return Buffer.from(response.data.data || '', 'base64url');
+}
+
+/**
+ * Write attachment bytes into `saveDir`, never overwriting an existing file.
+ *
+ * Collisions get a `-1`, `-2`, … suffix before the extension. The write uses
+ * the `wx` flag so the existence check and the create are one atomic operation
+ * rather than a check-then-write race.
+ */
+async function writeAttachmentToDir(
+  saveDir: string,
+  filename: string,
+  content: Buffer,
+): Promise<string> {
+  if (!path.isAbsolute(saveDir)) {
+    throw new Error(`save_dir must be an absolute path (got "${saveDir}").`);
+  }
+
+  let stat;
+  try {
+    stat = await fsp.stat(saveDir);
+  } catch {
+    throw new Error(`save_dir does not exist: ${saveDir}`);
+  }
+  if (!stat.isDirectory()) {
+    throw new Error(`save_dir is not a directory: ${saveDir}`);
+  }
+
+  const safe = safeAttachmentFilename(filename);
+  const ext = path.extname(safe);
+  const stem = safe.slice(0, safe.length - ext.length) || 'attachment';
+
+  for (let n = 0; n < 1000; n++) {
+    const candidate = path.join(saveDir, n === 0 ? safe : `${stem}-${n}${ext}`);
+    try {
+      await fsp.writeFile(candidate, content, { flag: 'wx' });
+      return candidate;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code === 'EEXIST') continue;
+      throw err;
+    }
+  }
+
+  throw new Error(`Could not find a free filename for "${safe}" in ${saveDir}.`);
+}
+
+/**
+ * Fetch an attachment, either writing it to disk or returning it inline.
+ *
+ * With `saveDir`: the bytes go to a file and the result carries its path.
+ * Without: the bytes come back as standard padded base64, but only when the
+ * attachment is at or below ATTACHMENT_INLINE_LIMIT_BYTES — a larger one gets a
+ * clear error naming `save_dir` rather than a 34MB string.
+ *
+ * Filename and MIME type are always returned; both come from the message part,
+ * not from the attachments endpoint (which reports neither).
+ */
+export async function getAttachment(opts: {
+  messageId: string;
+  attachmentId: string;
+  account?: string;
+  saveDir?: string;
+}): Promise<AttachmentData> {
+  const gmail = await getGmailClient(opts.account);
+
+  const info = await findAttachmentInfo(gmail, opts.messageId, opts.attachmentId);
+  const filename = safeAttachmentFilename(info?.filename ?? 'attachment');
+  const mimeType = info?.mimeType ?? 'application/octet-stream';
+
+  // Refuse an oversized inline request BEFORE downloading it: the part table
+  // already knows the decoded size.
+  if (!opts.saveDir && info && info.size > ATTACHMENT_INLINE_LIMIT_BYTES) {
+    throw new Error(
+      `Attachment "${filename}" is ${(info.size / 1_000_000).toFixed(1)}MB, over the `
+      + `${ATTACHMENT_INLINE_LIMIT_BYTES / 1_000_000}MB inline limit. `
+      + `Call get_attachment again with save_dir set to an absolute directory path `
+      + `to write it to disk instead.`
+    );
+  }
+
+  const content = await fetchAttachmentBytes({
+    messageId: opts.messageId,
+    attachmentId: opts.attachmentId,
+    account: opts.account,
+  });
+
+  if (opts.saveDir) {
+    const written = await writeAttachmentToDir(opts.saveDir, filename, content);
+    return {
+      attachmentId: opts.attachmentId,
+      filename: path.basename(written),
+      mimeType,
+      size: content.length,
+      path: written,
+    };
+  }
+
+  // Belt and braces: the part table may be missing (a draft mid-edit, an
+  // unusual structure), in which case the size is only known once downloaded.
+  if (content.length > ATTACHMENT_INLINE_LIMIT_BYTES) {
+    throw new Error(
+      `Attachment "${filename}" is ${(content.length / 1_000_000).toFixed(1)}MB, over the `
+      + `${ATTACHMENT_INLINE_LIMIT_BYTES / 1_000_000}MB inline limit. `
+      + `Call get_attachment again with save_dir set to an absolute directory path `
+      + `to write it to disk instead.`
+    );
+  }
+
   return {
     attachmentId: opts.attachmentId,
-    size: response.data.size || 0,
-    data_base64: data,
+    filename,
+    mimeType,
+    size: content.length,
+    data_base64: content.toString('base64'),
   };
 }
 

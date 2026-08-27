@@ -4,7 +4,9 @@ Unit A of `shared/active-work/2026-08-27-gmail-mcp-upgrade/BUILD-CONTRACT.md`
 (= `review-outbound.md` PART B, B0-B10, plus the two security items the contract
 adds: CRLF/header-injection sanitation and `resolveAccount` hardening).
 
-## Done
+Unit B (builder W2) is the contract's "Quick wins" list, items 1-5.
+
+## Unit A — done (builder W1)
 
 - [x] **B10 acceptance gate written FIRST, demonstrated failing** — `src/gmail/acceptance.test.ts`
       (5 gates: multipart/alternative + 998-octet guard, quote block, From display name,
@@ -38,23 +40,37 @@ adds: CRLF/header-injection sanitation and `resolveAccount` hardening).
       Gmail-native feature bullet added; CHANGELOG 1.2.0 entry.
 - [x] **B8 tests + B10 PASS-after** — 185 tests green, typecheck clean, all five B10 gates pass.
 
-## Remaining — nothing in Unit A's scope
-
-
-
-## B10 gate evidence (reproducible)
+### B10 gate evidence (reproducible)
 
 FAIL-before: `git worktree add --detach <dir> 915a8c0 && npx vitest run src/gmail/acceptance.test.ts`
 -> 5 tests, 5 failed (multipart assertion, two not-implemented stubs, two Bcc-injection
 assertions). PASS-after on HEAD: 5 passed. Full suite: 185 passed, typecheck clean.
 
-## Not this worker's
+### Not Unit A's worker's
 
 - B10.5 live acceptance sends (send / reply / forward / draft+send, `[TEST]`-prefixed, raw
   verification) — the chair runs these.
 - The >5MB media-upload transport is implemented and unit-covered on the size arithmetic, but
   the contract asks for it to be confirmed against one real send during acceptance. Not
   builder-runnable.
+
+## Unit B — in progress (builder W2)
+
+- [x] **Item 1 — `get_attachment` rebuilt** — `src/gmail/api.test.ts` harness (googleapis /
+      auth / config all mocked) + the rebuild in `client.ts`: `save_dir` writes the file
+      (sanitized filename from the message part, `-1`/`-2` collision suffix, `wx` flag so
+      the create is atomic), inline base64 only up to 1MB and refused BEFORE download when
+      the part table says it is bigger, filename + mimeType always returned, base64url
+      decoded through Node so the `=` padding is correct. `fetchAttachmentBytes` split out
+      as the unbounded low-level path the forward re-attach uses. 18 tests.
+
+## Remaining — Unit B
+
+- [ ] Item 2 — `modify_thread` + `trash_thread`
+- [ ] Item 3 — `update_draft` + `delete_draft`
+- [ ] Item 4 — correctness repairs (#6, #16, #7, #11, #8, #9/#26/#19, #12, #13/#14, #18,
+      #17, #10, #21, #1 SSRF, #27 logging)
+- [ ] Item 5 — README/CHANGELOG
 
 ## How to resume
 

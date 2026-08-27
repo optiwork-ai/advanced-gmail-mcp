@@ -48,11 +48,21 @@ export interface AttachmentInfo {
   size: number;
 }
 
-/** Result from fetching attachment bytes. */
+/** Result from fetching an attachment. */
 export interface AttachmentData {
   attachmentId: string;
+  /** The filename carried by the message part (sanitized), or 'attachment'. */
+  filename: string;
+  mimeType: string;
+  /** Decoded byte size. */
   size: number;
-  data_base64: string;
+  /**
+   * Standard, padded base64. Present only when the bytes were returned inline —
+   * i.e. no `save_dir` was given and the attachment was small enough to inline.
+   */
+  data_base64?: string;
+  /** Absolute path of the file written. Present only when `save_dir` was given. */
+  path?: string;
 }
 
 /** Thread with its messages. */
