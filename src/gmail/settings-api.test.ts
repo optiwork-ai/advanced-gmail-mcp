@@ -108,6 +108,28 @@ describe('listFilters', () => {
     expect(result.filters[0].forward).toBe('else@where.com');
   });
 
+  // R2-P5: Gmail's Filter.criteria also carries size/sizeComparison. Dropping
+  // them made a size-only filter come back as `criteria: {}` — which reads as
+  // "matches every message in the mailbox", the exact condition create_filter
+  // refuses to create.
+  it('reports a size-only filter as size criteria, not as an empty criteria object', async () => {
+    f.list.mockResolvedValueOnce({
+      data: {
+        filter: [
+          {
+            id: 'big',
+            criteria: { size: 10485760, sizeComparison: 'larger' },
+            action: { addLabelIds: ['Label_9'] },
+          },
+        ],
+      },
+    });
+
+    const { filters } = await listFilters();
+
+    expect(filters[0].criteria).toEqual({ size: 10485760, sizeComparison: 'larger' });
+  });
+
   it('returns an empty list when the account has no filters', async () => {
     f.list.mockResolvedValueOnce({ data: {} });
     expect((await listFilters()).filters).toEqual([]);

@@ -51,6 +51,15 @@ export interface FilterCriteria {
   negatedQuery?: string;
   hasAttachment?: boolean;
   excludeChats?: boolean;
+  /**
+   * Read-only, both of them. Gmail lets a filter match on message size; this
+   * server does not create such a filter, but reporting one as `criteria: {}`
+   * would describe it as matching every message in the mailbox — the exact
+   * thing `create_filter` refuses to build.
+   */
+  size?: number;
+  /** `larger` or `smaller`, as Gmail returns it. */
+  sizeComparison?: string;
 }
 
 export interface FilterSummary {
@@ -82,6 +91,8 @@ function toFilterSummary(filter: gmail_v1.Schema$Filter): FilterSummary {
       ...(criteria.negatedQuery ? { negatedQuery: criteria.negatedQuery } : {}),
       ...(criteria.hasAttachment ? { hasAttachment: true } : {}),
       ...(criteria.excludeChats ? { excludeChats: true } : {}),
+      ...(typeof criteria.size === 'number' ? { size: criteria.size } : {}),
+      ...(criteria.sizeComparison ? { sizeComparison: criteria.sizeComparison } : {}),
     },
     addLabelIds: action.addLabelIds ?? [],
     removeLabelIds: action.removeLabelIds ?? [],
