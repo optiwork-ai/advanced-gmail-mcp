@@ -727,14 +727,14 @@ export function buildMimeMessage(opts: MimeOptions): BuiltMessage {
   if (opts.plain_text_only === true) {
     // Byte-identical to the legacy single-part message (unsubscribe mailto path).
     headers.push('Content-Type: text/plain; charset="UTF-8"');
-    return finalize(`${headers.join(CRLF)}${CRLF}${CRLF}${textBody}`);
+    return finalize(`${headers.join(CRLF)}${CRLF}${CRLF}${textBody}`, attachments);
   }
 
   const alternative = buildAlternative(textBody, htmlBody);
 
   if (attachments.length === 0) {
     headers.push(`Content-Type: multipart/alternative; boundary="${alternative.boundary}"`);
-    return finalize(`${headers.join(CRLF)}${CRLF}${CRLF}${alternative.content}`);
+    return finalize(`${headers.join(CRLF)}${CRLF}${CRLF}${alternative.content}`, attachments);
   }
 
   const totalRaw = attachments.reduce((sum, a) => sum + a.content.length, 0);
@@ -755,22 +755,27 @@ export function buildMimeMessage(opts: MimeOptions): BuiltMessage {
   ];
   headers.push(`Content-Type: multipart/mixed; boundary="${outer}"`);
 
-  const built = finalize(`${headers.join(CRLF)}${CRLF}${CRLF}${sections.join(CRLF)}`);
-  if (built.bytes > MAX_ENCODED_MESSAGE_BYTES) {
-    const detail = attachments
-      .map(a => `${a.filename} (${mb(a.content.length)}MB)`)
-      .join(', ');
-    throw new Error(
-      `Assembled message is ${mb(built.bytes)}MB, over the 35MB ceiling. Attachments: ${detail}.`,
-    );
-  }
-  return built;
+  return finalize(`${headers.join(CRLF)}${CRLF}${CRLF}${sections.join(CRLF)}`, attachments);
 }
 
-function finalize(raw: string): BuiltMessage {
+/**
+ * Encode the assembled message and enforce the ceiling Gmail will accept.
+ * Checked on every path, not just the attachment one, so an oversized pasted
+ * body fails here with a clear message rather than as an opaque API error.
+ */
+function finalize(raw: string, attachments: Attachment[]): BuiltMessage {
+  const bytes = Buffer.byteLength(raw, 'utf8');
+  if (bytes > MAX_ENCODED_MESSAGE_BYTES) {
+    const detail = attachments.length > 0
+      ? ` Attachments: ${attachments.map(a => `${a.filename} (${mb(a.content.length)}MB)`).join(', ')}.`
+      : '';
+    throw new Error(
+      `Assembled message is ${mb(bytes)}MB, over the 35MB ceiling.${detail}`,
+    );
+  }
   return {
     raw,
     rawBase64Url: Buffer.from(raw, 'utf8').toString('base64url'),
-    bytes: Buffer.byteLength(raw, 'utf8'),
+    bytes,
   };
 }
