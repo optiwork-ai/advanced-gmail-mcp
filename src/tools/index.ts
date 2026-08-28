@@ -41,6 +41,7 @@ import { registerSearchDriveFiles } from './drive-search-files.js';
 import { registerReadDriveFile } from './drive-read-file.js';
 import { registerUploadDriveFile } from './drive-upload-file.js';
 import { registerGetGoogleDoc } from './docs-get-document.js';
+import { registerUpdateGoogleDoc } from './docs-update-document.js';
 // Calendar tools (three read-only + create_calendar_event)
 import { registerListCalendars } from './calendar-list-calendars.js';
 import { registerListCalendarEvents } from './calendar-list-events.js';
@@ -97,9 +98,11 @@ export function registerAllTools(server: McpServer): void {
   registerFilterTools(server);
   registerVacationTools(server);
 
-  // Chat / Drive / Docs. Chat and Docs stay strictly read-only; Drive gains
-  // exactly one write — upload_drive_file — under the narrow drive.file scope,
-  // which reaches only the files this server creates.
+  // Chat / Drive / Docs. Chat stays strictly read-only. Drive has exactly one
+  // write — upload_drive_file — under the narrow drive.file scope, which
+  // reaches only the files this server creates. Docs gained one write on
+  // 2026-08-28 — update_google_doc — under the `documents` scope that replaced
+  // `documents.readonly`; its surface is append-text and find-replace only.
   registerListChatSpaces(server);
   registerListChatMessages(server);
   registerGetChatMessage(server);
@@ -107,6 +110,7 @@ export function registerAllTools(server: McpServer): void {
   registerReadDriveFile(server);
   registerUploadDriveFile(server);
   registerGetGoogleDoc(server);
+  registerUpdateGoogleDoc(server);
 
   // Calendar: three read-only tools plus create_calendar_event, whose
   // send_updates defaults to 'none' so the default path emails nobody.

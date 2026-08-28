@@ -247,3 +247,34 @@ more likely to be this than anything in the code.
 - **NOT done, and deliberately:** the evidence pack also mentions `get_chat_message` having
   no size cap. The contract's G10 names exactly two items and that is not one of them, so
   it was left alone rather than widened. Flagging it so the reviewer knows it was seen.
+
+### G11 — Docs write: the one new-scope feature — DONE
+- Commit: `PENDING-SHA-G11`
+- FAIL-before: `src/tools/docs-update-document.test.ts` could not load its module at all
+  (`./docs-update-document.js` did not exist) — **no tests ran**.
+- PASS-after: full suite **689 passed (689)**, 19 files, typecheck clean. Roster **50 → 51**.
+- ONE tool, `update_google_doc`, with the minimal surface the contract asked for:
+  **append text at the end** (`insertText` with `endOfSegmentLocation`, never a computed
+  index) and **find-replace** (`replaceAllText`). A test asserts the built request JSON
+  contains no `"index"` at all — that is the whole point of the design: an index is a
+  position in a document the caller cannot see, and one wrong by two silently rewrites the
+  wrong paragraph.
+- Replacements are ordered **before** the append, so text added in the same call cannot be
+  rewritten by a rule in that same call.
+- Refusals before any network call: a call that would do nothing (neither append nor
+  replacements), and an empty/whitespace `find`.
+- **A replacement that matched nothing is called out** in the result. batchUpdate succeeds
+  either way, so without this the tool would report a clean success for an edit that never
+  happened and the caller would tell the user the document had changed.
+- Logged on both edges like the G9 destructive paths (start / done / failed).
+- SCOPES: `documents.readonly` **replaced** by `documents` in `src/gmail/auth.ts` (the
+  contract said "auth.ts"; the scope list actually lives in `src/gmail/auth.ts` —
+  `src/auth.ts` is the CLI). `documents` covers reading, so both Docs tools now travel on
+  one grant: `DOCS_READONLY_SCOPE` became a single `DOCS_SCOPE` that both quote. **No
+  re-auth was run by me.** Until each alias re-consents, BOTH Docs tools 403 — and thanks
+  to G3 they say exactly that, naming the scope and `npm run auth -- <alias>`.
+- **Restated, not loosened:** `read-only-tools.test.ts`'s `get_google_doc` scope assertion
+  moved from `documents.readonly` to `auth/documents`, because the scope that tool requires
+  genuinely changed. No other assertion in that file moved.
+- Unit tests mock the Docs API throughout. **No live document was touched.**
+- Consent round + live acceptance are the CHAIR's step, per the contract.

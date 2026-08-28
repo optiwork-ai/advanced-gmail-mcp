@@ -31,7 +31,9 @@ vi.mock('../drive/client.js', () => ({
 }));
 vi.mock('../docs/client.js', () => ({
   getDocsClient: vi.fn(async () => docsApi),
-  DOCS_READONLY_SCOPE: 'https://www.googleapis.com/auth/documents.readonly',
+  // Became `documents` on 2026-08-28 when update_google_doc was added; the read
+  // tool quotes the scope that is actually requested.
+  DOCS_SCOPE: 'https://www.googleapis.com/auth/documents',
 }));
 vi.mock('../config.js', () => ({
   resolveAccount: (input?: string) => ({
@@ -119,7 +121,7 @@ const cases = [
     mock: docsApi.documents.get,
     args: { document_id: 'doc1' },
     api: 'Google Docs',
-    scope: 'documents.readonly',
+    scope: 'auth/documents',
   },
 ] as const;
 

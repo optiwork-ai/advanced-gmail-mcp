@@ -20,10 +20,16 @@ const CLIENT_CACHE = new Map<string, CachedClient>();
 const CLIENT_TTL_MS = 50 * 60 * 1000; // 50 minutes
 
 /**
- * The scope a document read needs, named here so a missing-scope error can
- * quote it back at the caller (see `src/google-api-error.ts`).
+ * The scope the Docs calls need, named here so a missing-scope error can quote
+ * it back at the caller (see `src/google-api-error.ts`).
+ *
+ * This became `documents` (read AND write) on 2026-08-28, replacing
+ * `documents.readonly`, when update_google_doc was added. It is ONE constant on
+ * purpose: reading and writing now travel on the same grant, so an error that
+ * quoted the old read-only scope would name a permission that re-consenting
+ * will not produce.
  */
-export const DOCS_READONLY_SCOPE = 'https://www.googleapis.com/auth/documents.readonly';
+export const DOCS_SCOPE = 'https://www.googleapis.com/auth/documents';
 
 /**
  * Get an authenticated Google Docs API client for an account.

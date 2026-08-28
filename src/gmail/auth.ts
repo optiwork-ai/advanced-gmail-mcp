@@ -59,10 +59,13 @@ const SCOPES = [
   'https://www.googleapis.com/auth/chat.spaces.readonly',
   'https://www.googleapis.com/auth/chat.messages.readonly',
   'https://www.googleapis.com/auth/drive.readonly',
-  'https://www.googleapis.com/auth/documents.readonly',
   // Write scopes (added 2026-08-27) — see the note above.
   'https://www.googleapis.com/auth/drive.file',
   'https://www.googleapis.com/auth/gmail.settings.basic',
+  // Docs read AND write (2026-08-28). This REPLACED `documents.readonly`:
+  // `documents` includes reading, so both Docs tools now travel on one grant,
+  // and every alias must re-consent before update_google_doc will work.
+  'https://www.googleapis.com/auth/documents',
 ];
 
 const REDIRECT_URI = 'http://localhost:3000/oauth2callback';

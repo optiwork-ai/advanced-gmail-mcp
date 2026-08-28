@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { docs_v1 } from 'googleapis';
-import { DOCS_READONLY_SCOPE, getDocsClient } from '../docs/client.js';
+import { DOCS_SCOPE, getDocsClient } from '../docs/client.js';
 import { resolveAccount } from '../config.js';
 import { googleApiCall } from '../google-api-error.js';
 
@@ -66,7 +66,7 @@ export function registerGetGoogleDoc(server: McpServer): void {
       try {
         const resolved = resolveAccount(account ?? undefined);
         const docs = await getDocsClient(resolved);
-        const ctx = { tool: 'get_google_doc', api: 'Google Docs', scope: DOCS_READONLY_SCOPE, alias: resolved.alias };
+        const ctx = { tool: 'get_google_doc', api: 'Google Docs', scope: DOCS_SCOPE, alias: resolved.alias };
 
         const response = await googleApiCall(ctx, () =>
           docs.documents.get({ documentId: document_id })

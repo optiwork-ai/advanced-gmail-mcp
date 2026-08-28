@@ -6,7 +6,7 @@ A Gmail [MCP server](https://modelcontextprotocol.io) for [Claude Code](https://
 
 ## Features
 
-- **50 tools** spanning Gmail (read, compose, draft management, modify, attachments, mailbox-change watching, thread and label management, mail rules and the vacation responder), Google Calendar, Google Drive (read plus upload), and read-only Google Chat and Docs — see the [Tools](#tools) table
+- **51 tools** spanning Gmail (read, compose, draft management, modify, attachments, mailbox-change watching, thread and label management, mail rules and the vacation responder), Google Calendar, Google Drive (read plus upload), Google Docs (read plus append/find-replace), and read-only Google Chat — see the [Tools](#tools) table
 - **Gmail-native outbound mail** — everything you send goes out as `multipart/alternative` (HTML plus a plain-text alternative), with your account's Gmail signature, quoted history on replies, and a proper `Name <address>` sender. Attachments supported on send, draft and reply; images can be embedded in the body with `inline_images` and referenced as `cid:filename`; forwards re-attach the original's files and keep its embedded images embedded
 - **Watch for new mail without polling the whole inbox** — `get_history_baseline` hands you a cursor, `get_mail_changes` tells you what arrived, was deleted or was relabelled since it. Stateless: you keep the cursor
 - **Multi-account** support with simple aliases
@@ -31,14 +31,15 @@ npm install
 2. Create a new project (or select an existing one)
 3. Enable the APIs:
    - APIs & Services → Enable APIs → search "Gmail API" → Enable
-   - For the read-only Chat/Drive/Docs tools, also enable the **Google Chat API**, **Google Drive API**, and **Google Docs API**
+   - For the Chat/Drive/Docs tools, also enable the **Google Chat API**, **Google Drive API**, and **Google Docs API**
    - For the Calendar tools, also enable the **Google Calendar API**
 4. Configure the **OAuth consent screen**:
    - APIs & Services → OAuth consent screen
    - User type: External (or Internal if using Google Workspace)
    - Add your email address(es) as test users
    - Add scopes: `gmail.readonly`, `gmail.modify`, `gmail.send`, `gmail.compose`
-   - For read-only Chat/Drive/Docs, also add: `chat.spaces.readonly`, `chat.messages.readonly`, `drive.readonly`, `documents.readonly`, then re-run the auth flow for each alias (`npm run auth -- <alias>`) so the new scopes are granted
+   - For Chat/Drive/Docs, also add: `chat.spaces.readonly`, `chat.messages.readonly`, `drive.readonly`, `documents`, then re-run the auth flow for each alias (`npm run auth -- <alias>`) so the new scopes are granted
+   - **`documents` replaced `documents.readonly` on 2026-08-28** so that `update_google_doc` can write. It covers reading too, so both Docs tools travel on the one grant — but every alias must re-consent before either works again
    - For Calendar, also add: `calendar.events`, `calendar.freebusy`, `calendar.calendarlist.readonly`
    - For `upload_drive_file`, also add: `drive.file` — the narrow Drive scope, which reaches only the files this server itself creates
    - For the mail-rule and vacation-responder tools, also add: `gmail.settings.basic`
@@ -83,7 +84,7 @@ npm run auth:check
 
 The auth flow opens a browser window for each account. Tokens are saved to `./tokens/`.
 
-> **Adding a scope means re-consenting.** A token carries exactly the permissions that were granted when it was issued — editing the scope list does nothing to a token already on disk. **`drive.file` and `gmail.settings.basic` were added on 2026-08-27**, so on any account authenticated before then, `upload_drive_file`, `list_filters`, `create_filter`, `delete_filter`, `get_vacation` and `set_vacation` answer **403 until that alias runs `npm run auth -- <alias>` again**. Those tools say so in their own error messages. Everything else keeps working untouched in the meantime — nothing about sending, reading or the Gmail signature depends on the new grants.
+> **Adding a scope means re-consenting.** A token carries exactly the permissions that were granted when it was issued — editing the scope list does nothing to a token already on disk. **`documents` replaced `documents.readonly` on 2026-08-28**, so on any account authenticated before then, BOTH `get_google_doc` and `update_google_doc` answer 403 until that alias runs `npm run auth -- <alias>` again. **`drive.file` and `gmail.settings.basic` were added on 2026-08-27**, so on any account authenticated before then, `upload_drive_file`, `list_filters`, `create_filter`, `delete_filter`, `get_vacation` and `set_vacation` answer **403 until that alias runs `npm run auth -- <alias>` again**. Those tools say so in their own error messages. Everything else keeps working untouched in the meantime — nothing about sending, reading or the Gmail signature depends on the new grants.
 
 ### 5. Add to Claude Code
 
@@ -171,7 +172,7 @@ These need `gmail.settings.basic` (added 2026-08-27), so they **403 on any alias
 
 ### Chat / Drive / Docs
 
-Chat and Docs are **strictly read-only** — nothing is posted, created, updated, or deleted. Drive is read-only except `upload_drive_file`, which creates new files under the narrow `drive.file` scope (it reaches only files this server itself created, never the rest of your Drive). These tools require the extra scopes above; re-run the auth flow per alias after adding them.
+Chat is **strictly read-only** — nothing is posted, created, updated, or deleted. Drive is read-only except `upload_drive_file`, which creates new files under the narrow `drive.file` scope (it reaches only files this server itself created, never the rest of your Drive). Docs is read plus exactly one write, `update_google_doc`, whose surface is append-text and find-replace — there is no way to insert at a position, because a position is a number in a document the caller cannot see. These tools require the extra scopes above; re-run the auth flow per alias after adding them.
 
 | Tool | Description |
 |------|-------------|
@@ -182,6 +183,7 @@ Chat and Docs are **strictly read-only** — nothing is posted, created, updated
 | `read_drive_file` | Read a Drive file's metadata + text (Docs/Sheets/Slides exported to text; binary types return metadata only; ~1MB cap; read `contentNote` — a Sheets export is first-sheet-only) |
 | `upload_drive_file` | **Uploads a local file to Drive** (absolute path, optional `folder_id` and `name`; 100MB ceiling) and returns its id, name, size and `webViewLink`. Always creates a new file — it never overwrites one. Needs `drive.file` |
 | `get_google_doc` | Read a Google Doc as title + flattened plain text |
+| `update_google_doc` | Edit a Google Doc: append text at the end and/or replace text you name. No index arithmetic — the result reports how many occurrences each replacement actually changed |
 
 ### Calendar
 
