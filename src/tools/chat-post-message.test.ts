@@ -183,6 +183,16 @@ describe('postChatMessage — refusals before any call', () => {
     expect(chatApi.spaces.messages.create).not.toHaveBeenCalled();
   });
 
+  it('refuses a space id that would re-target the request, and posts nothing', async () => {
+    // CP-4: the id goes into the request PATH by reserved expansion, so
+    // "spaces/AAA?key=v" would be sent as .../v1/spaces/AAA?key=v/messages.
+    await expect(postChatMessage({ space: 'spaces/AAA?key=v', text: 'hi' }))
+      .rejects.toThrow(/not a usable Chat space/);
+    await expect(postChatMessage({ space: 'https://mail.google.com/chat/u/0/#chat/space/AAA', text: 'hi' }))
+      .rejects.toThrow(/list_chat_spaces/);
+    expect(chatApi.spaces.messages.create).not.toHaveBeenCalled();
+  });
+
   it('refuses a thread that belongs to another space', async () => {
     await expect(
       postChatMessage({ space: 'AAA', text: 'hi', thread: 'spaces/BBB/threads/TTT' }),

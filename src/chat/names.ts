@@ -8,13 +8,51 @@
  * module so the acceptance cannot drift apart again.
  */
 
+/**
+ * CP-4 — every id in this module ends up in a PATH PARAMETER of a Google API
+ * call, and the client builds those URLs by reserved URI-template expansion
+ * ('/v1/{+parent}/messages'), which does not percent-encode "/", "?", ":" or
+ * "#". An unchecked id therefore re-targets the request instead of being
+ * refused:
+ *
+ *   'spaces/AAA?key=v'                       -> /v1/spaces/AAA?key=v/messages
+ *   'spaces/../../v1/spaces/BBB/messages/X'  -> a different resource entirely
+ *
+ * The realistic case needs no attacker: a model passes a Chat web link, a
+ * display name or a message name where a space id belongs, and instead of
+ * "that is not a space id" the request goes out mangled and comes back as a
+ * raw Google error nobody can act on. post_chat_message refuses an empty
+ * message, an over-length one, contradictory thread arguments and a
+ * cross-space thread before any network call; the field deciding WHICH SPACE a
+ * public message is published into is checked here on the same principle.
+ *
+ * The shape is deliberately narrow — letters, digits, "-", "_" and "." — and
+ * a leading "." is barred so that "." and ".." cannot pass. Real Chat ids
+ * ("AAAAj0dJ1ac", "xyz.abc") fit inside it.
+ */
+const CHAT_ID = /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/;
+
+/** Refuse an id that is not a bare Chat id, saying what one looks like. */
+function checkChatId(id: string, kind: 'space' | 'thread' | 'message', whole: string): string {
+  if (CHAT_ID.test(id)) return id;
+  throw new Error(
+    `"${whole}" is not a usable Chat ${kind} name: "${id}" is not a ${kind} id. A Chat id is `
+    + 'letters, digits, "-", "_" and "." only — no slashes, no "?", no "#", and not a URL, '
+    + 'because the id is put straight into the address of the request. Ids come back from '
+    + 'list_chat_spaces and list_chat_messages in exactly the form Google wants '
+    + '(for example "spaces/AAAAj0dJ1ac/messages/xyz.abc"); a Chat web link or a space\'s '
+    + 'display name is not one.',
+  );
+}
+
 /** Normalize a space id or full resource name into "spaces/{space}". */
 export function toSpaceParent(space: string): string {
   const trimmed = space.trim();
   if (trimmed.length === 0) {
     throw new Error('A Chat space is required — pass either "spaces/{space}" or the bare space id.');
   }
-  return trimmed.startsWith('spaces/') ? trimmed : `spaces/${trimmed}`;
+  const id = trimmed.startsWith('spaces/') ? trimmed.slice('spaces/'.length) : trimmed;
+  return `spaces/${checkChatId(id, 'space', trimmed)}`;
 }
 
 /**
@@ -66,12 +104,18 @@ export function toThreadTarget(spaceParent: string, thread: string): ThreadTarge
   // after the segment is what identifies it; anything before is the space, and
   // the space is a parameter here already.
   const messageMatch = /(?:^|\/)messages\/([^/]+)$/.exec(trimmed);
-  if (messageMatch) return { kind: 'message', name: `${spaceParent}/messages/${messageMatch[1]}` };
+  if (messageMatch) {
+    const id = checkChatId(messageMatch[1], 'message', trimmed);
+    return { kind: 'message', name: `${spaceParent}/messages/${id}` };
+  }
 
   const threadMatch = /(?:^|\/)threads\/([^/]+)$/.exec(trimmed);
-  if (threadMatch) return { kind: 'thread', name: `${spaceParent}/threads/${threadMatch[1]}` };
+  if (threadMatch) {
+    const id = checkChatId(threadMatch[1], 'thread', trimmed);
+    return { kind: 'thread', name: `${spaceParent}/threads/${id}` };
+  }
 
-  return { kind: 'thread', name: `${spaceParent}/threads/${trimmed}` };
+  return { kind: 'thread', name: `${spaceParent}/threads/${checkChatId(trimmed, 'thread', trimmed)}` };
 }
 
 /**
@@ -89,8 +133,24 @@ export function toMessageName(name: string): string {
       + '(get it from list_chat_messages).',
     );
   }
-  if (trimmed.startsWith('spaces/')) return trimmed;
-  if (trimmed.includes('/messages/')) return `spaces/${trimmed}`;
+  const qualified = trimmed.startsWith('spaces/')
+    ? trimmed
+    : trimmed.includes('/messages/') ? `spaces/${trimmed}` : undefined;
+
+  if (qualified) {
+    // Both halves are checked, because both are path segments of the request.
+    const parts = /^spaces\/([^/]+)\/messages\/([^/]+)$/.exec(qualified);
+    if (!parts) {
+      throw new Error(
+        `"${trimmed}" is not a usable Chat message name. It should read `
+        + '"spaces/{space}/messages/{message}" and nothing else — list_chat_messages returns '
+        + 'exactly that in each message\'s "name" field.',
+      );
+    }
+    checkChatId(parts[1], 'space', trimmed);
+    checkChatId(parts[2], 'message', trimmed);
+    return qualified;
+  }
 
   throw new Error(
     `"${trimmed}" is not enough to find a Chat message: a message is identified by its space `

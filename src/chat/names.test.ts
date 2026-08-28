@@ -90,3 +90,57 @@ describe('toThreadTarget', () => {
       .toEqual({ kind: 'thread', name: 'spaces/AAAA/threads/TTTT' });
   });
 });
+
+/**
+ * CP-4 — these ids are not just data. Every one of them ends up in a path
+ * parameter of a Google API call, and the client builds those URLs by RESERVED
+ * URI-template expansion ('/v1/{+parent}/messages'), which does NOT
+ * percent-encode "/", "?", ":" or "#". So an id nobody checked re-targets the
+ * HTTP request rather than being refused:
+ *
+ *   'spaces/AAA?key=v'  ->  .../v1/spaces/AAA?key=v/messages
+ *   'spaces/../../v1/spaces/BBB/messages/X'  ->  a different resource entirely
+ *
+ * post_chat_message refuses an empty message, an over-length message, a
+ * contradictory pair of thread arguments and a cross-space thread — all before
+ * any network call. The field that decides WHICH SPACE a public message is
+ * published into had no such check.
+ */
+describe('id shapes — refused before any request is built', () => {
+  it('refuses a space id carrying a query string', () => {
+    expect(() => toSpaceParent('spaces/AAAA?key=v')).toThrow(/not a usable Chat space/);
+    expect(() => toSpaceParent('AAAA?key=v')).toThrow(/not a usable Chat space/);
+  });
+
+  it('refuses a space id that walks the URL path', () => {
+    expect(() => toSpaceParent('spaces/../../v1/spaces/BBBB/messages/X'))
+      .toThrow(/not a usable Chat space/);
+    expect(() => toSpaceParent('..')).toThrow(/not a usable Chat space/);
+  });
+
+  it('refuses a Chat web link, saying what a space id is', () => {
+    expect(() => toSpaceParent('https://mail.google.com/chat/u/0/#chat/space/AAAA'))
+      .toThrow(/list_chat_spaces/);
+  });
+
+  it('still accepts the ids Google actually returns', () => {
+    expect(toSpaceParent('spaces/AAAA_j0dJ1ac')).toBe('spaces/AAAA_j0dJ1ac');
+    expect(toSpaceParent('AAAA-j0dJ1ac')).toBe('spaces/AAAA-j0dJ1ac');
+    expect(toMessageName('spaces/AAAA/messages/xyz.abc')).toBe('spaces/AAAA/messages/xyz.abc');
+  });
+
+  it('refuses a malformed thread or message tail the same way', () => {
+    expect(() => toThreadTarget('spaces/AAAA', 'threads/TTTT?alt=json'))
+      .toThrow(/not a usable Chat thread/);
+    expect(() => toThreadTarget('spaces/AAAA', 'messages/MMMM#frag'))
+      .toThrow(/not a usable Chat message/);
+    expect(() => toThreadTarget('spaces/AAAA', 'a bare id with spaces'))
+      .toThrow(/not a usable Chat thread/);
+    expect(() => toMessageName('spaces/AAAA/messages/MMMM?alt=json'))
+      .toThrow(/not a usable Chat message/);
+  });
+
+  it('checks the space half of a message name too', () => {
+    expect(() => toMessageName('spaces/AAAA?x=1/messages/MMMM')).toThrow(/not a usable Chat space/);
+  });
+});
