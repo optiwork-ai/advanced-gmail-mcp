@@ -387,7 +387,11 @@ export async function postChatMessage(opts: PostChatMessageOptions): Promise<Pos
     }
   } else if (threadKey) {
     notes.push(
-      `Posted under thread_key "${threadKey}": later posts with the same key join this thread.`,
+      `Posted with thread_key "${threadKey}"`
+      + `${landedThread ? `, into thread "${landedThread}"` : ''}. Whether a later post with the `
+      + 'same key joins that thread is NOT confirmed for messages posted as a user — Google '
+      + 'documents a thread key as unique to the Chat app that sets it, and there is no Chat app '
+      + 'here. To continue this exact conversation, pass the thread name above as "thread".',
     );
   }
 
@@ -471,9 +475,13 @@ export const postChatMessageParams = {
     .string()
     .optional()
     .describe(
-      'A key of your own choosing that names a thread across posts: every message posted with '
-      + 'the same thread_key in the same space joins the same thread. Use it for a recurring '
-      + 'alert that should stay in one conversation. Cannot be combined with "thread".',
+      'A key of your own choosing, meant to name a thread across posts. TREAT IT AS UNPROVEN '
+      + 'HERE: Google documents a thread key as unique to the Chat app that sets it, and this '
+      + 'server posts as a user rather than as a Chat app, so it is not confirmed that a later '
+      + 'post with the same key joins the earlier thread — and it fails silently if it does not, '
+      + 'because Chat starts a new thread instead of erroring. The reliable way to keep a run of '
+      + 'alerts in one conversation is to take the "thread" name out of the first answer and '
+      + 'pass it as "thread" on the ones after it. Cannot be combined with "thread".',
     ),
   request_id: z
     .string()
@@ -506,9 +514,11 @@ export function registerPostChatMessage(server: McpServer): void {
     + 'The message text is not inert: the first link in it becomes a preview chip, and Chat '
     + 'mention markup ("<users/all>", "<users/{id}>") notifies people — so mention markup is '
     + 'made inert before posting unless you pass "allow_mentions": true. '
-    + 'Pass "thread" to reply inside an existing conversation, or "thread_key" to keep repeated '
-    + 'alerts together; when a reply cannot be threaded, Chat posts it as a new thread and the '
-    + 'answer says so ("repliedToThread": false). '
+    + 'Pass "thread" to reply inside an existing conversation; when a reply cannot be threaded, '
+    + 'Chat posts it as a new thread and the answer says so ("repliedToThread": false). To keep '
+    + 'a run of alerts in one conversation, take the "thread" name out of the first answer and '
+    + 'pass it back on the ones after it — "thread_key" is meant for that, but is not confirmed '
+    + 'to work for messages posted as a user. '
     + 'The post is never retried automatically, because a retried post is a second message in '
     + 'front of everybody. If it fails with a gateway error the message MAY still have been '
     + 'posted; the error says so, and names the "request_id" to retry with so Chat returns the '

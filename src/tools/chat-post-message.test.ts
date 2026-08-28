@@ -39,6 +39,7 @@ const {
   chatTextLength,
   neutralizeChatMentions,
   postChatMessage,
+  postChatMessageParams,
   registerPostChatMessage,
   sanitizeChatText,
 } = await import('./chat-post-message.js');
@@ -303,6 +304,30 @@ describe('postChatMessage — threading', () => {
     expect(args.requestBody.thread).toEqual({ threadKey: 'nightly-run' });
     expect(args.messageReplyOption).toBe('REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD');
     expect(result.note).toMatch(/thread_key "nightly-run"/);
+  });
+
+  /**
+   * CP-3 — the note used to assert that later posts with the same key would
+   * join this thread. Nothing checked that, and Google's own doc points the
+   * other way: a thread key "is unique to the Chat app that sets it", and this
+   * server posts as a USER, not as a Chat app. The failure would have been
+   * silent — REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD means Chat starts a new
+   * thread rather than erroring — so 30 nightly alerts could land in 30
+   * threads with every call reporting the opposite.
+   */
+  it('does not promise that a later post with the same key joins this thread', async () => {
+    const result = await postChatMessage({ space: 'AAA', text: 'nightly', threadKey: 'nightly-run' });
+
+    expect(result.note).not.toMatch(/join this thread/i);
+    expect(result.note).toMatch(/not confirmed/i);
+    // What IS known — and what a caller can actually use to keep a run of
+    // alerts together — is the thread the message landed in.
+    expect(result.note).toContain('spaces/AAA/threads/TTT');
+    expect(result.note).toMatch(/"thread"/);
+  });
+
+  it('tells the truth about thread_key in the parameter description too', () => {
+    expect(postChatMessageParams.thread_key.description).toMatch(/not confirmed|unique to the Chat app/i);
   });
 });
 
