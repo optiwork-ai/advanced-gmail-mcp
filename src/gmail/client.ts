@@ -896,10 +896,14 @@ async function hydrateArrivals(
 /**
  * List what changed in the mailbox since a caller-supplied cursor.
  *
- * Stateless by design: the caller (a session, an agent, a scheduled job) owns
- * the cursor. Pass the `historyId` from `getHistoryBaseline` — or from the last
- * COMPLETE page of this function — and get back the arrivals, deletions and
- * label changes since then, plus the cursor for next time.
+ * The cursor is remembered per account on this machine (G12), so the ordinary
+ * "what arrived since last time?" poll passes nothing: this continues from the
+ * last COMPLETE read. A caller that keeps its own cursor — a scheduled job with
+ * durable state of its own — still passes the `historyId` from
+ * `getHistoryBaseline`, or from the last COMPLETE page of this function, and
+ * that always wins over the remembered one. Either way the answer is the
+ * arrivals, deletions and label changes since that position, plus the cursor
+ * for next time.
  *
  * Two things the API makes easy to get wrong, handled here:
  *

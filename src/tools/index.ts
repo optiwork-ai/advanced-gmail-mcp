@@ -61,7 +61,9 @@ export function registerAllTools(server: McpServer): void {
   registerGetLabels(server);
 
   // Mail-arrival watching: a cursor to poll from, and what changed since it.
-  // Stateless — the caller stores the cursor between polls.
+  // The server REMEMBERS the last complete position per account (G12), so a
+  // routine "what arrived since last time?" needs no cursor at all. A cursor
+  // the caller supplies still wins — remembering is a default, not a lock.
   registerGetHistoryBaseline(server);
   registerGetMailChanges(server);
 

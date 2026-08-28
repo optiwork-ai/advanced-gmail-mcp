@@ -58,16 +58,23 @@ export interface HistoryMessageRef {
 }
 
 /**
- * One page of mailbox changes since a caller-supplied cursor.
+ * One page of mailbox changes since a cursor.
  *
- * There is no server-side state: the caller stores `historyId` and passes it
- * back on the next poll.
+ * The cursor is remembered per account on this machine (G12): a poll with no
+ * `history_id` continues from the last COMPLETE read. A caller that keeps its
+ * own cursor and passes it in still overrides that.
  */
 export interface MailChanges {
   /** The alias these changes came from. */
   account: string;
   /** The cursor that was polled. */
   fromHistoryId: string;
+  /**
+   * Present only when the polled cursor came from the remembered position
+   * rather than from the caller — the reason `fromHistoryId` is a value the
+   * caller never sent.
+   */
+  resumedFrom?: string;
   /**
    * The cursor for the NEXT poll. Store it only when `complete` is true — while
    * pages remain, the mailbox has already moved past what this page reports.
