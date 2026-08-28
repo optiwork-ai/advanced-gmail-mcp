@@ -23,7 +23,7 @@ import {
 } from './mime.js';
 import { getSendAsProfile } from './settings.js';
 import { assertPublicHttpsUrl } from './url-guard.js';
-import { readCursor, writeCursor } from './cursor-store.js';
+import { cursorFilePath, readCursor, writeCursor } from './cursor-store.js';
 import type {
   Attachment,
   DraftPage,
@@ -1018,7 +1018,14 @@ export async function getMailChanges(opts: {
   // silently, because complete was true and nothing said otherwise. The cursor
   // only ever moves forward, and a rewind is reported rather than performed.
   let nextHistoryId = String(response.data.historyId ?? startHistoryId);
+  // Set once Gmail's own answer has PROVED the polled cursor is not a position
+  // in this mailbox. A value the code has just disproved must never be written
+  // down: the store only moves forward, so a far-future foreign value stored
+  // once could never be corrected, and "since last time" would report nothing
+  // for that account for ever after.
+  let foreignCursor = false;
   if (/^\d+$/.test(nextHistoryId) && BigInt(nextHistoryId) < BigInt(startHistoryId)) {
+    foreignCursor = true;
     notes.push(
       `The mailbox is at history ${nextHistoryId}, BEHIND the cursor ${startHistoryId} that `
       + 'was polled with — that cursor does not belong to this account. history_id was kept '
@@ -1053,11 +1060,25 @@ export async function getMailChanges(opts: {
   // always documented that trap; storing only on completion makes it impossible
   // to fall into.
   const complete = !nextPageToken;
-  if (complete) {
+  if (complete && !foreignCursor) {
     const outcome = writeCursor(resolved.alias, nextHistoryId);
     if (!outcome.stored && outcome.reason) {
       notes.push(`The remembered cursor was not updated: it ${outcome.reason}.`);
     }
+  } else if (complete) {
+    // The guard fired, so the position being carried forward is the foreign
+    // one. Saying which cursor is at fault is the whole of the cure: if it came
+    // in as an argument, nothing is broken and nothing was stored; if it came
+    // from the store, the store is the thing to clear, and no tool can do that
+    // for the caller.
+    notes.push(
+      remembered !== null
+        ? `That cursor is the REMEMBERED one for "${resolved.alias}", so polling this account `
+          + 'with no history_id will keep reporting nothing until it is cleared. Delete '
+          + `${cursorFilePath(resolved.alias)}, then poll once with a fresh `
+          + 'get_history_baseline cursor to start remembering again.'
+        : 'It was NOT remembered — the position stored for this account is untouched.',
+    );
   }
 
   return {

@@ -404,7 +404,7 @@ on `feat/round2-enhancements`.
 - Full suite after: **20 files, 713 passed** (+4), typecheck clean.
 
 ### WR-3 — read_drive_file was the last Drive/Docs read tool on bare withRetry — FIXED
-- Commit: `PENDING`
+- Commit: `d3919b3`
 - **FAIL-before (real):** added `read_drive_file` to the existing 403-honesty case table in
   `src/tools/read-only-tools.test.ts` (the four-tool `describe.each`). Three failures at HEAD:
   the missing-scope, disabled-API and ordinary-forbidden cases all came back as
@@ -417,3 +417,27 @@ on `feat/round2-enhancements`.
   re-authenticating cannot fix, and search now returns shared-drive files the account may only
   partly reach.
 - Full suite after: **20 files, 717 passed** (+4), typecheck clean.
+
+### WR-2 — a foreign history_id permanently poisoned an account's remembered cursor — FIXED
+- Commit: `PENDING`
+- **FAIL-before (real):** four new tests in `src/gmail/api.test.ts` under "getMailChanges
+  remembers where it got to". At HEAD all four failed: polling with `history_id: 999999999`
+  against a mailbox at 5000 wrote `999999999` into the store, which then could never be
+  corrected (writeCursor only moves forward), so every later cursor-less poll started from a
+  position no mail will ever reach and reported nothing.
+- **Fix (`src/gmail/client.ts`):** the rewind guard now records that it fired (`foreignCursor`),
+  and a proved-foreign position is **never written to the store**. The value is still carried
+  back to the caller unchanged, so no window is replayed — only the durable state is protected.
+- **The cure, for an account wedged before this fix:** when the guard fires and the poll ran on
+  the REMEMBERED cursor, the note now says the stored cursor is the culprit, names the exact
+  file to delete (`cursorFilePath`, newly exported from `src/gmail/cursor-store.ts` because the
+  directory is env-configurable and the alias is sanitized into the filename), and says to poll
+  once with a fresh `get_history_baseline` cursor. When the foreign cursor came in as an
+  argument, the note says plainly that it was not remembered and the stored position is untouched.
+- **Deliberately NOT done — and why:** auto-healing the store (writing the mailbox's own
+  `response.data.historyId` over the stored value) was considered and rejected. It requires
+  bypassing the monotonic rule, and Gmail's `history.list` historyId can legitimately lag the
+  profile historyId across replicas — so an auto-heal would sometimes rewind a GOOD bookmark and
+  replay mail as new. Skipping the write is safe in every case; healing is not. Recorded as an
+  open item in `QUESTIONS-FOR-FABLE.md`.
+- Full suite after: **20 files, 721 passed** (+4), typecheck clean.

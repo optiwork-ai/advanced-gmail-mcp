@@ -54,6 +54,7 @@ const cursorStore = {
 vi.mock('./cursor-store.js', () => ({
   readCursor: (alias: string) => cursorStore.readCursor(alias),
   writeCursor: (alias: string, id: string) => cursorStore.writeCursor(alias, id),
+  cursorFilePath: (alias: string) => `/fake/cursors/${alias}.json`,
 }));
 
 vi.mock('../config.js', () => ({
@@ -2042,6 +2043,58 @@ describe('getMailChanges remembers where it got to', () => {
 
     expect(result.note).toMatch(/remembered cursor was not updated/i);
     expect(result.note).toMatch(/could not be written/);
+  });
+
+  // WR-2 — the rewind guard and the store used to disagree. The guard exists
+  // because callers paste a cursor from ANOTHER account; when it fired it kept
+  // the foreign, far-future value, and the store then wrote that value down.
+  // One mistyped argument therefore wedged the account's "since last time"
+  // watcher permanently: every later poll started from a cursor no mail will
+  // ever reach, reported nothing, and could not be healed — writeCursor's
+  // monotonic rule refuses to move a bookmark backwards.
+  it('does NOT remember a cursor Gmail has just proved is not this mailbox\'s', async () => {
+    api.history.list.mockResolvedValue(ok({ historyId: '5000', history: [] }));
+
+    const result = await getMailChanges({ historyId: '999999999', account: 'work' });
+
+    expect(result.historyId).toBe('999999999');
+    expect(cursorStore.writeCursor).not.toHaveBeenCalled();
+    expect(cursors.get('work')).toBeUndefined();
+  });
+
+  it('leaves a good bookmark exactly where it was when a foreign cursor is polled with', async () => {
+    cursors.set('work', '4000');
+    api.history.list.mockResolvedValue(ok({ historyId: '5000', history: [] }));
+
+    await getMailChanges({ historyId: '999999999', account: 'work' });
+    expect(cursors.get('work')).toBe('4000');
+
+    // And "since last time" still works afterwards.
+    const next = await getMailChanges({ account: 'work' });
+    expect(next.fromHistoryId).toBe('4000');
+    expect(cursors.get('work')).toBe('5000');
+  });
+
+  it('says the supplied cursor was not remembered, rather than leaving it ambiguous', async () => {
+    cursors.set('work', '4000');
+    api.history.list.mockResolvedValue(ok({ historyId: '5000', history: [] }));
+
+    const result = await getMailChanges({ historyId: '999999999', account: 'work' });
+
+    expect(result.note).toMatch(/not remembered|untouched/i);
+  });
+
+  it('names the cure when the REMEMBERED cursor is the foreign one', async () => {
+    // An account wedged before this fix: the store itself holds the bad value.
+    cursors.set('work', '999999999');
+    api.history.list.mockResolvedValue(ok({ historyId: '5000', history: [] }));
+
+    const result = await getMailChanges({ account: 'work' });
+
+    expect(result.note).toContain('/fake/cursors/work.json');
+    expect(result.note).toMatch(/get_history_baseline/);
+    // and it still refuses to write the bad value back
+    expect(cursorStore.writeCursor).not.toHaveBeenCalled();
   });
 
   it('keeps every account on its own bookmark', async () => {

@@ -39,6 +39,18 @@ function cursorPath(alias: string): string {
   return path.join(getCursorDir(), `${safe}.json`);
 }
 
+/**
+ * Where an account's remembered cursor lives on disk.
+ *
+ * Exported so a caller that has PROVED the stored cursor does not belong to
+ * this mailbox can name the file to delete. The directory is configurable and
+ * the alias is sanitized into the filename, so the path cannot be reconstructed
+ * correctly by a caller guessing at the layout.
+ */
+export function cursorFilePath(alias: string): string {
+  return cursorPath(alias);
+}
+
 interface StoredCursor {
   alias: string;
   historyId: string;
