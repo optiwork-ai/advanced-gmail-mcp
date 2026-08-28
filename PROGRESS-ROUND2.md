@@ -249,7 +249,7 @@ more likely to be this than anything in the code.
   it was left alone rather than widened. Flagging it so the reviewer knows it was seen.
 
 ### G11 — Docs write: the one new-scope feature — DONE
-- Commit: `PENDING-SHA-G11`
+- Commit: `f88cade`
 - FAIL-before: `src/tools/docs-update-document.test.ts` could not load its module at all
   (`./docs-update-document.js` did not exist) — **no tests ran**.
 - PASS-after: full suite **689 passed (689)**, 19 files, typecheck clean. Roster **50 → 51**.
