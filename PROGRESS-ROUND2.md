@@ -154,7 +154,7 @@ Evidence pack: `round2-sweep-evidence.json` (normative for unit scope).
   tests, which still passes unmodified.
 
 ### G7 — version / dist hygiene — DONE
-- Commit: `PENDING-SHA-G7`
+- Commit: `7a1107a`
 - No FAIL-before: this unit has no testable defect. Suite unchanged at **629 passed (629)**,
   typecheck clean under the new tsconfig.
 - `package.json` version **1.1.0 → 1.7.0** (it had not moved through six CHANGELOG
