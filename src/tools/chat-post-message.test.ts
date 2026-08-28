@@ -333,6 +333,54 @@ describe('postChatMessage — honest failures', () => {
     expect(chatApi.spaces.messages.create).toHaveBeenCalledTimes(1);
   });
 
+  /**
+   * CP-2 — maxRetries:0 stops THIS code duplicating a post, but the caller is
+   * an LLM: told only "Service Unavailable", the predictable next move is to
+   * call the tool again, which posts the duplicate anyway. Chat's own
+   * idempotency key is what makes that retry safe.
+   */
+  it('sends a request id, which is what makes a retry safe', async () => {
+    await postChatMessage({ space: 'AAA', text: 'hi' });
+
+    const sent = chatApi.spaces.messages.create.mock.calls[0][0].requestId;
+    expect(typeof sent).toBe('string');
+    expect(sent.length).toBeGreaterThan(8);
+  });
+
+  it('uses the request id the caller supplied, so their retry returns the same message', async () => {
+    const result = await postChatMessage({ space: 'AAA', text: 'hi', requestId: 'nightly-2026-08-28' });
+
+    expect(chatApi.spaces.messages.create.mock.calls[0][0].requestId).toBe('nightly-2026-08-28');
+    expect(result.requestId).toBe('nightly-2026-08-28');
+  });
+
+  it('says a gateway failure MAY have posted anyway, and how to retry without duplicating', async () => {
+    const err = new Error('Service Unavailable') as Error & { code: number };
+    err.code = 503;
+    chatApi.spaces.messages.create.mockRejectedValue(err);
+
+    await expect(postChatMessage({ space: 'AAA', text: 'hi' })).rejects.toThrow(
+      /may already have been posted/i,
+    );
+    // and it names the space to check and the key that makes a retry safe
+    const thrown = await postChatMessage({ space: 'AAA', text: 'hi' }).catch((e: Error) => e.message);
+    const used = chatApi.spaces.messages.create.mock.calls[1][0].requestId;
+    expect(thrown).toContain('spaces/AAA');
+    expect(thrown).toContain(used);
+    expect(thrown).toMatch(/request_id/);
+    expect(thrown).toMatch(/Service Unavailable/);
+  });
+
+  it('does NOT muddy a refusal that never reached the space', async () => {
+    // A missing scope is refused by Google before anything is created; saying
+    // "it may have posted" there would send someone hunting for a message that
+    // does not exist.
+    chatApi.spaces.messages.create.mockRejectedValue(missingScope());
+
+    const thrown = await postChatMessage({ space: 'AAA', text: 'hi' }).catch((e: Error) => e.message);
+    expect(thrown).not.toMatch(/may already have been posted/i);
+  });
+
   it('does not tell the reader to re-authenticate when Chat refuses the space', async () => {
     const err = new Error('The caller does not have permission') as Error & { code: number };
     err.code = 403;

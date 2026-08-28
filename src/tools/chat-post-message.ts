@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { chat_v1 } from 'googleapis';
@@ -11,6 +12,7 @@ import { toSpaceParent, toThreadTarget } from '../chat/names.js';
 import { type AccountConfig, resolveAccount } from '../config.js';
 import { googleApiCall } from '../google-api-error.js';
 import { log } from '../log.js';
+import { errorStatus } from '../scope-error.js';
 
 /**
  * CP2 — `post_chat_message`, the first and only Chat call this server makes
@@ -123,6 +125,12 @@ export interface PostChatMessageOptions {
    * everyone in the space. Default false — see CP-1 in this module's header.
    */
   allowMentions?: boolean;
+  /**
+   * Chat's idempotency key. Reusing the key of a call that may have landed
+   * returns the message it created instead of posting a second one. Defaults
+   * to a fresh UUID per call.
+   */
+  requestId?: string;
   account?: string | AccountConfig;
 }
 
@@ -148,7 +156,53 @@ export interface PostChatMessageResult {
    * did not happen, and pass allow_mentions to mean it.
    */
   mentionsDefused?: number;
+  /**
+   * The idempotency key this post was sent under. Pass it back as
+   * "request_id" to retry a call whose outcome you do not know: Chat returns
+   * the message already created with that key rather than posting a second.
+   */
+  requestId: string;
   note?: string;
+}
+
+/**
+ * Turn a failed post into an error the caller can act on.
+ *
+ * A gateway failure (5xx, or a network error with no status at all) can arrive
+ * AFTER Chat has already accepted the message, so "Service Unavailable" on its
+ * own is a trap: the honest reading is "it may or may not be in the space",
+ * and the only safe retry is one that carries the same request id. A 4xx —
+ * a missing scope, a space the account cannot post to — was refused before
+ * anything was created, so it is returned untouched rather than sending
+ * somebody hunting for a message that does not exist.
+ *
+ * The status is read from the RAW Google error at the call site, not from the
+ * error handed here: the translation deliberately drops the numeric code (an
+ * error carrying `code: 403` would be rewritten by the shared retry helper
+ * into "re-authenticate", which is exactly the advice these tools exist to
+ * avoid giving), so by this point the code is already gone.
+ */
+function postFailure(
+  err: unknown,
+  status: number | undefined,
+  parent: string,
+  requestId: string,
+): unknown {
+  const mayHaveLanded = status === undefined || status >= 500;
+  if (!mayHaveLanded) return err;
+
+  const original = err instanceof Error ? err.message : String(err);
+  const wrapped = new Error(
+    `${original}\n\n`
+    + `This failure arrived after the message was handed to Google Chat, so it MAY already have `
+    + `been posted to ${parent} — check the space before sending it again. To retry without `
+    + `risking a second copy, call post_chat_message again with request_id "${requestId}": Chat `
+    + `returns the message that key already created instead of posting a new one.`,
+    { cause: err },
+  );
+  const code = (err as { code?: unknown }).code;
+  if (code !== undefined) (wrapped as Error & { code?: unknown }).code = code;
+  return wrapped;
 }
 
 /**
@@ -161,6 +215,13 @@ export interface PostChatMessageResult {
  * reported instead, and the caller decides. The two READS around it (looking a
  * thread up, reading the space's display name) keep the retries, because
  * repeating a read costs nothing.
+ *
+ * CP-2 — that stops THIS code duplicating a post, but not the caller. An LLM
+ * told only "Service Unavailable" will reasonably call the tool again, and
+ * that second call is the duplicate. So every post carries Chat's own
+ * idempotency key (`requestId`), the failure says the message may already be
+ * in the space, and it names the key to retry with. Retrying under the same
+ * key returns the message that key already created.
  */
 export async function postChatMessage(opts: PostChatMessageOptions): Promise<PostChatMessageResult> {
   const resolved = typeof opts.account === 'string' || opts.account === undefined
@@ -210,6 +271,11 @@ export async function postChatMessage(opts: PostChatMessageOptions): Promise<Pos
   // work and no network call.
   const target = requestedThreadInput ? toThreadTarget(parent, requestedThreadInput) : undefined;
 
+  // Chat's own idempotency key, generated per call unless the caller brought
+  // one. A caller that retries with the same key gets the message that key
+  // already created, instead of a second copy in front of the space.
+  const requestId = opts.requestId?.trim() || randomUUID();
+
   const chat = await getChatClient(resolved);
   const postCtx = {
     tool: 'post_chat_message',
@@ -244,6 +310,7 @@ export async function postChatMessage(opts: PostChatMessageOptions): Promise<Pos
     thread: requestedThread ?? null,
     thread_key: threadKey ?? null,
     mentions_defused: mentionsDefused,
+    request_id: requestId,
   };
   log('info', 'post_chat_message', { ...fields, phase: 'start' });
 
@@ -254,19 +321,33 @@ export async function postChatMessage(opts: PostChatMessageOptions): Promise<Pos
       : undefined;
 
   let response;
+  // The status of the RAW error, kept before the honest-error translation
+  // discards it — it is what says whether the message could already be in the
+  // space. There is exactly one attempt (maxRetries: 0), so it is unambiguous.
+  let rawStatus: number | undefined;
   try {
-    response = await googleApiCall(postCtx, () =>
-      chat.spaces.messages.create({
-        parent,
-        // Chat's own words for "put it in that thread if you can, and if you
-        // cannot, say it in the space rather than failing". The caller is TOLD
-        // which of the two happened, below.
-        ...(thread ? { messageReplyOption: 'REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD' } : {}),
-        requestBody: {
-          text,
-          ...(thread ? { thread } : {}),
-        },
-      }),
+    response = await googleApiCall(postCtx, async () => {
+      try {
+        return await chat.spaces.messages.create({
+          parent,
+          // Chat's idempotency key. It costs nothing on a call that succeeds,
+          // and it is the only thing that makes a RETRY safe — see the note on
+          // the thrown error below.
+          requestId,
+          // Chat's own words for "put it in that thread if you can, and if you
+          // cannot, say it in the space rather than failing". The caller is TOLD
+          // which of the two happened, below.
+          ...(thread ? { messageReplyOption: 'REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD' } : {}),
+          requestBody: {
+            text,
+            ...(thread ? { thread } : {}),
+          },
+        });
+      } catch (raw: unknown) {
+        rawStatus = errorStatus(raw);
+        throw raw;
+      }
+      },
       // See postChatMessage's note: a retried post is a duplicate message.
       { maxRetries: 0 },
     );
@@ -276,7 +357,7 @@ export async function postChatMessage(opts: PostChatMessageOptions): Promise<Pos
       phase: 'failed',
       error: err instanceof Error ? err.message : String(err),
     });
-    throw err;
+    throw postFailure(err, rawStatus, parent, requestId);
   }
 
   const posted = response.data;
@@ -288,6 +369,7 @@ export async function postChatMessage(opts: PostChatMessageOptions): Promise<Pos
     ...(posted.createTime ? { createTime: posted.createTime } : {}),
     space: parent,
     account: resolved.alias,
+    requestId,
   };
 
   const notes: string[] = [];
@@ -393,6 +475,15 @@ export const postChatMessageParams = {
       + 'the same thread_key in the same space joins the same thread. Use it for a recurring '
       + 'alert that should stay in one conversation. Cannot be combined with "thread".',
     ),
+  request_id: z
+    .string()
+    .optional()
+    .describe(
+      'An idempotency key for this post. Leave it unset for a normal call — one is generated '
+      + 'and returned as "requestId". Pass it back ONLY when retrying a call whose outcome you '
+      + 'do not know (it failed with a message saying it may already have been posted): Chat '
+      + 'returns the message that key already created instead of posting a second copy.',
+    ),
   account: z
     .string()
     .optional()
@@ -418,11 +509,15 @@ export function registerPostChatMessage(server: McpServer): void {
     + 'Pass "thread" to reply inside an existing conversation, or "thread_key" to keep repeated '
     + 'alerts together; when a reply cannot be threaded, Chat posts it as a new thread and the '
     + 'answer says so ("repliedToThread": false). '
+    + 'The post is never retried automatically, because a retried post is a second message in '
+    + 'front of everybody. If it fails with a gateway error the message MAY still have been '
+    + 'posted; the error says so, and names the "request_id" to retry with so Chat returns the '
+    + 'message already created rather than posting another. '
     + 'Needs the "chat.messages.create" scope, added 2026-08-28 — until an account re-consents '
     + 'with "npm run auth -- <alias>" this returns an error naming that exact scope. '
     + 'Nothing here edits or deletes an existing message.',
     postChatMessageParams,
-    async ({ space, text, thread, thread_key, allow_mentions, account }) => {
+    async ({ space, text, thread, thread_key, allow_mentions, request_id, account }) => {
       try {
         const result = await postChatMessage({
           space,
@@ -430,6 +525,7 @@ export function registerPostChatMessage(server: McpServer): void {
           thread: thread ?? undefined,
           threadKey: thread_key ?? undefined,
           allowMentions: allow_mentions ?? undefined,
+          requestId: request_id ?? undefined,
           account: account ?? undefined,
         });
 
