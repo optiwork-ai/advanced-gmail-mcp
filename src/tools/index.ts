@@ -33,10 +33,11 @@ import { registerDeleteLabel } from './delete-label.js';
 // Mailbox settings (gmail.settings.basic)
 import { registerFilterTools } from './filters.js';
 import { registerVacationTools } from './vacation.js';
-// Read-only Chat / Drive / Docs tools
+// Chat (read + post) / Drive / Docs tools
 import { registerListChatSpaces } from './chat-list-spaces.js';
 import { registerListChatMessages } from './chat-list-messages.js';
 import { registerGetChatMessage } from './chat-get-message.js';
+import { registerPostChatMessage } from './chat-post-message.js';
 import { registerSearchDriveFiles } from './drive-search-files.js';
 import { registerReadDriveFile } from './drive-read-file.js';
 import { registerUploadDriveFile } from './drive-upload-file.js';
@@ -101,7 +102,10 @@ export function registerAllTools(server: McpServer): void {
   registerFilterTools(server);
   registerVacationTools(server);
 
-  // Chat / Drive / Docs. Chat stays strictly read-only. Everything that writes
+  // Chat / Drive / Docs. Chat was strictly read-only until 2026-08-28, when
+  // the owner withdrew that posture; post_chat_message is the one Chat call
+  // other people can see, and nothing here edits or deletes a message.
+  // Everything else that writes
   // here creates rather than overwrites: upload_drive_file and
   // create_google_doc both run under the narrow drive.file scope, which reaches
   // only the files this server itself created. The one exception is
@@ -111,6 +115,7 @@ export function registerAllTools(server: McpServer): void {
   registerListChatSpaces(server);
   registerListChatMessages(server);
   registerGetChatMessage(server);
+  registerPostChatMessage(server);
   registerSearchDriveFiles(server);
   registerReadDriveFile(server);
   registerUploadDriveFile(server);

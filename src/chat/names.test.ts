@@ -6,7 +6,7 @@
  * id the sibling had just accepted failed with a raw Google error.
  */
 import { describe, expect, it } from 'vitest';
-import { toMessageName, toSpaceParent } from './names.js';
+import { toMessageName, toSpaceParent, toThreadTarget } from './names.js';
 
 describe('toSpaceParent', () => {
   it('accepts a full resource name', () => {
@@ -46,5 +46,47 @@ describe('toMessageName', () => {
 
   it('refuses an empty value', () => {
     expect(() => toMessageName('  ')).toThrow(/message/i);
+  });
+});
+
+/**
+ * CP2 — the thread a reply is aimed at. A caller usually has a MESSAGE in hand,
+ * not a thread, and the two ids differ, so the kind is reported back rather
+ * than guessed at with string surgery.
+ */
+describe('toThreadTarget', () => {
+  it('takes a full thread name as it stands', () => {
+    expect(toThreadTarget('spaces/AAAA', 'spaces/AAAA/threads/TTTT'))
+      .toEqual({ kind: 'thread', name: 'spaces/AAAA/threads/TTTT' });
+  });
+
+  it('completes a bare thread id with the space being posted to', () => {
+    expect(toThreadTarget('spaces/AAAA', 'TTTT'))
+      .toEqual({ kind: 'thread', name: 'spaces/AAAA/threads/TTTT' });
+    expect(toThreadTarget('spaces/AAAA', 'threads/TTTT'))
+      .toEqual({ kind: 'thread', name: 'spaces/AAAA/threads/TTTT' });
+  });
+
+  it('reports a message name as a MESSAGE, for the caller to look the thread up', () => {
+    expect(toThreadTarget('spaces/AAAA', 'spaces/AAAA/messages/MMMM'))
+      .toEqual({ kind: 'message', name: 'spaces/AAAA/messages/MMMM' });
+    expect(toThreadTarget('spaces/AAAA', 'messages/MMMM'))
+      .toEqual({ kind: 'message', name: 'spaces/AAAA/messages/MMMM' });
+  });
+
+  it('refuses a name from a different space rather than re-pointing it', () => {
+    expect(() => toThreadTarget('spaces/AAAA', 'spaces/BBBB/threads/TTTT'))
+      .toThrow(/different Chat space/);
+    expect(() => toThreadTarget('spaces/AAAA', 'spaces/BBBB/messages/MMMM'))
+      .toThrow(/different Chat space/);
+  });
+
+  it('refuses an empty value', () => {
+    expect(() => toThreadTarget('spaces/AAAA', '  ')).toThrow(/thread/i);
+  });
+
+  it('ignores surrounding whitespace', () => {
+    expect(toThreadTarget('spaces/AAAA', ' spaces/AAAA/threads/TTTT '))
+      .toEqual({ kind: 'thread', name: 'spaces/AAAA/threads/TTTT' });
   });
 });
