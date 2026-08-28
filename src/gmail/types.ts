@@ -70,9 +70,11 @@ export interface MailChanges {
   /** The cursor that was polled. */
   fromHistoryId: string;
   /**
-   * Present only when the polled cursor came from the remembered position
-   * rather than from the caller — the reason `fromHistoryId` is a value the
-   * caller never sent.
+   * The remembered history id this poll resumed from — the value read out of
+   * this machine's cursor store. Present ONLY when the caller supplied no
+   * `history_id`, which is also why `fromHistoryId` is a value the caller
+   * never sent. It equals `fromHistoryId`; it is stated separately so a caller
+   * can tell "the server remembered this" from "I passed this in".
    */
   resumedFrom?: string;
   /**

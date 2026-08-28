@@ -2057,6 +2057,28 @@ describe('getMailChanges remembers where it got to', () => {
     expect(result.fromHistoryId).toBe('4200');
   });
 
+  // P1 — resumedFrom used to carry the SENTENCE "the remembered cursor". A
+  // field named for a cursor must carry the cursor: the value that was read
+  // out of the store, so a caller can log it, compare it, or poll with it.
+  it('resumedFrom carries the remembered history id itself, not a description of it', async () => {
+    cursors.set('work', '4200');
+    api.history.list.mockResolvedValue(ok({ historyId: '5000', history: [] }));
+
+    const result = await getMailChanges({ account: 'work' });
+
+    expect(result.resumedFrom).toBe('4200');
+    expect(result.resumedFrom).toBe(result.fromHistoryId);
+  });
+
+  it('omits resumedFrom when the caller supplied the cursor', async () => {
+    cursors.set('work', '4200');
+    api.history.list.mockResolvedValue(ok({ historyId: '5000', history: [] }));
+
+    const result = await getMailChanges({ historyId: '4300', account: 'work' });
+
+    expect(result.resumedFrom).toBeUndefined();
+  });
+
   it('a supplied cursor still wins over the remembered one', async () => {
     cursors.set('work', '4200');
     api.history.list.mockResolvedValue(ok({ historyId: '5000', history: [] }));

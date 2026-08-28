@@ -1094,7 +1094,7 @@ export async function getMailChanges(opts: {
   return {
     account: resolved.alias,
     fromHistoryId: startHistoryId,
-    ...(remembered !== null ? { resumedFrom: 'the remembered cursor' } : {}),
+    ...(remembered !== null ? { resumedFrom: remembered } : {}),
     historyId: nextHistoryId,
     complete,
     ...(nextPageToken ? { nextPageToken } : {}),
