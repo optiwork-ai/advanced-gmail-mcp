@@ -72,7 +72,7 @@ Evidence pack: `round2-sweep-evidence.json` (normative for unit scope).
     and non-image attachments are byte-for-byte the same response as before.
 
 ### G3 — scope-error honesty extended to the four read-only tools — DONE
-- Commit: `PENDING-SHA-G3`
+- Commit: `ee5f2b6`
 - FAIL-before: `npx vitest run src/tools/read-only-tools.test.ts` → **12 failed | 4 passed
   (16)**. The four that passed are the 401 pass-throughs, which were already correct.
 - PASS-after: full suite **613 passed (613)**, 15 files, typecheck clean. The 49 existing
