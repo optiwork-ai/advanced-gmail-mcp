@@ -144,7 +144,7 @@ Then use `/email` or `/checkemail` in Claude Code.
 | `modify_thread` | Add/remove labels on every message in a thread (archive = remove `INBOX`) |
 | `trash_thread` | Move an entire thread to trash |
 | `batch_modify` | Batch archive/trash/label, chunked, with per-failure reporting |
-| `unsubscribe_email` | Process `List-Unsubscribe` header (one-click HTTPS or mailto) |
+| `unsubscribe_email` | Process `List-Unsubscribe` header (one-click HTTPS, or a mailto send that needs `confirm: true`) |
 | `mark_read` | Remove UNREAD label from a message |
 | `mark_unread` | Add UNREAD label to a message |
 | `star_email` | Add STARRED label |
@@ -153,7 +153,7 @@ Then use `/email` or `/checkemail` in Claude Code.
 | `mark_not_important` | Remove IMPORTANT label |
 | `create_label` | Create a new label (optionally colored) |
 | `update_label` | Rename or recolor a label |
-| `delete_label` | Delete a label (removes it from every message) |
+| `delete_label` | Delete a label (removes it from every message); requires `confirm: true` |
 
 ### Mailbox settings — mail rules and the vacation responder
 

@@ -1466,11 +1466,26 @@ export async function updateLabel(opts: {
 
 /**
  * Delete a label. The label is removed from every message it was applied to.
+ *
+ * The tool description has always told the caller to confirm with the user
+ * first because there is no undo — but nothing checked it, so the rule was
+ * advice, not a gate. It is now enforced the same way the vacation responder's
+ * is: `confirm: true` or the call is refused, before the log line and before
+ * the API call.
  */
 export async function deleteLabel(opts: {
   labelId: string;
+  confirm?: boolean;
   account?: string;
 }): Promise<{ success: boolean; labelId: string }> {
+  if (opts.confirm !== true) {
+    throw new Error(
+      `delete_label: refused. Deleting label "${opts.labelId}" strips it from every message `
+      + 'it was applied to and there is no undo. Pass confirm: true, and only after the user '
+      + 'has explicitly asked for this label to be deleted — never to clear this error.',
+    );
+  }
+
   const resolved = resolveAccount(opts.account);
   const gmail = await getGmailClient(resolved);
 
@@ -1903,9 +1918,15 @@ export function parseUnsubscribeHeaders(
 /**
  * Unsubscribe from a mailing list by processing the List-Unsubscribe header.
  * Prefers RFC 8058 one-click HTTPS POST; falls back to mailto.
+ *
+ * The mailto fallback is a real outbound send from the owner's account, so it
+ * takes an explicit `confirm: true` — the same gate the vacation responder
+ * got. The one-click HTTPS POST is not gated: it puts no mail in anyone's
+ * mailbox, and it is the path that should be preferred.
  */
 export async function unsubscribeFromEmail(opts: {
   messageId: string;
+  confirm?: boolean;
   account?: string;
 }): Promise<UnsubscribeResult> {
   const resolved = resolveAccount(opts.account);
@@ -1925,7 +1946,16 @@ export async function unsubscribeFromEmail(opts: {
   const listUnsubPost = extractHeader(headers, 'List-Unsubscribe-Post');
 
   if (!listUnsub) {
-    return { success: false, method: 'none', detail: 'No List-Unsubscribe header found on this email.' };
+    // Benign, and common: plenty of ordinary mail carries no unsubscribe
+    // header. Reporting it as a failure made Claude retry and apologise for a
+    // normal outcome. Nothing to do IS the successful outcome here.
+    return {
+      success: true,
+      method: 'none',
+      detail:
+        'This email has no List-Unsubscribe header, so there is nothing to unsubscribe from. '
+        + 'Nothing was sent and nothing changed.',
+    };
   }
 
   const { httpsUrls, mailto, canOneClick } = parseUnsubscribeHeaders(listUnsub, listUnsubPost);
@@ -1969,6 +1999,26 @@ export async function unsubscribeFromEmail(opts: {
 
   // Fallback: mailto unsubscribe.
   if (mailto) {
+    const httpsPrefix = httpsFailures.length > 0
+      ? `HTTPS attempt(s) failed first: ${httpsFailures.join('; ')}. `
+      : '';
+
+    // The gate. Sending this mail is an outward act from the owner's account,
+    // and "check the unsubscribe header on that email" is a request a model
+    // can satisfy without ever meaning to send anything. Refuse, and name
+    // exactly what the send would be so the user can say yes to a real thing.
+    if (opts.confirm !== true) {
+      return {
+        success: false,
+        method: 'mailto',
+        detail:
+          `${httpsPrefix}Refused: this list has no working one-click link, so unsubscribing `
+          + `means SENDING an email from ${resolved.email} to ${mailto.address} `
+          + `(subject "${mailto.subject}", body "${mailto.body}"). Nothing was sent. `
+          + 'Pass confirm: true to send it, and only after the user has agreed to that send.',
+      };
+    }
+
     // Legacy single-part text/plain, no signature — an unsubscribe request is
     // a machine-to-machine message, not correspondence.
     const raw = buildRawMessage({
@@ -1991,13 +2041,10 @@ export async function unsubscribeFromEmail(opts: {
       })
     );
 
-    const httpsNote = httpsFailures.length > 0
-      ? ` HTTPS attempt(s) failed first: ${httpsFailures.join('; ')}.`
-      : '';
     return {
       success: true,
       method: 'mailto',
-      detail: `Unsubscribe email sent to ${mailto.address}.${httpsNote}`,
+      detail: `${httpsPrefix}Unsubscribe email sent to ${mailto.address}.`,
     };
   }
 

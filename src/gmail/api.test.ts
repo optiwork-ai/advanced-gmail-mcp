@@ -848,10 +848,25 @@ describe('modifyMessage', () => {
 describe('deleteLabel', () => {
   it('deletes and reports the id', async () => {
     api.labels.delete.mockResolvedValue(ok({}));
-    await expect(deleteLabel({ labelId: 'L1' })).resolves.toEqual({
+    await expect(deleteLabel({ labelId: 'L1', confirm: true })).resolves.toEqual({
       success: true,
       labelId: 'L1',
     });
+  });
+
+  // G1 — the tool description has always said "confirm with the user first —
+  // there is no undo", and nothing checked it.
+  it('refuses to delete without confirm, and names the label it would have removed', async () => {
+    api.labels.delete.mockResolvedValue(ok({}));
+    await expect(deleteLabel({ labelId: 'L1' })).rejects.toThrow(/confirm: true/);
+    await expect(deleteLabel({ labelId: 'L1' })).rejects.toThrow(/L1/);
+    expect(api.labels.delete).not.toHaveBeenCalled();
+  });
+
+  it('refuses before the log line, so a refused delete leaves no "delete_label" trail', async () => {
+    api.labels.delete.mockResolvedValue(ok({}));
+    await expect(deleteLabel({ labelId: 'L1', confirm: false })).rejects.toThrow();
+    expect(api.labels.delete).not.toHaveBeenCalled();
   });
 });
 
@@ -1051,7 +1066,7 @@ describe('unsubscribeFromEmail SSRF guard', () => {
     api.messages.send.mockResolvedValue(ok({ id: 'sent1' }));
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
 
-    const result = await unsubscribeFromEmail({ messageId: 'm1' });
+    const result = await unsubscribeFromEmail({ messageId: 'm1', confirm: true });
 
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(api.messages.send).toHaveBeenCalledTimes(1);
@@ -1081,6 +1096,105 @@ describe('unsubscribeFromEmail SSRF guard', () => {
     await expect(unsubscribeFromEmail({ messageId: 'm1' })).resolves.toMatchObject({
       method: 'none',
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// G1 — the mailto fallback is a real outbound send and now takes a confirm,
+// and "this email has no unsubscribe link" stops being reported as a failure.
+// ---------------------------------------------------------------------------
+
+describe('unsubscribeFromEmail confirm gate on the mailto fallback', () => {
+  function headerMessage(listUnsub: string, listUnsubPost = 'List-Unsubscribe=One-Click') {
+    return ok({
+      id: 'm1',
+      payload: {
+        headers: [
+          { name: 'List-Unsubscribe', value: listUnsub },
+          ...(listUnsubPost ? [{ name: 'List-Unsubscribe-Post', value: listUnsubPost }] : []),
+        ],
+      },
+    });
+  }
+
+  it('refuses to send the unsubscribe mail without confirm, and names what it would send', async () => {
+    api.messages.get.mockResolvedValue(headerMessage('<mailto:unsub@example.com?subject=Stop>', ''));
+    api.messages.send.mockResolvedValue(ok({ id: 'sent1' }));
+
+    const result = await unsubscribeFromEmail({ messageId: 'm1' });
+
+    expect(api.messages.send).not.toHaveBeenCalled();
+    expect(result.success).toBe(false);
+    expect(result.method).toBe('mailto');
+    expect(result.detail).toMatch(/confirm: true/);
+    // It names the recipient and the subject it would have sent.
+    expect(result.detail).toMatch(/unsub@example\.com/);
+    expect(result.detail).toMatch(/Stop/);
+  });
+
+  it('refuses on confirm: false exactly as it does on a missing confirm', async () => {
+    api.messages.get.mockResolvedValue(headerMessage('<mailto:unsub@example.com>', ''));
+    api.messages.send.mockResolvedValue(ok({ id: 'sent1' }));
+
+    const result = await unsubscribeFromEmail({ messageId: 'm1', confirm: false });
+
+    expect(api.messages.send).not.toHaveBeenCalled();
+    expect(result.success).toBe(false);
+  });
+
+  it('sends once confirm: true is passed', async () => {
+    api.messages.get.mockResolvedValue(headerMessage('<mailto:unsub@example.com>', ''));
+    api.messages.send.mockResolvedValue(ok({ id: 'sent1' }));
+
+    const result = await unsubscribeFromEmail({ messageId: 'm1', confirm: true });
+
+    expect(api.messages.send).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ success: true, method: 'mailto' });
+  });
+
+  it('still carries the failed HTTPS attempts into the refusal, so the caller sees both facts', async () => {
+    api.messages.get.mockResolvedValue(
+      headerMessage('<https://localhost/u>, <mailto:unsub@example.com>'),
+    );
+    api.messages.send.mockResolvedValue(ok({ id: 'sent1' }));
+
+    const result = await unsubscribeFromEmail({ messageId: 'm1' });
+
+    expect(api.messages.send).not.toHaveBeenCalled();
+    expect(result.detail).toMatch(/confirm: true/);
+    expect(result.detail).toMatch(/refused/);
+  });
+
+  it('does NOT gate the one-click HTTPS path — no mail leaves the account there', async () => {
+    api.messages.get.mockResolvedValue(headerMessage('<https://example.com/unsub>'));
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(null, { status: 204 }));
+
+    const result = await unsubscribeFromEmail({ messageId: 'm1' });
+
+    expect(result).toMatchObject({ success: true, method: 'https' });
+    expect(api.messages.send).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it('an email with no List-Unsubscribe header is a success with nothing to do, not a failure', async () => {
+    api.messages.get.mockResolvedValue(ok({ id: 'm1', payload: { headers: [] } }));
+
+    const result = await unsubscribeFromEmail({ messageId: 'm1' });
+
+    expect(result.success).toBe(true);
+    expect(result.method).toBe('none');
+    expect(result.detail).toMatch(/nothing to unsubscribe from/i);
+  });
+
+  it('a header it cannot parse is still a failure', async () => {
+    api.messages.get.mockResolvedValue(headerMessage('garbage-with-no-angle-brackets', ''));
+
+    const result = await unsubscribeFromEmail({ messageId: 'm1' });
+
+    expect(result.success).toBe(false);
+    expect(result.method).toBe('none');
   });
 });
 
