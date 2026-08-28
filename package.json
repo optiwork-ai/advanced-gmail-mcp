@@ -1,6 +1,6 @@
 {
   "name": "gmail-mcp",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "type": "module",
   "description": "Gmail MCP server for Claude Code — multi-account email management",
   "scripts": {

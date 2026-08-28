@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.1] — 2026-08-28
+
+Polish on the 1.7.0 tools. No new tools, no new permissions, nothing to re-consent.
+
+### Fixed
+- **Two mail watchers on one account no longer steal each other's new mail.** The watcher can be narrowed — to the inbox only, or to arrivals only — and it remembers where it got to. But it remembered one position per account and ignored the narrowing, so an assistant watching just the inbox and a general watcher on the same mailbox shared a single bookmark: whichever ran first moved it past everything, and the other was told nothing had arrived. Neither had any way to notice. Each narrowing now keeps its own position. A watcher that uses no narrowing keeps exactly the position it already had, so nothing in place today restarts blind.
+- **A Drive refusal during a document export said only "request failed".** Exporting a Google Doc or Sheet is fetched differently from an ordinary file, and on that path Google's own explanation — the document is too large to export, this permission was never granted — was arriving in a form the server was not reading, so it reported a bare status code with no cure in it. Google's words come through now, and a missing permission again names the permission and the command that grants it.
+- **Saving a file to Drive blamed your login for problems that had nothing to do with it.** A folder the account cannot write to, a full Drive, the Drive service switched off for the project: all of them came back as "authentication error, re-authenticate", which fixes none of them. The upload now explains itself the way every other Drive and Docs action already does, and it still retries a temporary server failure exactly as before. A genuine expired login is still reported as one.
+- **A deleted or edited Chat message looked exactly like an ordinary one.** Nothing in the result said a message had been retracted by its author, or that its wording had been changed since it was sent — so a summary of a conversation could quote a message that no longer stands, or an old version as if it were current. Both are now marked, with the time and, for a deletion, who did it.
+- **The watcher's "resumed from" said "the remembered cursor" instead of naming the position.** It now carries the actual position it resumed from, so it can be logged and compared rather than merely read.
+
 ## [1.7.0] — 2026-08-28
 
 Two new tools take the roster from 50 to **52**.

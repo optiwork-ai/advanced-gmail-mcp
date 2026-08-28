@@ -152,4 +152,18 @@ widened to key by alias + filter, mirroring the real store; that is a harness ch
 loosened assertion.
 
 PASS-after: 22 files, 772 passed, 0 failed; typecheck clean.
+Commit: `9eb69cf`
+
+## Release — 1.7.1 — DONE
+
+`package.json` 1.7.0 → 1.7.1; a `[1.7.1]` CHANGELOG entry in plain language, one bullet per
+unit, worst first. No new tools (roster stays 52), no scope change, nothing to re-consent —
+stated in the entry. No other file referenced the version string.
+
+Final gate: `npm test` = 22 files, **772 passed, 0 failed**; `npm run typecheck` clean, exit 0.
+Net over baseline: **+26 tests, zero deleted, zero assertions weakened.**
 Commit: (recorded below)
+
+## Units skipped
+
+None. No design fork was met, so nothing was appended to `QUESTIONS-FOR-FABLE.md`.
