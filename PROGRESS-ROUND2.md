@@ -228,7 +228,7 @@ more likely to be this than anything in the code.
   the guard runs before the trail, so a refusal leaves no "delete_label" footprint.
 
 ### G10 — small roughness (Chat id formats, broken-draft read) — DONE
-- Commit: `PENDING-SHA-G10`
+- Commit: `95a2fd4`
 - FAIL-before: `1 failed | 125 passed (126)` in api.test.ts for the draft error, plus
   `src/chat/names.test.ts` unable to resolve its module at all (`./names.js` did not exist).
 - PASS-after: full suite **675 passed (675)**, 18 files, typecheck clean.
