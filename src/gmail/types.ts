@@ -174,6 +174,12 @@ export interface AttachmentInfo {
 /** Result from fetching an attachment. */
 export interface AttachmentData {
   attachmentId: string;
+  /**
+   * The stable part key this fetch was matched to. Present whenever the part
+   * was identified and Gmail supplied one; pass it back as `part_id` on a
+   * later fetch of the same attachment.
+   */
+  partId?: string;
   /** The filename carried by the message part (sanitized), or 'attachment'. */
   filename: string;
   mimeType: string;
@@ -186,6 +192,13 @@ export interface AttachmentData {
   data_base64?: string;
   /** Absolute path of the file written. Present only when `save_dir` was given. */
   path?: string;
+  /**
+   * Present ONLY when the message part could not be identified, in which case
+   * `filename` and `mimeType` above are placeholders. It says so in words and
+   * names the way out (`part_id`), because the silent version of this — an
+   * unnamed `application/octet-stream` — reads as a fact rather than a failure.
+   */
+  note?: string;
 }
 
 /** Thread with its messages. */

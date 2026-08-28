@@ -2339,21 +2339,69 @@ export function safeAttachmentFilename(filename: string): string {
 }
 
 /**
- * Locate an attachment's part metadata (filename, mimeType, decoded size)
- * inside its message. Gmail's `attachments.get` returns neither the filename
- * nor the MIME type, so the part table is the only place to get them.
+ * Every downloadable part of a message, as the part table reports it right now.
+ *
+ * Gmail's `attachments.get` returns neither the filename nor the MIME type, so
+ * the part table is the only place to get them.
  */
-async function findAttachmentInfo(
+async function listMessageParts(
   gmail: gmail_v1.Gmail,
   messageId: string,
-  attachmentId: string,
-): Promise<AttachmentInfo | undefined> {
+): Promise<AttachmentInfo[]> {
   const response = await withRetry(() =>
     gmail.users.messages.get({ userId: 'me', id: messageId, format: 'full' })
   );
   const payload = response.data.payload;
-  if (!payload) return undefined;
-  return extractAttachments(payload).find(a => a.attachmentId === attachmentId);
+  if (!payload) return [];
+  return extractAttachments(payload);
+}
+
+/**
+ * Locate an attachment's part metadata without downloading anything.
+ *
+ * Two of the three matchers live here, in the order they are trusted:
+ *
+ * 1. `partId` — the part's position in the payload, which is the SAME on every
+ *    fetch. Supplied by the caller from `read_email`, it is an exact answer.
+ * 2. `attachmentId` equality — the old sole matcher. It still works whenever
+ *    Gmail happens to hand back the same id, so it is kept rather than
+ *    replaced; it is simply no longer relied on.
+ *
+ * The third matcher (decoded size) cannot run here because it needs the bytes;
+ * see `matchPartByByteLength`, used by `getAttachment` after the download.
+ *
+ * A `partId` that matches nothing falls THROUGH to the id matcher instead of
+ * failing: a stale or mistyped part_id should degrade to the old behaviour, not
+ * break a fetch that would otherwise have worked.
+ */
+function matchAttachmentPart(
+  parts: AttachmentInfo[],
+  attachmentId: string,
+  partId?: string,
+): AttachmentInfo | undefined {
+  if (partId) {
+    const byPart = parts.find(p => p.partId === partId);
+    if (byPart) return byPart;
+  }
+  return parts.find(p => p.attachmentId === attachmentId);
+}
+
+/**
+ * The last-resort matcher: the one part whose declared size equals the number
+ * of bytes that actually came back.
+ *
+ * Only a UNIQUE hit counts. If two parts declare the same size there is no way
+ * to tell which one was downloaded, and labelling a file with the wrong
+ * neighbour's name and MIME type is worse than admitting the part is unknown —
+ * a wrong filename gets written to disk and a wrong MIME type either fakes or
+ * suppresses an image block.
+ */
+function matchPartByByteLength(
+  parts: AttachmentInfo[],
+  byteLength: number,
+): AttachmentInfo | undefined {
+  const hits = parts.filter(p => p.size === byteLength);
+  return hits.length === 1 ? hits[0] : undefined;
 }
 
 /**
@@ -2437,24 +2485,34 @@ async function writeAttachmentToDir(
  *
  * Filename and MIME type are always returned; both come from the message part,
  * not from the attachments endpoint (which reports neither).
+ *
+ * Identifying WHICH part was fetched is the delicate half, because Gmail
+ * rotates attachmentIds between fetches of the same message: the id read_email
+ * handed out can be gone by the time the download is requested, even though it
+ * still downloads the right bytes. So the part is matched by `partId` first,
+ * then by id, and only then — after the bytes are in hand — by unique decoded
+ * size. When none of the three answers, the result says so in `note` rather
+ * than quietly presenting a picture as an unnamed blob.
  */
 export async function getAttachment(opts: {
   messageId: string;
   attachmentId: string;
+  partId?: string;
   account?: string;
   saveDir?: string;
 }): Promise<AttachmentData> {
   const gmail = await getGmailClient(opts.account);
 
-  const info = await findAttachmentInfo(gmail, opts.messageId, opts.attachmentId);
-  const filename = safeAttachmentFilename(info?.filename ?? 'attachment');
-  const mimeType = info?.mimeType ?? 'application/octet-stream';
+  const parts = await listMessageParts(gmail, opts.messageId);
+  let info = matchAttachmentPart(parts, opts.attachmentId, opts.partId);
 
-  // Refuse an oversized inline request BEFORE downloading it: the part table
-  // already knows the decoded size.
+  // Refuse an oversized inline request BEFORE downloading it: when the part is
+  // identified up front, the part table already knows the decoded size, and
+  // there is no reason to pull megabytes down only to refuse them.
   if (!opts.saveDir && info && info.size > ATTACHMENT_INLINE_LIMIT_BYTES) {
+    const named = safeAttachmentFilename(info.filename);
     throw new Error(
-      `Attachment "${filename}" is ${(info.size / 1_000_000).toFixed(1)}MB, over the `
+      `Attachment "${named}" is ${(info.size / 1_000_000).toFixed(1)}MB, over the `
       + `${ATTACHMENT_INLINE_LIMIT_BYTES / 1_000_000}MB inline limit. `
       + `Call get_attachment again with save_dir set to an absolute directory path `
       + `to write it to disk instead.`
@@ -2467,14 +2525,28 @@ export async function getAttachment(opts: {
     account: opts.account,
   });
 
+  // The bytes arrived, so the size matcher can finally run.
+  if (!info) info = matchPartByByteLength(parts, content.length);
+
+  const filename = safeAttachmentFilename(info?.filename ?? 'attachment');
+  const mimeType = info?.mimeType ?? 'application/octet-stream';
+  const note = info
+    ? undefined
+    : 'The message part for this attachment could not be identified, so the filename and '
+      + 'mimeType above are placeholders rather than the real ones. Gmail rotates '
+      + 'attachmentIds between fetches of the same message; call read_email again and pass '
+      + 'part_id (attachments[].partId) to get_attachment for an exact match.';
+
   if (opts.saveDir) {
     const written = await writeAttachmentToDir(opts.saveDir, filename, content);
     return {
       attachmentId: opts.attachmentId,
+      ...(info?.partId ? { partId: info.partId } : {}),
       filename: path.basename(written),
       mimeType,
       size: content.length,
       path: written,
+      ...(note ? { note } : {}),
     };
   }
 
@@ -2491,10 +2563,12 @@ export async function getAttachment(opts: {
 
   return {
     attachmentId: opts.attachmentId,
+    ...(info?.partId ? { partId: info.partId } : {}),
     filename,
     mimeType,
     size: content.length,
     data_base64: content.toString('base64'),
+    ...(note ? { note } : {}),
   };
 }
 

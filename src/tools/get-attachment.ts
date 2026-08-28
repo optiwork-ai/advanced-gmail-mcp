@@ -70,6 +70,16 @@ export function attachmentContentBlocks(result: AttachmentData): ContentBlock[] 
 export const getAttachmentParams = {
   message_id: z.string().describe('The Gmail message ID the attachment belongs to'),
   attachment_id: z.string().describe('The attachmentId from read_email\'s attachments[].attachmentId'),
+  part_id: z
+    .string()
+    .optional()
+    .describe(
+      'The partId from read_email\'s attachments[].partId — pass part_id from read_email '
+      + 'for exact identification. Gmail hands out a different attachmentId for the same '
+      + 'part on every fetch of a message, so the id alone cannot always say WHICH part '
+      + 'was downloaded; partId does not change. Without it the filename and mimeType are '
+      + 'recovered by matching the downloaded size, and a note explains it when that fails.',
+    ),
   account: z.string().optional().describe('Account alias or email address. Uses default account if not specified.'),
   save_dir: z
     .string()
@@ -93,13 +103,16 @@ export function registerGetAttachment(server: McpServer): void {
     + 'With save_dir it writes the file to that directory and returns its path instead (no image is '
     + 'shown, since the bytes went to disk). Other file types come back as base64 in data_base64. '
     + 'Either way the inline limit is 1MB — anything larger errors and asks for save_dir. '
-    + 'Use read_email first to get the attachmentId from attachments[].',
+    + 'Use read_email first to get the attachmentId from attachments[], and pass part_id '
+    + 'from that same attachments[].partId for exact identification — Gmail changes the '
+    + 'attachmentId between fetches, so part_id is what pins down which part you meant.',
     getAttachmentParams,
-    async ({ message_id, attachment_id, account, save_dir }) => {
+    async ({ message_id, attachment_id, part_id, account, save_dir }) => {
       try {
         const result = await getAttachment({
           messageId: message_id,
           attachmentId: attachment_id,
+          partId: part_id ?? undefined,
           account: account ?? undefined,
           saveDir: save_dir ?? undefined,
         });
