@@ -9,7 +9,7 @@ export const readDriveFileParams = {
 };
 
 // ~1MB cap on returned text content. Larger content is truncated with a note.
-const MAX_CONTENT_BYTES = 1_000_000;
+export const MAX_CONTENT_BYTES = 1_000_000;
 
 // Google Workspace editor types -> the text-ish MIME to export them as.
 const GOOGLE_APPS_EXPORT: Record<string, string> = {
@@ -59,14 +59,84 @@ function isTextMime(mimeType: string): boolean {
 }
 
 /**
+ * How many bytes at the end of `buf` are an INCOMPLETE UTF-8 sequence.
+ *
+ * Cutting a buffer at a byte offset can land in the middle of a character.
+ * Decoding that tail yields U+FFFD — a replacement glyph in the middle of the
+ * user's document, which reads as corruption rather than as a cut. Dropping the
+ * partial bytes instead loses at most one character and never invents one.
+ */
+function incompleteTailBytes(buf: Buffer): number {
+  // A continuation byte is 10xxxxxx; a lead byte says how long the sequence is.
+  for (let back = 1; back <= 3 && back <= buf.length; back++) {
+    const byte = buf[buf.length - back];
+    if ((byte & 0b1100_0000) !== 0b1000_0000) {
+      // This is a lead byte (or ASCII). How long a sequence does it start?
+      const needed = byte < 0x80 ? 1 : byte >= 0xf0 ? 4 : byte >= 0xe0 ? 3 : byte >= 0xc0 ? 2 : 1;
+      return needed > back ? back : 0;
+    }
+  }
+  return 0;
+}
+
+/**
+ * Cap a buffer at `maxBytes`, decoding what fits. The one place both read paths
+ * cut, so the export branch and the alt=media branch cannot disagree about what
+ * a truncated document looks like.
+ *
+ * Exported for unit testing.
+ */
+export function capBuffer(buf: Buffer, maxBytes: number): { content: string; truncated: boolean } {
+  if (buf.length <= maxBytes) return { content: buf.toString('utf-8'), truncated: false };
+  const sliced = buf.subarray(0, maxBytes);
+  const whole = sliced.subarray(0, sliced.length - incompleteTailBytes(sliced));
+  return { content: whole.toString('utf-8'), truncated: true };
+}
+
+/**
  * Cap a string at MAX_CONTENT_BYTES, returning [content, truncated].
  */
 function capContent(text: string): { content: string; truncated: boolean } {
-  const bytes = Buffer.byteLength(text, 'utf-8');
-  if (bytes <= MAX_CONTENT_BYTES) return { content: text, truncated: false };
-  // Slice by bytes, then re-decode (may drop a partial trailing char — fine).
-  const sliced = Buffer.from(text, 'utf-8').subarray(0, MAX_CONTENT_BYTES).toString('utf-8');
-  return { content: sliced, truncated: true };
+  return capBuffer(Buffer.from(text, 'utf-8'), MAX_CONTENT_BYTES);
+}
+
+/**
+ * Read a response stream, stopping as soon as `maxBytes` have arrived.
+ *
+ * Drive's export endpoint ignores the Range header, so the export branch used
+ * to await the whole body and cap it afterwards — a 50MB exported Doc or Sheet
+ * was held in memory in full before being trimmed to 1MB, inside an MCP process
+ * that every account shares. Reading the stream and abandoning it at the cap
+ * bounds that, so one very large file can no longer disturb everything else.
+ * Nothing changes for a normal-sized document.
+ *
+ * The stream is destroyed once we have enough, which ends the transfer rather
+ * than letting the rest arrive into a listener nobody is reading.
+ *
+ * Exported for unit testing.
+ */
+export async function readStreamToCap(
+  stream: NodeJS.ReadableStream,
+  maxBytes: number,
+): Promise<{ content: string; truncated: boolean }> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+
+  try {
+    for await (const chunk of stream) {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), 'utf-8');
+      chunks.push(buf);
+      total += buf.length;
+      // One byte past the cap is enough to know the document was longer.
+      if (total > maxBytes) break;
+    }
+  } finally {
+    // Whether we stopped early or read to the end, do not leave the transfer
+    // open. `destroy` on an already-ended stream is a no-op.
+    (stream as NodeJS.ReadableStream & { destroy?: () => void }).destroy?.();
+  }
+
+  return capBuffer(Buffer.concat(chunks), maxBytes);
 }
 
 /**
@@ -108,16 +178,21 @@ export function registerReadDriveFile(server: McpServer): void {
           if (!exportMime) {
             result.contentNote = `Google Workspace type "${mimeType}" cannot be exported as text; metadata only.`;
           } else {
+            // Drive's export endpoint does not honour Range, so the transfer
+            // cannot be bounded by asking for fewer bytes. It is bounded by
+            // reading instead: the body arrives as a stream and the read stops
+            // at the cap, so a 50MB exported Doc no longer lands whole in a
+            // process every account shares.
             const resp = await withRetry(() =>
               drive.files.export(
                 { fileId: file_id, mimeType: exportMime },
-                { responseType: 'text' }
+                { responseType: 'stream' }
               )
             );
-            // Drive's export endpoint does not honour Range, so the bound here
-            // is capContent's: the export is fetched and then capped, and the
-            // truncation is always declared rather than left implicit.
-            const { content, truncated } = capContent(String(resp.data ?? ''));
+            const { content, truncated } = await readStreamToCap(
+              resp.data as unknown as NodeJS.ReadableStream,
+              MAX_CONTENT_BYTES,
+            );
             result.content = content;
             result.truncated = truncated;
             result.exportedAs = exportMime;
