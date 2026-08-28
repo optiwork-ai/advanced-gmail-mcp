@@ -172,3 +172,133 @@ describe.each(cases)('$label tells the truth about a 403', ({ label, register, m
     expect(result.content[0].text).toMatch(/Authentication error \(401\)/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// G4 — the Chat list tools return the fields they promise, not the whole raw
+// Google object. Every listing was paying for dozens of fields nobody asked
+// for, and the descriptions named four while handing over everything.
+// ---------------------------------------------------------------------------
+
+const RAW_SPACE = {
+  name: 'spaces/AAAA',
+  displayName: 'Engineering',
+  spaceType: 'SPACE',
+  spaceDetails: { description: 'the eng room', guidelines: 'be kind' },
+  // everything below is what the raw object also carries, and nobody asked for
+  type: 'ROOM',
+  threaded: true,
+  singleUserBotDm: false,
+  spaceThreadingState: 'THREADED_MESSAGES',
+  spaceHistoryState: 'HISTORY_ON',
+  importMode: false,
+  createTime: '2024-01-01T00:00:00Z',
+  adminInstalled: false,
+  spaceUri: 'https://chat.google.com/room/AAAA',
+};
+
+const RAW_MESSAGE = {
+  name: 'spaces/AAAA/messages/BBBB',
+  sender: { name: 'users/1', displayName: 'Cathy Mason', type: 'HUMAN', domainId: 'd1' },
+  createTime: '2026-08-20T10:00:00Z',
+  text: 'the report is attached',
+  thread: { name: 'spaces/AAAA/threads/CCCC', threadKey: 'k' },
+  space: RAW_SPACE,
+  argumentText: 'the report is attached',
+  formattedText: 'the report is attached',
+  annotations: [{ type: 'USER_MENTION', startIndex: 0, length: 4 }],
+  cardsV2: [{ cardId: 'c1', card: { header: { title: 'big' } } }],
+  attachment: [
+    { name: 'a/1', contentName: 'report.pdf', contentType: 'application/pdf', source: 'DRIVE_FILE', driveDataRef: { driveFileId: 'x' } },
+  ],
+  emojiReactionSummaries: [{ emoji: { unicode: '👍' }, reactionCount: 3 }],
+  clientAssignedMessageId: '',
+  fallbackText: '',
+};
+
+describe('list_chat_spaces field projection', () => {
+  it('returns exactly the four fields the description promises', async () => {
+    chatApi.spaces.list.mockResolvedValue({ data: { spaces: [RAW_SPACE] } });
+    const { handler } = capture(registerListChatSpaces as (server: never) => void);
+
+    const result = await handler({});
+    const spaces = JSON.parse(result.content[0].text);
+
+    expect(spaces).toHaveLength(1);
+    expect(Object.keys(spaces[0]).sort()).toEqual(
+      ['displayName', 'name', 'spaceDetails', 'spaceType'].sort(),
+    );
+    expect(spaces[0]).toMatchObject({
+      name: 'spaces/AAAA',
+      displayName: 'Engineering',
+      spaceType: 'SPACE',
+    });
+  });
+
+  it('drops an absent field rather than emitting a null for it', async () => {
+    chatApi.spaces.list.mockResolvedValue({ data: { spaces: [{ name: 'spaces/D', spaceType: 'DIRECT_MESSAGE' }] } });
+    const { handler } = capture(registerListChatSpaces as (server: never) => void);
+
+    const spaces = JSON.parse((await handler({})).content[0].text);
+    expect(Object.keys(spaces[0]).sort()).toEqual(['name', 'spaceType']);
+  });
+
+  it('says in its description exactly what it returns', () => {
+    const { description } = capture(registerListChatSpaces as (server: never) => void);
+    for (const field of ['name', 'displayName', 'spaceType', 'spaceDetails']) {
+      expect(description).toContain(field);
+    }
+  });
+});
+
+describe('list_chat_messages field projection', () => {
+  it('keeps who said what, when, in which thread — and drops the rest', async () => {
+    chatApi.spaces.messages.list.mockResolvedValue({ data: { messages: [RAW_MESSAGE] } });
+    const { handler } = capture(registerListChatMessages as (server: never) => void);
+
+    const messages = JSON.parse((await handler({ space: 'AAAA' })).content[0].text);
+    const m = messages[0];
+
+    expect(m.name).toBe('spaces/AAAA/messages/BBBB');
+    expect(m.text).toBe('the report is attached');
+    expect(m.createTime).toBe('2026-08-20T10:00:00Z');
+    expect(m.sender).toEqual({ name: 'users/1', displayName: 'Cathy Mason', type: 'HUMAN' });
+    expect(m.thread).toBe('spaces/AAAA/threads/CCCC');
+
+    // the noise is gone
+    expect(m.space).toBeUndefined();
+    expect(m.annotations).toBeUndefined();
+    expect(m.cardsV2).toBeUndefined();
+    expect(m.emojiReactionSummaries).toBeUndefined();
+    expect(m.argumentText).toBeUndefined();
+  });
+
+  it('does not silently hide that a file was shared', async () => {
+    chatApi.spaces.messages.list.mockResolvedValue({ data: { messages: [RAW_MESSAGE] } });
+    const { handler } = capture(registerListChatMessages as (server: never) => void);
+
+    const m = JSON.parse((await handler({ space: 'AAAA' })).content[0].text)[0];
+    expect(m.attachments).toEqual([{ contentName: 'report.pdf', contentType: 'application/pdf' }]);
+  });
+
+  it('a card-only message does not come back looking empty', async () => {
+    chatApi.spaces.messages.list.mockResolvedValue({
+      data: {
+        messages: [
+          { name: 'spaces/A/messages/C', text: '', fallbackText: 'Build #42 failed', createTime: 't' },
+        ],
+      },
+    });
+    const { handler } = capture(registerListChatMessages as (server: never) => void);
+
+    const m = JSON.parse((await handler({ space: 'AAAA' })).content[0].text)[0];
+    expect(m.fallbackText).toBe('Build #42 failed');
+  });
+
+  it('says in its description exactly what it returns', () => {
+    const { description } = capture(registerListChatMessages as (server: never) => void);
+    for (const field of ['name', 'sender', 'createTime', 'text', 'thread']) {
+      expect(description).toContain(field);
+    }
+    expect(description).not.toMatch(/raw Chat message objects/);
+  });
+});

@@ -96,3 +96,25 @@ Evidence pack: `round2-sweep-evidence.json` (normative for unit scope).
   help; any other 403 → restated with Google's own words and no re-auth advice; rate-limit
   403 → untouched so `withRetry` still retries it; **401 → untouched**, because there
   re-authenticating really is the fix.
+
+### G4 — Chat list field projection — DONE
+- Commit: `PENDING-SHA-G4`
+- FAIL-before: 4 of the 8 new projection assertions failed (`23 tests: 4 failed | 19
+  passed`) — the four that already passed were the "absent field" and spaces-description
+  cases, which were accidentally correct.
+- PASS-after: full suite **620 passed (620)**, typecheck clean.
+- `projectSpace` (chat-list-spaces.ts) returns exactly the four fields the description has
+  always promised — name, displayName, spaceType, spaceDetails — and omits an absent field
+  rather than emitting `null` for it (a `null` asserts "this space has no display name"
+  when the truth is Google did not send one).
+- `projectChatMessage` (chat-list-messages.ts) returns name, sender {name, displayName,
+  type}, createTime, text and thread. It drops the space object repeated in full on every
+  message, annotations, card payloads, reaction summaries and the three duplicate copies
+  of the text.
+- **Two deliberate keeps, against data loss:** `attachments` reduced to
+  {contentName, contentType} — dropping them would make "here's the report" look like a
+  message with nothing attached, a silent lie rather than a saving; and `fallbackText`
+  **only when `text` is empty**, so a card-only build/alert message does not read as an
+  empty message from a bot.
+- Both tool descriptions now state exactly what they return (the messages one previously
+  said "the raw Chat message objects"); README rows updated.

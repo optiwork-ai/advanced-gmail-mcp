@@ -22,6 +22,55 @@ export const listChatMessagesParams = {
 };
 
 /**
+ * The fields a Chat message listing is actually read for: who said what, when,
+ * and in which thread.
+ *
+ * The raw Message object carries the space it belongs to (repeated in full on
+ * EVERY message), annotations, card payloads, reaction summaries, and three
+ * more copies of the text under different names. A listing of 500 messages was
+ * spending most of its size on that, and the description promised "the raw Chat
+ * message objects", which told Claude to expect the noise.
+ *
+ * Two things are deliberately kept beyond the obvious:
+ *
+ * - `attachments`, reduced to name + type. Dropping them entirely would make
+ *   "here's the report" look like a message with nothing attached, which is a
+ *   silent lie rather than a saving.
+ * - `fallbackText`, but only when `text` is empty. A card-only message (a build
+ *   notification, an alert) has no `text` at all, and would otherwise read as an
+ *   empty message from a bot.
+ *
+ * Exported for unit testing.
+ */
+export function projectChatMessage(message: chat_v1.Schema$Message): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (message.name != null) out.name = message.name;
+
+  if (message.sender != null) {
+    const sender: Record<string, unknown> = {};
+    if (message.sender.name != null) sender.name = message.sender.name;
+    if (message.sender.displayName != null) sender.displayName = message.sender.displayName;
+    if (message.sender.type != null) sender.type = message.sender.type;
+    out.sender = sender;
+  }
+
+  if (message.createTime != null) out.createTime = message.createTime;
+  if (message.text != null) out.text = message.text;
+  if (!message.text && message.fallbackText) out.fallbackText = message.fallbackText;
+  if (message.thread?.name != null) out.thread = message.thread.name;
+
+  const attachments = (message.attachment ?? [])
+    .map(a => ({
+      ...(a.contentName != null ? { contentName: a.contentName } : {}),
+      ...(a.contentType != null ? { contentType: a.contentType } : {}),
+    }))
+    .filter(a => Object.keys(a).length > 0);
+  if (attachments.length > 0) out.attachments = attachments;
+
+  return out;
+}
+
+/**
  * Normalize a space id or full resource name into "spaces/{id}".
  */
 function toSpaceParent(space: string): string {
@@ -35,9 +84,11 @@ function toSpaceParent(space: string): string {
 export function registerListChatMessages(server: McpServer): void {
   server.tool(
     'list_chat_messages',
-    'List messages in a Google Chat space. Read-only. Requires a space name/id. Returns the raw '
-    + 'Chat message objects, newest first by default (order_by "createTime asc" for oldest '
-    + 'first).',
+    'List messages in a Google Chat space. Read-only. Requires a space name/id. '
+    + 'Returns, per message: name, sender (name, displayName, type), createTime, text, and '
+    + 'thread — plus attachments (contentName, contentType) when a file was shared, and '
+    + 'fallbackText when the message is a card with no text of its own. '
+    + 'Newest first by default (order_by "createTime asc" for oldest first).',
     listChatMessagesParams,
     async ({ space, account, filter, max_results, order_by }) => {
       try {
@@ -76,7 +127,7 @@ export function registerListChatMessages(server: McpServer): void {
           content: [
             {
               type: 'text' as const,
-              text: JSON.stringify(messages.slice(0, maxResults), null, 2),
+              text: JSON.stringify(messages.slice(0, maxResults).map(projectChatMessage), null, 2),
             },
           ],
         };

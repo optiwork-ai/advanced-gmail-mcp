@@ -175,8 +175,8 @@ Chat and Docs are **strictly read-only** — nothing is posted, created, updated
 
 | Tool | Description |
 |------|-------------|
-| `list_chat_spaces` | List the Chat spaces/DMs the account belongs to |
-| `list_chat_messages` | List messages in a Chat space (requires a space name/id; newest first) |
+| `list_chat_spaces` | List the Chat spaces/DMs the account belongs to (name, displayName, spaceType, spaceDetails) |
+| `list_chat_messages` | List messages in a Chat space (requires a space name/id; newest first). Returns name, sender, createTime, text, thread, plus attachments when a file was shared |
 | `get_chat_message` | Read a single Chat message by resource name |
 | `search_drive_files` | Search Drive files with Drive `q` query syntax |
 | `read_drive_file` | Read a Drive file's metadata + text (Docs/Sheets/Slides exported to text; binary types return metadata only; ~1MB cap; read `contentNote` — a Sheets export is first-sheet-only) |
