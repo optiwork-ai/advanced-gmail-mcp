@@ -29,4 +29,30 @@ server remembered this position rather than the caller sending it.
 FAIL-before (real, behavioural): 1 failed | 141 passed —
 `expected 'the remembered cursor' to be '4200'`.
 PASS-after: 22 files, 748 passed, 0 failed; typecheck clean.
+Commit: `8301ad2`
+
+## P2 — an export failure whose body arrived as a string — DONE
+
+G8 moved the Drive export onto `responseType: 'stream'`. gaxios does not parse the body of a
+NON-2xx stream answer: it concatenates it onto `response.data` as a plain **string**, and the
+thrown Error says only `Request failed with status code N`. So `googleErrorReasons` found no
+reasons and `SCOPE_PHRASES` matched nothing — an export 403 came back with no cure in it.
+
+- `src/scope-error.ts` — new private `googleErrorBody(err)` reads Google's `error` object from
+  `response.data` whether it is an object OR an unparsed JSON string (a non-JSON body is simply
+  not a body — `JSON.parse` failure returns undefined, never throws). `googleErrorReasons` now
+  reads through it; new exported `googleErrorMessage(err)` APPENDS Google's own sentence to the
+  Error message when the message does not already contain it, so nothing already reported is
+  lost and no existing wording changes. `isMissingScopeError` and `scopeError` use it.
+- `src/google-api-error.ts` — `translateGoogleApiError`'s `original` is now
+  `googleErrorMessage(err)`, so the disabled-API test and the "Original error:" tail both see
+  Google's words on a stream call.
+
+Structural, not a patch at the call site: every tool on the honesty path gets this, and the one
+place that knows how to read a Google failure stays the one place.
+
+FAIL-before (real, behavioural): 3 failed | 36 passed in `read-only-tools.test.ts`. The fourth
+new test (a non-JSON body must not crash the translation) passes on both sides by design — it
+is a regression guard, not a demonstration.
+PASS-after: 22 files, 752 passed, 0 failed; typecheck clean.
 Commit: (recorded below)

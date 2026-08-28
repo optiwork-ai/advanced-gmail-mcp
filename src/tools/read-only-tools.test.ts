@@ -423,3 +423,80 @@ describe('read_drive_file can open what search now finds', () => {
     expect(payload.metadata.driveId).toBe('0AB');
   });
 });
+
+// ---------------------------------------------------------------------------
+// P2 — the export branch asks for responseType:'stream'. gaxios does not parse
+// the body of a NON-2xx stream response: it concatenates it and hands back a
+// plain STRING on response.data, with the bare message "Request failed with
+// status code N". So every signal the honest-error path reads — the reason
+// codes, Google's own sentence — sat unread inside a string, and an export
+// 403 came back as "Request failed with status code 403" with no cure in it.
+// ---------------------------------------------------------------------------
+
+describe('an export failure whose body arrived as a string still tells the truth', () => {
+  const DOC_META = { id: 'd1', name: 'Plan', mimeType: 'application/vnd.google-apps.document' };
+
+  /** gaxios' non-2xx stream shape: data is the raw body text, not an object. */
+  function streamError(status: number, body: unknown): Error {
+    return Object.assign(new Error(`Request failed with status code ${status}`), {
+      code: status,
+      response: { status, data: typeof body === 'string' ? body : JSON.stringify(body) },
+    });
+  }
+
+  async function exportFailing(err: Error) {
+    driveApi.files.get.mockResolvedValue({ data: DOC_META });
+    driveApi.files.export.mockRejectedValue(err);
+    const { handler } = capture(registerReadDriveFile as (server: never) => void);
+    const result = await handler({ file_id: 'd1', account: 'work' });
+    return result.content[0].text as string;
+  }
+
+  it('a missing scope in a string body still names the scope and the re-consent command', async () => {
+    const text = await exportFailing(streamError(403, {
+      error: {
+        code: 403,
+        message: 'Request had insufficient authentication scopes.',
+        errors: [{ reason: 'insufficientPermissions', message: 'Insufficient Permission' }],
+        status: 'PERMISSION_DENIED',
+      },
+    }));
+
+    expect(text).toContain('drive.readonly');
+    expect(text).toContain('npm run auth -- work');
+  });
+
+  it('a disabled API in a string body still says to enable it, not to re-authenticate', async () => {
+    const text = await exportFailing(streamError(403, {
+      error: {
+        code: 403,
+        message: API_DISABLED('Google Drive'),
+        errors: [{ reason: 'accessNotConfigured' }],
+      },
+    }));
+
+    expect(text).toContain('Google Drive API is not enabled');
+    expect(text).toMatch(/will not help/);
+  });
+
+  it('an export-only 403 keeps Google\'s own sentence instead of the bare status line', async () => {
+    const text = await exportFailing(streamError(403, {
+      error: {
+        code: 403,
+        message: 'This file is too large to be exported.',
+        errors: [{ reason: 'exportSizeLimitExceeded' }],
+      },
+    }));
+
+    expect(text).toContain('This file is too large to be exported.');
+    expect(text).toContain('read_drive_file');
+    expect(text).not.toMatch(/Re-authenticate with: npx tsx/);
+  });
+
+  it('a body that is not JSON at all is left alone rather than crashing the translation', async () => {
+    const text = await exportFailing(streamError(403, '<html>upstream said no</html>'));
+
+    expect(text).toContain('Google refused this Google Drive request (403)');
+    expect(text).toContain('Request failed with status code 403');
+  });
+});

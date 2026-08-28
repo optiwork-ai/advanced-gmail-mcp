@@ -24,6 +24,7 @@ import { isRateLimit403, withRetry } from './gmail/client.js';
 import {
   type ScopeErrorContext,
   errorStatus,
+  googleErrorMessage,
   googleErrorReasons,
   isMissingScopeError,
   scopeError,
@@ -65,7 +66,11 @@ export function translateGoogleApiError(err: unknown, ctx: GoogleApiErrorContext
   if (status !== 403) return err;
   if (isRateLimit403(status, err)) return err;
 
-  const original = err instanceof Error ? err.message : String(err);
+  // Google's own words, recovered from the response body when the HTTP client
+  // never parsed it (a `responseType: 'stream'` call's non-2xx body arrives as
+  // a plain string). Without this an export 403 reads "Request failed with
+  // status code 403" and carries no cure at all.
+  const original = googleErrorMessage(err);
   const reasons = googleErrorReasons(err);
 
   if (reasons.includes('accessnotconfigured') || API_DISABLED_RE.test(original)) {

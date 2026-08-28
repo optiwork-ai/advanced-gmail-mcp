@@ -35,6 +35,38 @@ export function errorStatus(err: unknown): number | undefined {
   return undefined;
 }
 
+/** The `error` object Google returns in a failed API response body. */
+interface GoogleErrorBody {
+  message?: string;
+  errors?: Array<{ reason?: string; message?: string }>;
+  status?: string;
+}
+
+/**
+ * The error body Google sent, whether the HTTP client parsed it or not.
+ *
+ * A request made with `responseType: 'stream'` — the Drive export path — gets
+ * no JSON parsing on a NON-2xx answer: gaxios concatenates the body and leaves
+ * it on `response.data` as a plain STRING, and the thrown Error carries only
+ * "Request failed with status code N". Every signal the honest-error path
+ * reads (the reason codes, Google's own sentence) then sits unread inside that
+ * string. Parsing it here is what keeps a stream call's 403 as legible as a
+ * JSON call's. A body that is not JSON at all is simply not a body.
+ */
+function googleErrorBody(err: unknown): GoogleErrorBody | undefined {
+  const data = (err as { response?: { data?: unknown } })?.response?.data;
+  if (typeof data === 'string') {
+    try {
+      const parsed = JSON.parse(data) as { error?: GoogleErrorBody };
+      return typeof parsed?.error === 'object' && parsed.error !== null ? parsed.error : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  const nested = (data as { error?: GoogleErrorBody } | undefined)?.error;
+  return typeof nested === 'object' && nested !== null ? nested : undefined;
+}
+
 /**
  * Collect the `reason` strings a Google API error carries, lowercased.
  *
@@ -45,10 +77,7 @@ export function errorStatus(err: unknown): number | undefined {
  * reading a Google failure, and this module imports nothing.
  */
 export function googleErrorReasons(err: unknown): string[] {
-  const e = err as {
-    errors?: Array<{ reason?: string }>;
-    response?: { data?: { error?: { errors?: Array<{ reason?: string }>; status?: string } } };
-  };
+  const e = err as { errors?: Array<{ reason?: string }> };
   const reasons: string[] = [];
   const push = (value: unknown): void => {
     if (typeof value === 'string' && value.length > 0) reasons.push(value.toLowerCase());
@@ -57,13 +86,31 @@ export function googleErrorReasons(err: unknown): string[] {
   if (Array.isArray(e?.errors)) {
     for (const item of e.errors) push(item?.reason);
   }
-  const nested = e?.response?.data?.error;
+  const nested = googleErrorBody(err);
   if (Array.isArray(nested?.errors)) {
     for (const item of nested.errors) push(item?.reason);
   }
   push(nested?.status);
 
   return reasons;
+}
+
+/**
+ * The most informative sentence available for a Google failure.
+ *
+ * Normally that is the Error's own message, because the client lifts Google's
+ * `error.message` into it. When the body was never parsed — the stream case
+ * above — the Error says only "Request failed with status code N", and Google's
+ * actual words ("This file is too large to be exported.") are in the body. This
+ * appends them rather than replacing the message, so nothing already reported
+ * is lost and no existing wording changes.
+ */
+export function googleErrorMessage(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  const fromBody = googleErrorBody(err)?.message;
+  if (typeof fromBody !== 'string' || fromBody.length === 0) return message;
+  if (message.includes(fromBody)) return message;
+  return `${message}: ${fromBody}`;
 }
 
 /** The reasons and phrasings Google uses when a token lacks a required scope. */
@@ -92,8 +139,10 @@ export function isMissingScopeError(err: unknown): boolean {
 
   if (googleErrorReasons(err).some(reason => SCOPE_REASONS.has(reason))) return true;
 
-  const message = err instanceof Error ? err.message : String(err);
-  return SCOPE_PHRASES.test(message);
+  // googleErrorMessage, not err.message: on a stream call Google's sentence is
+  // in the unparsed body and the Error itself says only "Request failed with
+  // status code 403", which matches no phrase here.
+  return SCOPE_PHRASES.test(googleErrorMessage(err));
 }
 
 /**
@@ -101,7 +150,7 @@ export function isMissingScopeError(err: unknown): boolean {
  * and the exact command that fixes it, and keep the original message.
  */
 export function scopeError(err: unknown, ctx: ScopeErrorContext): Error {
-  const original = err instanceof Error ? err.message : String(err);
+  const original = googleErrorMessage(err);
   return new Error(
     `${ctx.tool} needs the ${ctx.scope} scope, and the token for "${ctx.alias}" does not carry it.\n\n`
     + `This is expected until the account re-consents: adding a scope does not change a token `
