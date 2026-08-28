@@ -1,4 +1,6 @@
 node_modules/
+# Dead build output. The server runs from src via tsx and tsconfig sets noEmit,
+# so nothing here should ever reappear; the entry stays as a backstop.
 dist/
 
 # Credentials & tokens (NEVER commit these)

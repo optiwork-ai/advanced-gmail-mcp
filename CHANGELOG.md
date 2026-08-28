@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] — 2026-08-28
+
+### Added
+- **You can now look at an image someone emailed you.** A PNG, JPEG, GIF or WebP fetched with `get_attachment` comes back as a viewable image rather than a filename and a size, so a screenshot, a photo of a damaged roof or a scanned form can be read and answered about in the same breath as the email it arrived on. Files written to disk with `save_dir`, and every other file type, are unchanged. The 1MB inline limit still applies, and formats no client is required to render (SVG, TIFF, HEIC) still come back as data rather than risking a rejected call.
+- **Drive search now finds files in shared (team) drives.** They were invisible, with nothing saying so — an empty result reads exactly like "that file does not exist". My Drive and every shared drive the account can see are now searched together; `include_shared_drives: false` narrows it back. Results carry `driveId` so a shared-drive hit can be told apart. No new permission is needed.
+
+### Changed
+- **Unsubscribing can no longer send an email on its own.** Most lists offer a one-click link, which sends no mail and is unchanged. When a list offers no working link, the only way to unsubscribe is to send a message from your account — and "check that email's unsubscribe header" is a request that could satisfy itself that way without anyone meaning to. That send now requires an explicit confirmation, and the refusal names the exact recipient, subject and body it would have sent so you can agree to a real thing.
+- **An email with no unsubscribe link is no longer reported as a failure.** There is nothing to unsubscribe from, nothing was sent, nothing changed — so Claude stops retrying and apologising for ordinary mail. A header that genuinely cannot be read is still a failure.
+- **Deleting a label now enforces the confirmation it always claimed to require.** The tool has read "confirm with the user first — there is no undo" since it was written, and nothing checked it. Deleting a label strips it from every message it was on, and that labelling work does not come back.
+- **The Chat and Drive lists return the fields they promise instead of the whole raw Google object.** Every Chat listing was carrying its parent space repeated in full on each message, plus card payloads, reaction summaries and three duplicate copies of each message's text — most of the size of the call, for fields nobody asked for, while the description named four. Attachments are kept (reduced to name and type), so "here's the report" never looks like a message with nothing attached, and a card-only alert keeps its fallback text rather than arriving blank.
+
+### Fixed
+- **A permission error from Chat, Drive search or Docs told you to log in again when that was not the problem.** The real causes are a permission never granted, an API never switched on for the Cloud project, or a file the account simply cannot see — none of them fixed by re-authenticating, which sent you round a loop while the true cause survived only in a tail of the message. Each now names what is actually wrong and what fixes it. A 401, where logging in again really is the answer, is untouched.
+- **Your own name went out as gibberish if it has an accent in it.** Recipient names were fixed in 1.6.2; the `From` and `Reply-To` names were not, and both are filled from your Gmail profile — so an account whose display name carries an accent was garbling it on every message it sent. Plain-ASCII names are byte-for-byte unchanged.
+- **The package claimed to be version 1.1.0** after six releases, and a stale April build sat in `dist/` looking like the code that runs. The version is honest again, the build script is gone (the server runs from source; `tsc` now writes nothing), and `dist/` is documented as deletable.
+
 ## [1.6.2] — 2026-08-27
 
 ### Fixed

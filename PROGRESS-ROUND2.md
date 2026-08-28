@@ -152,3 +152,28 @@ Evidence pack: `round2-sweep-evidence.json` (normative for unit scope).
   and `foldHeader` is a no-op below 78 chars — pinned by a new byte-identical test over the
   four ASCII shapes real sends use, and by the pre-existing From assertion in the forward
   tests, which still passes unmodified.
+
+### G7 — version / dist hygiene — DONE
+- Commit: `PENDING-SHA-G7`
+- No FAIL-before: this unit has no testable defect. Suite unchanged at **629 passed (629)**,
+  typecheck clean under the new tsconfig.
+- `package.json` version **1.1.0 → 1.7.0** (it had not moved through six CHANGELOG
+  releases). CHANGELOG gains a `[1.7.0] — 2026-08-28` entry, written in plain language,
+  covering G1-G6; **G8-G12 are appended to that same entry as those units land**, so the
+  round ends with one complete release note rather than twelve fragments.
+- **The `build` script is REMOVED and `tsconfig.json` now sets `"noEmit": true`.** The
+  contract allowed keeping `build` only if it could not silently produce a divergent
+  artifact — it could: the server runs from `src` via `tsx`, nothing consumes compiled
+  output, and `npm run build` would happily refresh a `dist/` that looks like the code
+  that runs. `noEmit` makes the divergent artifact *impossible* rather than merely
+  unscripted (a bare `tsc` now writes nothing), which is the structural version of the
+  same fix. `outDir` and `declaration` went with it. CI never used `build`
+  (it runs `typecheck` + `test` only), so nothing else changes.
+- README gains a short "there is no build step, on purpose" note under Testing, with the
+  `rm -rf dist` line.
+- ⚠️ **ONE RESIDUE FOR THE CHAIR — I could not do this half.** The stale April `dist/`
+  exists in the **live checkout** (`/Users/steve/Claude-Projects/2-backbone/advanced-gmail-mcp/dist`,
+  untracked and gitignored). Deleting it means touching the live checkout, which the
+  contract's concurrency rule forbids me outright. It is already gitignored, so it can
+  never be committed; it is now also unreproducible. The chair should run, at acceptance:
+  `rm -rf /Users/steve/Claude-Projects/2-backbone/advanced-gmail-mcp/dist`

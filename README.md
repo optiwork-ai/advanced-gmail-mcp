@@ -256,6 +256,13 @@ npm test           # vitest unit tests
 
 CI runs both on every push and PR ([.github/workflows/ci.yml](.github/workflows/ci.yml)).
 
+**There is no build step, on purpose.** The server runs straight from `src/` via `tsx`, so
+compiled output is never loaded — but a `dist/` sitting on disk looks like the thing that
+runs, and a stale one (or one built from a different branch) is a trap for the next person
+to read the repo. The `build` script has been removed and `tsconfig.json` sets
+`"noEmit": true`, so a bare `tsc` checks types and writes nothing. If you have an old
+`dist/` from before this change, delete it: `rm -rf dist`.
+
 ## Troubleshooting
 
 | Error | Fix |

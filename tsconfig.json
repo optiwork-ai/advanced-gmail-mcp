@@ -6,9 +6,11 @@
     "esModuleInterop": true,
     "strict": true,
     "skipLibCheck": true,
-    "outDir": "dist",
     "rootDir": "src",
-    "declaration": true,
+    // The server runs from src via tsx and nothing consumes compiled output.
+    // noEmit makes a divergent build artifact impossible rather than merely
+    // unscripted: a bare `tsc` in this directory now checks and writes nothing.
+    "noEmit": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "forceConsistentCasingInFileNames": true,
