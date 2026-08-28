@@ -363,3 +363,10 @@ changed. **No assertion was weakened, and no test was deleted.**
 - `rm -rf /Users/steve/Claude-Projects/2-backbone/advanced-gmail-mcp/dist` (see G7).
 - Two chair calls recorded in `QUESTIONS-FOR-FABLE.md` under `## ROUND 2 QUESTIONS`
   (R2-Q1: whether `update_google_doc` should take a `confirm`; R2-Q2: the `dist/` residue).
+
+### Concurrency note — another session was working the live checkout during this build
+At the START the live checkout was clean, on `main` at the baseline sha. By the END it had
+three UNTRACKED items that are not mine and that I did not touch: `.vscode/`,
+`SIGNATURE-BANNER-MOCKUPS.md`, `sig-mockups/`. That is another session's work in progress.
+The live checkout is still on `main` at `a513a81` — its branch was never switched and no
+tracked file in it was modified by this build. Worktree isolation did its job.
