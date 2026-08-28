@@ -118,3 +118,20 @@ Evidence pack: `round2-sweep-evidence.json` (normative for unit scope).
   empty message from a bot.
 - Both tool descriptions now state exactly what they return (the messages one previously
   said "the raw Chat message objects"); README rows updated.
+
+### G5 — shared-drive visibility on Drive search — DONE
+- Commit: `PENDING-SHA-G5`
+- FAIL-before: `4 failed | 23 passed (27)` in read-only-tools.test.ts.
+- PASS-after: full suite **624 passed (624)**, typecheck clean.
+- `files.list` now sends the **three flags Google requires together**: `supportsAllDrives:
+  true`, `includeItemsFromAllDrives`, and `corpora`. The third is the one that is easy to
+  miss — with only the first two, Drive still defaults `corpora` to `'user'` and the search
+  never leaves My Drive.
+- New optional `include_shared_drives` param, **defaulting to true**: a file the user can
+  see is a file they expect to find. `false` narrows to My Drive
+  (`includeItemsFromAllDrives: false`, `corpora: 'user'`); `supportsAllDrives` stays true
+  either way, since it governs how a shared-drive item is handled rather than whether one
+  is searched for.
+- `driveId` added to the requested fields, so a result that came from a shared drive can be
+  told apart from one in My Drive. Description and README row updated.
+- No new scope: the existing `drive.readonly` grant already covers shared-drive reads.

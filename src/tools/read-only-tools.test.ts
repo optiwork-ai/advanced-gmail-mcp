@@ -302,3 +302,49 @@ describe('list_chat_messages field projection', () => {
     expect(description).not.toMatch(/raw Chat message objects/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// G5 — files that live in a shared (team) drive were invisible to the search,
+// with no message saying so: it looked exactly like the file did not exist.
+// ---------------------------------------------------------------------------
+
+describe('search_drive_files sees shared drives', () => {
+  beforeEach(() => {
+    driveApi.files.list.mockResolvedValue({ data: { files: [] } });
+  });
+
+  async function callWith(args: Record<string, unknown>) {
+    const { handler } = capture(registerSearchDriveFiles as (server: never) => void);
+    await handler(args);
+    return driveApi.files.list.mock.calls[0][0] as Record<string, unknown>;
+  }
+
+  it('asks for shared-drive items by default — the three flags Google requires together', async () => {
+    const params = await callWith({ query: "name contains 'report'" });
+
+    expect(params.supportsAllDrives).toBe(true);
+    expect(params.includeItemsFromAllDrives).toBe(true);
+    // Without this the other two still search only My Drive.
+    expect(params.corpora).toBe('allDrives');
+  });
+
+  it('can be narrowed back to the account\'s own Drive', async () => {
+    const params = await callWith({ include_shared_drives: false });
+
+    expect(params.includeItemsFromAllDrives).toBe(false);
+    expect(params.corpora).toBe('user');
+    // Still true: it governs how a shared-drive item is HANDLED, not whether
+    // one is searched for, and Google wants it set either way.
+    expect(params.supportsAllDrives).toBe(true);
+  });
+
+  it('returns driveId, so a result from a shared drive can be told apart', async () => {
+    const params = await callWith({});
+    expect(String(params.fields)).toContain('driveId');
+  });
+
+  it('says in its description that shared drives are included', () => {
+    const { description } = capture(registerSearchDriveFiles as (server: never) => void);
+    expect(description).toMatch(/shared drive/i);
+  });
+});

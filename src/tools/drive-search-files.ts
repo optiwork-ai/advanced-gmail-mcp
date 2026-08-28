@@ -10,6 +10,7 @@ export const searchDriveFilesParams = {
   account: z.string().optional().describe('Account alias or email address. Uses default account if not specified.'),
   order_by: z.string().optional().describe('Drive orderBy expression, e.g. "modifiedTime desc" or "name". Optional.'),
   max_results: z.number().optional().describe('Maximum number of files to return (default: 100, max: 1000). Paginates automatically.'),
+  include_shared_drives: z.boolean().optional().describe('Whether to search shared (team) drives as well as the account\'s own My Drive. Defaults to TRUE, because a file the user can see is a file they expect to find. Pass false to search only My Drive, which is marginally faster.'),
 };
 
 /**
@@ -18,14 +19,20 @@ export const searchDriveFilesParams = {
 export function registerSearchDriveFiles(server: McpServer): void {
   server.tool(
     'search_drive_files',
-    'Search Google Drive files using Drive "q" query syntax. Read-only. Returns file id, name, mimeType, modifiedTime, owners, webViewLink, and parents.',
+    'Search Google Drive files using Drive "q" query syntax. Read-only. '
+    + 'Searches the account\'s own My Drive AND every shared (team) drive it can see, unless '
+    + 'include_shared_drives is set to false. '
+    + 'Returns file id, name, mimeType, modifiedTime, owners, webViewLink, parents, and driveId '
+    + '(present only on a file that lives in a shared drive).',
     searchDriveFilesParams,
-    async ({ query, account, order_by, max_results }) => {
+    async ({ query, account, order_by, max_results, include_shared_drives }) => {
       try {
         const resolved = resolveAccount(account ?? undefined);
         const drive = await getDriveClient(resolved);
         const ctx = { tool: 'search_drive_files', api: 'Google Drive', scope: DRIVE_READONLY_SCOPE, alias: resolved.alias };
         const maxResults = Math.min(max_results ?? 100, 1000);
+        // Default TRUE: a file the user can see is a file they expect to find.
+        const includeSharedDrives = include_shared_drives ?? true;
 
         const files: drive_v3.Schema$File[] = [];
         let pageToken: string | undefined;
@@ -38,7 +45,15 @@ export function registerSearchDriveFiles(server: McpServer): void {
               orderBy: order_by || undefined,
               pageSize,
               pageToken,
-              fields: 'files(id,name,mimeType,modifiedTime,owners,webViewLink,parents),nextPageToken',
+              // All three are required TOGETHER. supportsAllDrives alone only
+              // says the caller can handle a shared-drive item; without
+              // includeItemsFromAllDrives none is returned, and without
+              // corpora: 'allDrives' the search still only looks at My Drive
+              // (Drive defaults corpora to 'user').
+              supportsAllDrives: true,
+              includeItemsFromAllDrives: includeSharedDrives,
+              corpora: includeSharedDrives ? 'allDrives' : 'user',
+              fields: 'files(id,name,mimeType,modifiedTime,owners,webViewLink,parents,driveId),nextPageToken',
             })
           );
 

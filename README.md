@@ -178,7 +178,7 @@ Chat and Docs are **strictly read-only** — nothing is posted, created, updated
 | `list_chat_spaces` | List the Chat spaces/DMs the account belongs to (name, displayName, spaceType, spaceDetails) |
 | `list_chat_messages` | List messages in a Chat space (requires a space name/id; newest first). Returns name, sender, createTime, text, thread, plus attachments when a file was shared |
 | `get_chat_message` | Read a single Chat message by resource name |
-| `search_drive_files` | Search Drive files with Drive `q` query syntax |
+| `search_drive_files` | Search Drive files with Drive `q` query syntax — My Drive **and** shared (team) drives by default (`include_shared_drives: false` to narrow) |
 | `read_drive_file` | Read a Drive file's metadata + text (Docs/Sheets/Slides exported to text; binary types return metadata only; ~1MB cap; read `contentNote` — a Sheets export is first-sheet-only) |
 | `upload_drive_file` | **Uploads a local file to Drive** (absolute path, optional `folder_id` and `name`; 100MB ceiling) and returns its id, name, size and `webViewLink`. Always creates a new file — it never overwrites one. Needs `drive.file` |
 | `get_google_doc` | Read a Google Doc as title + flattened plain text |
