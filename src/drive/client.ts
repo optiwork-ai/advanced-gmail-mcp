@@ -5,10 +5,9 @@ import type { drive_v3 } from 'googleapis';
 import type { Auth } from 'googleapis';
 import { type AccountConfig, resolveAccount } from '../config.js';
 import { getAuthClient } from '../gmail/auth.js';
-import { withRetry } from '../gmail/client.js';
 import { mimeTypeForFilename } from '../gmail/mime.js';
+import { googleApiCall } from '../google-api-error.js';
 import { log } from '../log.js';
-import { withScopeHint } from '../scope-error.js';
 
 // ---------------------------------------------------------------------------
 // Client cache: Google Drive API client per account with 50-min TTL.
@@ -197,9 +196,23 @@ export async function uploadFile(opts: UploadFileOptions): Promise<UploadFileRes
 
   const drive = await getDriveClient(resolved);
 
-  const response = await withScopeHint(
-    { tool: 'upload_drive_file', scope: DRIVE_FILE_SCOPE, alias: resolved.alias },
-    () => withRetry(() =>
+  // The honesty path every other Drive/Docs tool travels. `withScopeHint`
+  // rescued only a MISSING SCOPE; every other 403 fell through to withRetry's
+  // rewrite — "Authentication error (403) … Re-authenticate with: npx tsx
+  // src/auth.ts" — and Drive's other 403s (a folder this account cannot write
+  // to, the Drive API switched off on the project, a storage quota) are none of
+  // them a broken login. `googleApiCall` is `withRetry` with the translation
+  // inside it, so the retry behaviour above is unchanged: the read stream is
+  // still created per attempt, a 5xx is still retried, and a rate-limit 403 is
+  // still passed through untouched so withRetry backs off on it.
+  const response = await googleApiCall(
+    {
+      tool: 'upload_drive_file',
+      api: 'Google Drive',
+      scope: DRIVE_FILE_SCOPE,
+      alias: resolved.alias,
+    },
+    () =>
       drive.files.create({
         requestBody: {
           name,
@@ -212,7 +225,6 @@ export async function uploadFile(opts: UploadFileOptions): Promise<UploadFileRes
         fields: 'id,name,mimeType,size,webViewLink,webContentLink,parents',
         supportsAllDrives: true,
       }),
-    ),
   );
 
   const file = response.data;

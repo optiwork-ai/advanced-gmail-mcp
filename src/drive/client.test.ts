@@ -294,3 +294,74 @@ describe('uploadFile without the drive.file grant', () => {
       .rejects.toThrow(/File not found: folder-9/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// P3 — upload_drive_file was the last Drive/Docs tool on withScopeHint +
+// withRetry rather than the shared googleApiCall honesty path. withScopeHint
+// only rescues a MISSING SCOPE; every other 403 fell through to withRetry's
+// rewrite, "Authentication error (403) … Re-authenticate with: npx tsx
+// src/auth.ts". Drive's other 403s — a folder the account cannot write to, a
+// project with the Drive API switched off, a storage quota — are none of them
+// a broken login, and re-authenticating fixes none of them.
+// ---------------------------------------------------------------------------
+
+describe('upload_drive_file tells the truth about a 403 that is not a missing scope', () => {
+  /** A Google API error in the shape googleapis actually throws. */
+  function googleError(status: number, reason: string, message: string): Error {
+    return Object.assign(new Error(message), {
+      code: status,
+      errors: [{ reason }],
+      response: { status, data: { error: { errors: [{ reason }] } } },
+    });
+  }
+
+  it('a per-folder permission refusal keeps Google\'s words and drops the re-auth advice', async () => {
+    api.files.create.mockRejectedValue(
+      googleError(403, 'insufficientFilePermissions', 'The user does not have sufficient permissions for this file.'),
+    );
+    const filePath = tempFile('summary.pdf');
+
+    await expect(uploadFile({ filePath, folderId: 'folder-9', account: 'work' })).rejects.toThrow(
+      /The user does not have sufficient permissions for this file\./,
+    );
+    await expect(uploadFile({ filePath, folderId: 'folder-9', account: 'work' })).rejects.not.toThrow(
+      /Re-authenticate with: npx tsx/,
+    );
+  });
+
+  it('a disabled Drive API says to enable it in the console, and that a re-login will not help', async () => {
+    api.files.create.mockRejectedValue(googleError(
+      403,
+      'accessNotConfigured',
+      'Google Drive API has not been used in project 12345 before or it is disabled.',
+    ));
+    const filePath = tempFile('summary.pdf');
+
+    await expect(uploadFile({ filePath, account: 'work' })).rejects.toThrow(
+      /Google Drive API is not enabled/,
+    );
+    await expect(uploadFile({ filePath, account: 'work' })).rejects.toThrow(/will not help/);
+  });
+
+  it('still retries a 5xx with a fresh stream — moving onto the honest path kept the retry', async () => {
+    api.files.create
+      .mockRejectedValueOnce(Object.assign(new Error('backend error'), { code: 503 }))
+      .mockResolvedValueOnce(okResponse());
+    const filePath = tempFile('summary.pdf');
+
+    const result = await uploadFile({ filePath });
+
+    expect(api.files.create).toHaveBeenCalledTimes(2);
+    const first = api.files.create.mock.calls[0][0].media.body;
+    const second = api.files.create.mock.calls[1][0].media.body;
+    expect(first).not.toBe(second);
+    expect(result.id).toBe('file-123');
+  }, 15_000);
+
+  it('a 401 is still left to the shared re-authenticate path, where re-login IS the fix', async () => {
+    api.files.create.mockRejectedValue(googleError(401, 'authError', 'Invalid Credentials'));
+    const filePath = tempFile('summary.pdf');
+
+    await expect(uploadFile({ filePath })).rejects.toThrow(/Authentication error \(401\)/);
+  });
+});

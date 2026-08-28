@@ -55,4 +55,33 @@ FAIL-before (real, behavioural): 3 failed | 36 passed in `read-only-tools.test.t
 new test (a non-JSON body must not crash the translation) passes on both sides by design — it
 is a regression guard, not a demonstration.
 PASS-after: 22 files, 752 passed, 0 failed; typecheck clean.
+Commit: `c88bf1e`
+
+## P3 — upload_drive_file joins the shared honesty path — DONE
+
+`uploadFile` was the last Drive/Docs call on `withScopeHint(ctx, () => withRetry(...))`.
+`withScopeHint` rescues only a MISSING SCOPE; every other 403 fell through to `withRetry`'s
+rewrite — "Authentication error (403) … Re-authenticate with: npx tsx src/auth.ts" — and
+Drive's other 403s (a folder this account cannot write to, the Drive API switched off on the
+project, a storage quota) are none of them a broken login.
+
+**Retry behaviour preserved, verified by reading both helpers.** `googleApiCall` IS
+`withRetry` with the translation inside it (`src/google-api-error.ts`), so nothing had to be
+composed: the read stream is still created per attempt inside the retry loop, a 5xx is still
+retried, and a rate-limit 403 is still returned untouched so `withRetry` backs off on it. A
+test pins the fresh-stream-per-attempt behaviour on the new path, alongside the pre-existing
+one that already pinned it on the old.
+
+One improvement falls out of the ordering: the translation now runs INSIDE the retry, on the
+raw Google error, instead of after `withRetry` had already rewritten it.
+
+- `src/drive/client.ts` — `googleApiCall` with `api: 'Google Drive'`; the now-unused
+  `withRetry` / `withScopeHint` imports dropped. `withScopeHint` itself is untouched and
+  still exported and tested.
+- Tests: 4 new in `src/drive/client.test.ts` (per-file 403, disabled API, retry preserved,
+  401 still routed to re-authenticate).
+
+FAIL-before (real, behavioural): 2 failed | 23 passed. The retry and 401 tests pass on both
+sides by design — they are the regression guards that prove nothing was dropped.
+PASS-after: 22 files, 756 passed, 0 failed; typecheck clean.
 Commit: (recorded below)
