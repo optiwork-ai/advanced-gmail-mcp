@@ -505,3 +505,87 @@ on `feat/round2-enhancements`.
   (`R2-Q3`): whether a watcher cursor poisoned before this fix should heal itself automatically
   or stay clearable by hand. The poisoning path is closed either way.
 - The repo's LIVE checkout was never touched in this pass.
+
+---
+
+# ROUND 2 CLOSURE PASS — the two pre-merge units (CF1, CF2)
+
+Worker: closure builder. Same frozen contract, same prohibitions. Worktree
+`/Users/steve/Claude-Projects/2-backbone/advanced-gmail-mcp-wt/round2` on
+`feat/round2-enhancements`. Charter: the chair's post-validation rulings **F1** and **F2**.
+
+## Closure baseline (read fresh, before any edit)
+
+- Branch head at start: **`eb0ad5a`** — "docs(progress): the fix pass — five findings closed,
+  final gate". Worktree **clean**.
+- `npm test` → **20 files, 724 passed, 0 failed. GREEN.** `npm run typecheck` → clean, exit 0.
+- Gate for this pass: **724 + new tests, zero failures, nothing deleted or loosened.**
+- Disk before starting: `df -h /` → **6.1Gi available** (the volume hit 0 once during the build).
+- The repo's LIVE checkout was not touched at any point in this pass.
+
+## CF1 — `create_google_doc`: the dropped doc-CREATION clause — DONE
+
+- Commit: `d347181`
+- **FAIL-before (real):** `src/tools/docs-create-document.test.ts` could not load its module at
+  all — neither `./docs-create-document.js` nor `cleanDriveName` existed. **No tests ran.**
+- **PASS-after:** full suite **21 files, 735 passed** (+11), typecheck clean. Roster **51 → 52**
+  (`grep -c "server.tool(" src/tools/*.ts` = 52).
+
+### The mechanism, and why it is the right one rather than the convenient one
+Creation does **not** go through the Docs API. It is a Drive `files.create` whose TARGET
+`mimeType` is `application/vnd.google-apps.document`, with the body sent as a `text/plain`
+media part that Google converts on upload. Two things follow, and both matter:
+
+1. **It rides `drive.file`, already granted on 2026-08-27.** No new scope, no consent round —
+   so unlike `update_google_doc`, this tool works on every already-authenticated alias the day
+   it lands. Stated in the tool description, the README and the release note.
+2. **`drive.file` reaches only files this server itself created.** The new write therefore
+   cannot touch a document the user already had — the same bound `upload_drive_file` has.
+
+`documents.create` was the obvious alternative and is worse on both counts: it takes a title
+and nothing else, so the text would need a second, **index-addressed** call — the precise
+arithmetic `update_google_doc` was designed never to expose — and it needs the `documents`
+scope no alias has consented to yet.
+
+### Design decisions worth the reviewer's attention
+- **No media part at all when there is no `initial_text`.** A metadata-only create makes an
+  empty document; uploading zero bytes as `text/plain` asks Google to convert nothing. Pinned
+  by test.
+- **Not retried.** `files.create` is not idempotent: a retry after a request that actually
+  landed leaves two documents in Drive and returns the id of only one, so the caller edits one
+  copy while the user reads the other. `uploadFile` accepts that trade knowingly (its comment
+  says so); for a document that is about to be edited by id, a duplicate is worse than a
+  reported failure.
+- **Title cleaning is NOT filename cleaning.** `driveFileName` basenames its input so an
+  upload name cannot smuggle a directory. A title must not be basenamed — "Q3/Q4 planning"
+  would become "Q4 planning". The shared half (strip control characters, trim) was lifted into
+  a new exported `cleanDriveName` in `src/drive/client.ts`; `driveFileName` delegates to it and
+  keeps basenaming. Its behaviour is byte-for-byte unchanged.
+- **Refusal before any network call:** an empty or whitespace title. An untitled document is a
+  real thing in Drive and an unfindable one afterwards.
+- **Wired through `googleApiCall`** (the G3/WR-3 honesty path), so a 403 names the missing
+  `drive.file` scope and the exact `npm run auth -- <alias>`, rather than advising a re-login
+  that cannot fix it. `upload_drive_file` still uses the older `withScopeHint`; that is a
+  pre-existing inconsistency, not one this unit introduced, and moving it was out of charter.
+- **Logged on both edges** (`phase: 'start' / 'done' / 'failed'`), like the G9 destructive
+  paths and `update_google_doc`. Ids and counts only — never the document's text.
+- **The result carries a `hint`** naming `update_google_doc` for appending/replacing and
+  `get_google_doc` for reading back, so the create → edit path is stated where the caller is
+  looking.
+- The tool description says the body is **plain text, not Markdown** — `"# Heading"` arrives as
+  those literal characters. A model that assumed otherwise would report a formatted document
+  that is not one.
+
+### Where the code lives, and why
+The request is built in `src/tools/docs-create-document.ts` rather than in
+`src/drive/client.ts`. That matches what the Drive **read** tools already do (each builds its
+own `files.list` / `files.get` / `files.export`); `uploadFile` living inside the client module
+is the outlier. It is also the seam this repo's tests already mock (`vi.mock('../drive/client.js')`).
+`src/drive/client.ts`'s header comment — which claimed `uploadFile` was the only mutating Drive
+call in the server — was corrected rather than left to become a second falsehood.
+
+### Docs
+`README.md`: roster 51 → 52, a `create_google_doc` row in the Chat/Drive/Docs table, the scope
+bullet now names both `drive.file` tools and says creation needs no Docs scope, and the
+read-only/write summary paragraph rewritten. `CHANGELOG.md`: a `create_google_doc` bullet in the
+1.7.0 entry plus a one-line roster statement (50 → 52) under the heading.
