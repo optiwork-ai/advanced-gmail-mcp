@@ -27,7 +27,7 @@ Evidence pack: `round2-sweep-evidence.json` (normative for unit scope).
 ## Units
 
 ### G1 — unsubscribe confirm gate + honest benign case + delete_label enforcement — DONE
-- Commit: `PENDING-SHA-G1`
+- Commit: `9590c9f`
 - FAIL-before: `npx vitest run src/gmail/api.test.ts` → **6 failed | 119 passed (125)**
   before the implementation (the six new gate/benign assertions).
 - PASS-after: full suite **587 passed (587)**, typecheck clean.
