@@ -120,7 +120,7 @@ Evidence pack: `round2-sweep-evidence.json` (normative for unit scope).
   said "the raw Chat message objects"); README rows updated.
 
 ### G5 — shared-drive visibility on Drive search — DONE
-- Commit: `PENDING-SHA-G5`
+- Commit: `d8fa7e0`
 - FAIL-before: `4 failed | 23 passed (27)` in read-only-tools.test.ts.
 - PASS-after: full suite **624 passed (624)**, typecheck clean.
 - `files.list` now sends the **three flags Google requires together**: `supportsAllDrives:
