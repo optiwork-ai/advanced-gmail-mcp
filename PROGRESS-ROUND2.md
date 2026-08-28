@@ -137,7 +137,7 @@ Evidence pack: `round2-sweep-evidence.json` (normative for unit scope).
 - No new scope: the existing `drive.readonly` grant already covers shared-drive reads.
 
 ### G6 — Reply-To (and From) through encodeAddressList + foldHeader — DONE
-- Commit: `PENDING-SHA-G6`
+- Commit: `f83693a`
 - FAIL-before: `3 failed | 160 passed (163)` in mime.test.ts.
 - PASS-after: full suite **629 passed (629)**, typecheck clean.
 - ⚠️ **BEYOND THE CONTRACT'S LETTER, flagged for the reviewer:** the contract named
