@@ -46,15 +46,29 @@ vi.mock('./auth.js', () => ({
 
 // G12: the on-disk cursor store is stubbed so these tests never write to the
 // real cursors/ directory, and so the store's own contract can be simulated.
+// P5: the store is keyed by account AND filter, so the stub carries the filter
+// through exactly as the real one does.
 type CursorWrite = { stored: boolean; reason?: string };
+type CursorFilter = { labelId?: string; historyTypes?: readonly string[] };
+/** The stub's key: the same order-independent signature the real store uses. */
+function cursorKey(alias: string, filter?: CursorFilter): string {
+  const labelId = filter?.labelId?.trim() || null;
+  const types = [...(filter?.historyTypes ?? [])].sort();
+  if (labelId === null && types.length === 0) return alias;
+  return `${alias}::${JSON.stringify({ labelId, historyTypes: types })}`;
+}
 const cursorStore = {
-  readCursor: vi.fn((_alias: string): string | null => null),
-  writeCursor: vi.fn((_alias: string, _id: string): CursorWrite => ({ stored: true })),
+  readCursor: vi.fn((_alias: string, _filter?: CursorFilter): string | null => null),
+  writeCursor: vi.fn(
+    (_alias: string, _id: string, _filter?: CursorFilter): CursorWrite => ({ stored: true }),
+  ),
 };
 vi.mock('./cursor-store.js', () => ({
-  readCursor: (alias: string) => cursorStore.readCursor(alias),
-  writeCursor: (alias: string, id: string) => cursorStore.writeCursor(alias, id),
-  cursorFilePath: (alias: string) => `/fake/cursors/${alias}.json`,
+  readCursor: (alias: string, filter?: CursorFilter) => cursorStore.readCursor(alias, filter),
+  writeCursor: (alias: string, id: string, filter?: CursorFilter) =>
+    cursorStore.writeCursor(alias, id, filter),
+  cursorFilePath: (alias: string, filter?: CursorFilter) =>
+    `/fake/cursors/${cursorKey(alias, filter)}.json`,
 }));
 
 vi.mock('../config.js', () => ({
@@ -2016,15 +2030,20 @@ describe('getMailChanges remembers where it got to', () => {
 
   beforeEach(() => {
     cursors.clear();
-    cursorStore.readCursor.mockImplementation((alias: string) => cursors.get(alias) ?? null);
-    cursorStore.writeCursor.mockImplementation((alias: string, id: string) => {
-      const existing = cursors.get(alias);
-      if (existing !== undefined && BigInt(id) < BigInt(existing)) {
-        return { stored: false, reason: `would rewind the remembered cursor from ${existing}` };
-      }
-      cursors.set(alias, id);
-      return { stored: true };
-    });
+    cursorStore.readCursor.mockImplementation(
+      (alias: string, filter?: CursorFilter) => cursors.get(cursorKey(alias, filter)) ?? null,
+    );
+    cursorStore.writeCursor.mockImplementation(
+      (alias: string, id: string, filter?: CursorFilter) => {
+        const key = cursorKey(alias, filter);
+        const existing = cursors.get(key);
+        if (existing !== undefined && BigInt(id) < BigInt(existing)) {
+          return { stored: false, reason: `would rewind the remembered cursor from ${existing}` };
+        }
+        cursors.set(key, id);
+        return { stored: true };
+      },
+    );
   });
 
   it('stores the position after a COMPLETE read', async () => {
@@ -2032,7 +2051,7 @@ describe('getMailChanges remembers where it got to', () => {
 
     await getMailChanges({ historyId: '4000', account: 'work' });
 
-    expect(cursorStore.writeCursor).toHaveBeenCalledWith('work', '5000');
+    expect(cursorStore.writeCursor).toHaveBeenCalledWith('work', '5000', {});
     expect(cursors.get('work')).toBe('5000');
   });
 
@@ -2136,6 +2155,53 @@ describe('getMailChanges remembers where it got to', () => {
     const next = await getMailChanges({ account: 'work' });
     expect(next.fromHistoryId).toBe('4000');
     expect(cursors.get('work')).toBe('5000');
+  });
+
+  // P5 — the bookmark is per account AND per filter. An INBOX-only agent and an
+  // unfiltered watcher on one account used to share a cursor and silently eat
+  // each other's window: whichever polled first moved it past everything, and
+  // the other was told nothing had happened.
+
+  it('an INBOX watcher and an unfiltered one no longer consume each other\'s window', async () => {
+    api.history.list.mockResolvedValue(ok({ historyId: '5000', history: [] }));
+    await getMailChanges({ historyId: '4000', account: 'work', labelId: 'INBOX' });
+
+    api.history.list.mockResolvedValue(ok({ historyId: '6000', history: [] }));
+    await getMailChanges({ historyId: '4000', account: 'work' });
+
+    // Each resumes from its OWN position, not from the other's.
+    api.history.list.mockResolvedValue(ok({ historyId: '7000', history: [] }));
+    const inbox = await getMailChanges({ account: 'work', labelId: 'INBOX' });
+    const all = await getMailChanges({ account: 'work' });
+
+    expect(inbox.fromHistoryId).toBe('5000');
+    expect(all.fromHistoryId).toBe('6000');
+  });
+
+  it('carries the filter to the store, so the file it uses matches the poll', async () => {
+    api.history.list.mockResolvedValue(ok({ historyId: '5000', history: [] }));
+
+    await getMailChanges({
+      historyId: '4000',
+      account: 'work',
+      labelId: 'INBOX',
+      historyTypes: ['messageAdded'],
+    });
+
+    expect(cursorStore.writeCursor).toHaveBeenCalledWith('work', '5000', {
+      labelId: 'INBOX',
+      historyTypes: ['messageAdded'],
+    });
+  });
+
+  it('an unfiltered poll asks for no filter at all, so today\'s cursor files keep working', async () => {
+    cursors.set('work', '4200');
+    api.history.list.mockResolvedValue(ok({ historyId: '5000', history: [] }));
+
+    const result = await getMailChanges({ account: 'work' });
+
+    expect(cursorStore.readCursor).toHaveBeenCalledWith('work', {});
+    expect(result.fromHistoryId).toBe('4200');
   });
 
   it('says the supplied cursor was not remembered, rather than leaving it ambiguous', async () => {

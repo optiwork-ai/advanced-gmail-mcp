@@ -23,7 +23,7 @@ import {
 } from './mime.js';
 import { getSendAsProfile } from './settings.js';
 import { assertPublicHttpsUrl } from './url-guard.js';
-import { cursorFilePath, readCursor, writeCursor } from './cursor-store.js';
+import { type CursorFilter, cursorFilePath, readCursor, writeCursor } from './cursor-store.js';
 import type {
   Attachment,
   DraftPage,
@@ -925,7 +925,9 @@ async function hydrateArrivals(
 export async function getMailChanges(opts: {
   /**
    * The position to poll from. OMIT it to continue from where this account was
-   * last read to — the server remembers the last COMPLETE position per account.
+   * last read to — the server remembers the last COMPLETE position per account
+   * AND per filter (`labelId` + `historyTypes`), so two watchers with different
+   * filters do not consume each other's window.
    * A supplied value always wins over the remembered one.
    */
   historyId?: string;
@@ -940,7 +942,20 @@ export async function getMailChanges(opts: {
 
   // "Since last time": the caller may omit the cursor entirely and continue
   // from the last COMPLETE read of this account.
-  const remembered = opts.historyId === undefined ? readCursor(resolved.alias) : null;
+  // A bookmark belongs to an account AND to the filter that was polled with.
+  // A poll only ever sees the changes its filter admits, so an INBOX-only agent
+  // and an unfiltered watcher sharing one bookmark ate each other's window in
+  // silence. An UNFILTERED poll keeps the plain per-alias file it has always
+  // used, so cursors already on disk keep working.
+  const cursorFilter: CursorFilter = {
+    ...(opts.labelId ? { labelId: opts.labelId } : {}),
+    ...(opts.historyTypes && opts.historyTypes.length > 0
+      ? { historyTypes: opts.historyTypes }
+      : {}),
+  };
+  const remembered = opts.historyId === undefined
+    ? readCursor(resolved.alias, cursorFilter)
+    : null;
   if (opts.historyId === undefined && remembered === null) {
     throw new Error(
       `No remembered position for account "${resolved.alias}" (${resolved.email}), and no `
@@ -1071,7 +1086,7 @@ export async function getMailChanges(opts: {
   // to fall into.
   const complete = !nextPageToken;
   if (complete && !foreignCursor) {
-    const outcome = writeCursor(resolved.alias, nextHistoryId);
+    const outcome = writeCursor(resolved.alias, nextHistoryId, cursorFilter);
     if (!outcome.stored && outcome.reason) {
       notes.push(`The remembered cursor was not updated: it ${outcome.reason}.`);
     }
@@ -1085,7 +1100,7 @@ export async function getMailChanges(opts: {
       remembered !== null
         ? `That cursor is the REMEMBERED one for "${resolved.alias}", so polling this account `
           + 'with no history_id will keep reporting nothing until it is cleared. Delete '
-          + `${cursorFilePath(resolved.alias)}, then poll once with a fresh `
+          + `${cursorFilePath(resolved.alias, cursorFilter)}, then poll once with a fresh `
           + 'get_history_baseline cursor to start remembering again.'
         : 'It was NOT remembered — the position stored for this account is untouched.',
     );

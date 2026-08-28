@@ -50,6 +50,10 @@ export function registerGetMailChanges(server: McpServer): void {
     + 'is false, call again with the SAME history_id plus the nextPageToken; nothing was '
     + 'remembered from a partial page. (A caller keeping its own cursor follows the same rule: '
     + 'store the returned historyId only when complete is true.) '
+    + 'The remembered position belongs to the account AND to the filter: a poll with a label_id '
+    + 'or history_types remembers its own position, separate from an unfiltered poll of the '
+    + 'same account, so two watchers with different filters do not consume each other\'s '
+    + 'window. Poll with the SAME filter each time, or you are resuming a different bookmark. '
     + 'If the cursor is older than roughly a week Gmail no longer has that history and this '
     + 'errors: get a fresh cursor from get_history_baseline and treat the gap as a full resync '
     + '(list_emails / search_emails), not as "no new mail". Read-only.',

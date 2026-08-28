@@ -14,7 +14,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'gmail-mcp-cursors-'));
 process.env.GMAIL_MCP_CURSOR_DIR = DIR;
 
-const { readCursor, writeCursor } = await import('./cursor-store.js');
+const { cursorFilePath, readCursor, writeCursor } = await import('./cursor-store.js');
 
 beforeEach(() => {
   for (const file of fs.readdirSync(DIR)) fs.rmSync(path.join(DIR, file), { force: true });
@@ -95,5 +95,91 @@ describe('writeCursor', () => {
     writeCursor('../escape', '100');
     expect(fs.existsSync(path.join(DIR, '..', 'escape.json'))).toBe(false);
     expect(fs.readdirSync(DIR)).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P5 — the bookmark is per account AND per filter.
+//
+// It used to be keyed on the alias alone, while get_mail_changes also takes
+// label_id and history_types. So an INBOX-only agent and an unfiltered watcher
+// polling the same account shared one bookmark and silently ate each other's
+// window: whichever polled first moved the cursor past everything, and the
+// other was told nothing had happened. Neither could tell.
+// ---------------------------------------------------------------------------
+
+describe('a filtered poll keeps its own bookmark', () => {
+  it('an UNFILTERED poll still uses the plain per-alias file, so existing cursors keep working', () => {
+    fs.writeFileSync(
+      path.join(DIR, 'steve-optiwork.json'),
+      JSON.stringify({ alias: 'steve-optiwork', historyId: '4242' }),
+    );
+
+    expect(readCursor('steve-optiwork')).toBe('4242');
+    expect(readCursor('steve-optiwork', {})).toBe('4242');
+  });
+
+  it('two callers with different filters no longer consume each other\'s window', () => {
+    writeCursor('work', '5000', { labelId: 'INBOX' });
+    writeCursor('work', '9000');
+
+    expect(readCursor('work', { labelId: 'INBOX' })).toBe('5000');
+    expect(readCursor('work')).toBe('9000');
+  });
+
+  it('a filtered bookmark is written somewhere else entirely, not over the plain one', () => {
+    writeCursor('work', '5000');
+    writeCursor('work', '6000', { labelId: 'INBOX' });
+
+    expect(readCursor('work')).toBe('5000');
+    expect(fs.readdirSync(DIR)).toHaveLength(2);
+  });
+
+  it('the same filter resolves to the same file however it was ordered', () => {
+    writeCursor('work', '7000', { historyTypes: ['labelAdded', 'messageAdded'] });
+
+    expect(readCursor('work', { historyTypes: ['messageAdded', 'labelAdded'] })).toBe('7000');
+  });
+
+  it('different filters on one account do not collide', () => {
+    writeCursor('work', '100', { labelId: 'INBOX' });
+    writeCursor('work', '200', { labelId: 'SENT' });
+    writeCursor('work', '300', { labelId: 'INBOX', historyTypes: ['messageAdded'] });
+
+    expect(readCursor('work', { labelId: 'INBOX' })).toBe('100');
+    expect(readCursor('work', { labelId: 'SENT' })).toBe('200');
+    expect(readCursor('work', { labelId: 'INBOX', historyTypes: ['messageAdded'] })).toBe('300');
+  });
+
+  it('two aliases that sanitize to the same filename keep separate filtered bookmarks', () => {
+    writeCursor('a/b', '100', { labelId: 'INBOX' });
+    writeCursor('a_b', '200', { labelId: 'INBOX' });
+
+    expect(readCursor('a/b', { labelId: 'INBOX' })).toBe('100');
+    expect(readCursor('a_b', { labelId: 'INBOX' })).toBe('200');
+  });
+
+  it('a filtered alias still cannot write outside the cursor directory', () => {
+    writeCursor('../escape', '100', { labelId: 'INBOX' });
+
+    expect(fs.existsSync(path.join(DIR, '..', 'escape.json'))).toBe(false);
+    expect(fs.readdirSync(DIR)).toHaveLength(1);
+  });
+
+  it('names the file it actually uses, so a wedged filtered cursor can be cleared', () => {
+    const plain = cursorFilePath('work');
+    const filtered = cursorFilePath('work', { labelId: 'INBOX' });
+
+    expect(filtered).not.toBe(plain);
+    expect(path.dirname(filtered)).toBe(DIR);
+
+    writeCursor('work', '100', { labelId: 'INBOX' });
+    expect(fs.existsSync(filtered)).toBe(true);
+  });
+
+  it('the rewind rule is per filter, not shared across them', () => {
+    writeCursor('work', '9000');
+    expect(writeCursor('work', '100', { labelId: 'INBOX' }).stored).toBe(true);
+    expect(readCursor('work', { labelId: 'INBOX' })).toBe('100');
   });
 });

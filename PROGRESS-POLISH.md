@@ -108,4 +108,48 @@ FAIL-before (real, behavioural): 3 failed | 40 passed. The fourth new test (an o
 message carries neither marker) passes on both sides by design — it is the guard that keeps
 the markers meaningful.
 PASS-after: 22 files, 760 passed, 0 failed; typecheck clean.
+Commit: `d3bf6ab`
+
+## P5 — the watcher's bookmark belongs to an account AND a filter — DONE
+
+`get_mail_changes` takes `label_id` and `history_types`, and a poll only ever sees the
+changes its filter admits — but the bookmark was keyed on the alias alone. An INBOX-only
+agent and an unfiltered watcher on one account therefore shared a cursor and silently ate
+each other's window: whichever polled first moved it past everything, and the other was told
+nothing had happened. Neither could tell.
+
+- `src/gmail/cursor-store.ts` — new exported `CursorFilter { labelId?, historyTypes? }`;
+  `readCursor` / `writeCursor` / `cursorFilePath` all take it.
+  - **Unfiltered keeps today's filename exactly** (`<alias>.json`), so
+    `cursors/steve-optiwork.json` keeps working and no watcher restarts blind. An EMPTY
+    filter is the unfiltered case.
+  - **Filtered gets `<alias>--<16 hex>.json`.** The digest is sha256 over the UNSANITIZED
+    alias + the canonical filter, so it is collision-free in both directions: two filters on
+    one account cannot share a file, and neither can two aliases that sanitize to the same
+    name (`a/b` and `a_b` — the G12 alias-collision advisory, closed for filtered files).
+  - Signature is order-independent (`historyTypes` sorted), so the same filter written two
+    ways is one bookmark. An explicit list of all four types is still a filter: the signature
+    records what the caller asked for.
+  - The rewind rule is per filter — one filter's position says nothing about another's.
+  - The file body records the filter for diagnosability; it is never read back (the filename
+    identifies the file), so an old file without it still loads.
+- `src/gmail/client.ts` — builds the filter from `opts.labelId` / `opts.historyTypes` and
+  passes it to all three calls, including the `cursorFilePath` named in the wedged-cursor
+  cure. Explicit `history_id` still bypasses the store entirely and wins.
+- Descriptions: the tool description and `getMailChanges`'s doc say the position is per
+  account AND per filter and to poll with the same filter each time; README updated in two
+  places.
+
+FAIL-before (real, behavioural, two levels):
+- store: 6 failed | 15 passed in `cursor-store.test.ts`;
+- client: 4 failed | 141 passed in `api.test.ts`, demonstrated by restoring the committed
+  `client.ts` under the new tests and running them.
+
+**One pre-existing test call site restated, no assertion weakened:**
+`expect(cursorStore.writeCursor).toHaveBeenCalledWith('work', '5000')` gained the third
+argument `{}` — the callee's contract changed. The `cursorStore` stub in `api.test.ts` was
+widened to key by alias + filter, mirroring the real store; that is a harness change, not a
+loosened assertion.
+
+PASS-after: 22 files, 772 passed, 0 failed; typecheck clean.
 Commit: (recorded below)
