@@ -25,11 +25,15 @@ import type { StoredToken } from './types.js';
  * it, calendarList.list 403s with "Insufficient Permission" even when
  * calendar.events + calendar.freebusy are granted.
  *
- * Chat/Drive/Docs read-only scopes (chat.spaces.readonly,
- * chat.messages.readonly, drive.readonly, documents.readonly) back the
- * read-only Chat/Drive/Docs MCP tools. Those four are strictly read scopes,
- * and the Chat and Docs tools remain read-only: the server never posts a Chat
- * message and never edits a document.
+ * Chat/Drive/Docs read scopes (chat.spaces.readonly, chat.messages.readonly,
+ * drive.readonly, documents) back the Chat/Drive/Docs MCP tools.
+ *
+ * Chat POSTING (chat.messages.create, added 2026-08-28) ends the read-only
+ * Chat posture, by the owner's ruling of that day. It backs one tool,
+ * `post_chat_message`, and it is a WRITE scope in the plainest sense: a call
+ * under it puts a message in front of everyone in the space, attributed to the
+ * account. It does NOT include reading — `chat.messages.create` grants posting
+ * only — so the two read-only Chat scopes stay exactly where they were.
  *
  * Two WRITE scopes were added 2026-08-27 for the Phase 2 tools:
  *   - drive.file — deliberately the narrow one. It grants access ONLY to files
@@ -47,7 +51,7 @@ import type { StoredToken } from './types.js';
  * Gmail-settings tools, 403 until every alias that needs them is re-run
  * through the auth flow.
  */
-const SCOPES = [
+export const SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/gmail.modify',
   'https://www.googleapis.com/auth/gmail.send',
@@ -58,6 +62,9 @@ const SCOPES = [
   // Read-only Chat / Drive / Docs (added 2026-07-11)
   'https://www.googleapis.com/auth/chat.spaces.readonly',
   'https://www.googleapis.com/auth/chat.messages.readonly',
+  // Chat POSTING (2026-08-28, owner ruling): posting only, no read. Every
+  // alias must re-consent before post_chat_message will work.
+  'https://www.googleapis.com/auth/chat.messages.create',
   'https://www.googleapis.com/auth/drive.readonly',
   // Write scopes (added 2026-08-27) — see the note above.
   'https://www.googleapis.com/auth/drive.file',

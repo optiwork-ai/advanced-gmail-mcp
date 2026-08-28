@@ -6,8 +6,13 @@ import { getAuthClient } from '../gmail/auth.js';
 
 // ---------------------------------------------------------------------------
 // Client cache: Google Chat API client per account with 50-min TTL.
-// Mirrors the caching idiom in src/gmail/client.ts. READ-ONLY use only —
-// callers must never invoke a mutating Chat method (create/update/delete).
+// Mirrors the caching idiom in src/gmail/client.ts.
+//
+// This module was read-only until 2026-08-28, when the owner withdrew that
+// posture ("lets get chat posting working as well"). The one mutating call
+// this server makes is `spaces.messages.create`, behind `post_chat_message`.
+// Nothing here updates or deletes a message, and no scope for either is
+// requested.
 // ---------------------------------------------------------------------------
 
 interface CachedClient {
@@ -25,6 +30,12 @@ const CLIENT_TTL_MS = 50 * 60 * 1000; // 50 minutes
  */
 export const CHAT_SPACES_SCOPE = 'https://www.googleapis.com/auth/chat.spaces.readonly';
 export const CHAT_MESSAGES_SCOPE = 'https://www.googleapis.com/auth/chat.messages.readonly';
+/**
+ * Posting. Deliberately separate from the two read scopes above: a token can
+ * carry the read pair and still be unable to post, which is precisely the case
+ * every alias is in until it re-consents after 2026-08-28.
+ */
+export const CHAT_MESSAGES_CREATE_SCOPE = 'https://www.googleapis.com/auth/chat.messages.create';
 
 /**
  * Get an authenticated Google Chat API client for an account.
