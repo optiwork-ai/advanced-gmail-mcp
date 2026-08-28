@@ -20,6 +20,13 @@ const CLIENT_CACHE = new Map<string, CachedClient>();
 const CLIENT_TTL_MS = 50 * 60 * 1000; // 50 minutes
 
 /**
+ * The scopes the Chat calls need, named here so a missing-scope error can quote
+ * the exact one back at the caller (see `src/google-api-error.ts`).
+ */
+export const CHAT_SPACES_SCOPE = 'https://www.googleapis.com/auth/chat.spaces.readonly';
+export const CHAT_MESSAGES_SCOPE = 'https://www.googleapis.com/auth/chat.messages.readonly';
+
+/**
  * Get an authenticated Google Chat API client for an account.
  * Reuses the shared OAuth client + per-account token store via getAuthClient.
  * Caches the built client per account with a 50-min TTL.

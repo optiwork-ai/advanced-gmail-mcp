@@ -1,8 +1,9 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { chat_v1 } from 'googleapis';
-import { getChatClient } from '../chat/client.js';
-import { withRetry } from '../gmail/client.js';
+import { CHAT_SPACES_SCOPE, getChatClient } from '../chat/client.js';
+import { resolveAccount } from '../config.js';
+import { googleApiCall } from '../google-api-error.js';
 
 export const listChatSpacesParams = {
   account: z.string().optional().describe('Account alias or email address. Uses default account if not specified.'),
@@ -20,7 +21,9 @@ export function registerListChatSpaces(server: McpServer): void {
     listChatSpacesParams,
     async ({ account, filter, max_results }) => {
       try {
-        const chat = await getChatClient(account ?? undefined);
+        const resolved = resolveAccount(account ?? undefined);
+        const chat = await getChatClient(resolved);
+        const ctx = { tool: 'list_chat_spaces', api: 'Google Chat', scope: CHAT_SPACES_SCOPE, alias: resolved.alias };
         const maxResults = Math.min(max_results ?? 500, 1000);
 
         const spaces: chat_v1.Schema$Space[] = [];
@@ -28,7 +31,7 @@ export function registerListChatSpaces(server: McpServer): void {
 
         while (spaces.length < maxResults) {
           const pageSize = Math.min(maxResults - spaces.length, 1000);
-          const response = await withRetry(() =>
+          const response = await googleApiCall(ctx, () =>
             chat.spaces.list({
               pageSize,
               pageToken,

@@ -1,8 +1,9 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { chat_v1 } from 'googleapis';
-import { getChatClient } from '../chat/client.js';
-import { withRetry } from '../gmail/client.js';
+import { CHAT_MESSAGES_SCOPE, getChatClient } from '../chat/client.js';
+import { resolveAccount } from '../config.js';
+import { googleApiCall } from '../google-api-error.js';
 
 export const listChatMessagesParams = {
   space: z.string().describe('The Chat space to list messages from. Accepts a full resource name ("spaces/AAAA...") or a bare space id ("AAAA...").'),
@@ -40,7 +41,9 @@ export function registerListChatMessages(server: McpServer): void {
     listChatMessagesParams,
     async ({ space, account, filter, max_results, order_by }) => {
       try {
-        const chat = await getChatClient(account ?? undefined);
+        const resolved = resolveAccount(account ?? undefined);
+        const chat = await getChatClient(resolved);
+        const ctx = { tool: 'list_chat_messages', api: 'Google Chat', scope: CHAT_MESSAGES_SCOPE, alias: resolved.alias };
         const parent = toSpaceParent(space);
         const maxResults = Math.min(max_results ?? 500, 1000);
         // Newest-first: with the API's own ascending default, max_results would
@@ -52,7 +55,7 @@ export function registerListChatMessages(server: McpServer): void {
 
         while (messages.length < maxResults) {
           const pageSize = Math.min(maxResults - messages.length, 1000);
-          const response = await withRetry(() =>
+          const response = await googleApiCall(ctx, () =>
             chat.spaces.messages.list({
               parent,
               pageSize,

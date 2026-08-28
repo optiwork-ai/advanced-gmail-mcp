@@ -1,8 +1,9 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { drive_v3 } from 'googleapis';
-import { getDriveClient } from '../drive/client.js';
-import { withRetry } from '../gmail/client.js';
+import { DRIVE_READONLY_SCOPE, getDriveClient } from '../drive/client.js';
+import { resolveAccount } from '../config.js';
+import { googleApiCall } from '../google-api-error.js';
 
 export const searchDriveFilesParams = {
   query: z.string().optional().describe('Drive search query in Drive "q" syntax, e.g. "name contains \'report\'", "mimeType = \'application/vnd.google-apps.document\'", "modifiedTime > \'2024-01-01T00:00:00\'". Omit to list recent files.'),
@@ -21,7 +22,9 @@ export function registerSearchDriveFiles(server: McpServer): void {
     searchDriveFilesParams,
     async ({ query, account, order_by, max_results }) => {
       try {
-        const drive = await getDriveClient(account ?? undefined);
+        const resolved = resolveAccount(account ?? undefined);
+        const drive = await getDriveClient(resolved);
+        const ctx = { tool: 'search_drive_files', api: 'Google Drive', scope: DRIVE_READONLY_SCOPE, alias: resolved.alias };
         const maxResults = Math.min(max_results ?? 100, 1000);
 
         const files: drive_v3.Schema$File[] = [];
@@ -29,7 +32,7 @@ export function registerSearchDriveFiles(server: McpServer): void {
 
         while (files.length < maxResults) {
           const pageSize = Math.min(maxResults - files.length, 1000);
-          const response = await withRetry(() =>
+          const response = await googleApiCall(ctx, () =>
             drive.files.list({
               q: query || undefined,
               orderBy: order_by || undefined,

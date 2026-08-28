@@ -20,6 +20,12 @@ const CLIENT_CACHE = new Map<string, CachedClient>();
 const CLIENT_TTL_MS = 50 * 60 * 1000; // 50 minutes
 
 /**
+ * The scope a document read needs, named here so a missing-scope error can
+ * quote it back at the caller (see `src/google-api-error.ts`).
+ */
+export const DOCS_READONLY_SCOPE = 'https://www.googleapis.com/auth/documents.readonly';
+
+/**
  * Get an authenticated Google Docs API client for an account.
  * Reuses the shared OAuth client + per-account token store via getAuthClient.
  * Caches the built client per account with a 50-min TTL.

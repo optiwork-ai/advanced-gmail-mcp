@@ -70,3 +70,29 @@ Evidence pack: `round2-sweep-evidence.json` (normative for unit scope).
     builder independently refuses to build an image block above the cap.
   - `save_dir` reads are unchanged (bytes went to disk; no image block is fabricated),
     and non-image attachments are byte-for-byte the same response as before.
+
+### G3 — scope-error honesty extended to the four read-only tools — DONE
+- Commit: `PENDING-SHA-G3`
+- FAIL-before: `npx vitest run src/tools/read-only-tools.test.ts` → **12 failed | 4 passed
+  (16)**. The four that passed are the 401 pass-throughs, which were already correct.
+- PASS-after: full suite **613 passed (613)**, 15 files, typecheck clean. The 49 existing
+  Calendar tests stayed green through the refactor below, unmodified.
+- **Structural choice (worth the reviewer's attention):** rather than copy
+  `translateCalendarError` into four more tools, its body was lifted into a new shared
+  module `src/google-api-error.ts` (`translateGoogleApiError` + `googleApiCall`), with the
+  service's human name as one more context field. `translateCalendarError` is now a
+  one-line delegation that fixes `api: 'Google Calendar'`, so its call sites and its tests
+  are untouched and no call site can mislabel the API. Layering is
+  `google-api-error.ts → gmail/client.ts → scope-error.ts`; `scope-error.ts` still imports
+  nothing, so no cycle was introduced.
+- The four tools (`list_chat_spaces`, `list_chat_messages`, `search_drive_files`,
+  `get_google_doc`) now run their API calls through `googleApiCall` with a context naming
+  the tool, the API and the scope that call actually needs. New exported scope constants:
+  `CHAT_SPACES_SCOPE`, `CHAT_MESSAGES_SCOPE` (chat/client.ts), `DRIVE_READONLY_SCOPE`
+  (drive/client.ts), `DOCS_READONLY_SCOPE` (docs/client.ts) — matching the existing
+  `DRIVE_FILE_SCOPE`/`CALENDAR_*_SCOPE` idiom.
+- Behaviour per tool: missing scope → names the scope + `npm run auth -- <alias>`;
+  disabled API → says to enable it in the Cloud console and that re-authenticating will not
+  help; any other 403 → restated with Google's own words and no re-auth advice; rate-limit
+  403 → untouched so `withRetry` still retries it; **401 → untouched**, because there
+  re-authenticating really is the fix.

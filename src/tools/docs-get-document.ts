@@ -1,8 +1,9 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { docs_v1 } from 'googleapis';
-import { getDocsClient } from '../docs/client.js';
-import { withRetry } from '../gmail/client.js';
+import { DOCS_READONLY_SCOPE, getDocsClient } from '../docs/client.js';
+import { resolveAccount } from '../config.js';
+import { googleApiCall } from '../google-api-error.js';
 
 export const getGoogleDocParams = {
   document_id: z.string().describe('The Google Docs document id to read.'),
@@ -63,9 +64,11 @@ export function registerGetGoogleDoc(server: McpServer): void {
     getGoogleDocParams,
     async ({ document_id, account }) => {
       try {
-        const docs = await getDocsClient(account ?? undefined);
+        const resolved = resolveAccount(account ?? undefined);
+        const docs = await getDocsClient(resolved);
+        const ctx = { tool: 'get_google_doc', api: 'Google Docs', scope: DOCS_READONLY_SCOPE, alias: resolved.alias };
 
-        const response = await withRetry(() =>
+        const response = await googleApiCall(ctx, () =>
           docs.documents.get({ documentId: document_id })
         );
         const doc = response.data;

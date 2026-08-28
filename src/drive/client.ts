@@ -73,6 +73,9 @@ function resolve(account?: string | AccountConfig): AccountConfig {
 /** The scope an upload needs. Named here so the error message can quote it. */
 export const DRIVE_FILE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 
+/** The scope a Drive search / read needs, quoted the same way. */
+export const DRIVE_READONLY_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
+
 /**
  * Per-file upload ceiling, decimal MB to match every other ceiling in this
  * codebase (see the mime module's `mb()`). Drive itself allows far more; the

@@ -3,14 +3,8 @@ import type { calendar_v3 } from 'googleapis';
 import type { Auth } from 'googleapis';
 import { type AccountConfig, resolveAccount } from '../config.js';
 import { getAuthClient } from '../gmail/auth.js';
-import { isRateLimit403, withRetry } from '../gmail/client.js';
-import {
-  type ScopeErrorContext,
-  errorStatus,
-  googleErrorReasons,
-  isMissingScopeError,
-  scopeError,
-} from '../scope-error.js';
+import { googleApiCall, translateGoogleApiError } from '../google-api-error.js';
+import type { ScopeErrorContext } from '../scope-error.js';
 import { log } from '../log.js';
 
 // ---------------------------------------------------------------------------
@@ -82,56 +76,19 @@ export const CALENDAR_LIST_SCOPE = 'https://www.googleapis.com/auth/calendar.cal
 export const CALENDAR_EVENTS_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
 export const CALENDAR_FREEBUSY_SCOPE = 'https://www.googleapis.com/auth/calendar.freebusy';
 
-/** Google's own words for "this project never turned the API on". */
-const API_DISABLED_RE = /has not been used in project|api is disabled|is not enabled/i;
+/** The API's human name, as it should read in a sentence and in the console. */
+const CALENDAR_API = 'Google Calendar';
 
 /**
  * Turn a Calendar failure into advice that is actually true.
  *
- * `withRetry` is shared with the Gmail client, where a non-rate-limit 401/403
- * really is almost always a token problem. For Calendar it usually is not: the
- * two 403s this server provokes are "the Google Calendar API was never enabled
- * on this Cloud project" and "this token was never granted the calendar
- * scopes". Both came out as "Authentication error (403) … Re-authenticate",
- * which sends the reader to redo a login that is working while the real cause
- * survives only in the tail of the message.
- *
- * This runs INSIDE `withRetry`, on the raw Google error, because the reason
- * codes that tell these cases apart do not survive the rewrite. It returns the
- * error to throw:
- *
- * - a missing scope becomes the shared `scopeError` — the same instruction the
- *   six Phase-2 tools produce, naming the scope and the exact re-consent command;
- * - a rate-limit 403 is returned UNTOUCHED so `withRetry` still retries it and
- *   the caller ultimately sees Google's own rate-limit words;
- * - any other 403 is restated honestly, without re-auth advice;
- * - everything else — 401 included, where re-authenticating IS the fix — is
- *   returned untouched.
+ * The logic is the shared one in `src/google-api-error.ts` — Chat, Drive and
+ * Docs need exactly the same translation, and W13 built it here first. This
+ * wrapper survives because the Calendar call sites and their tests name it, and
+ * because it fixes the API label so no call site can get it wrong.
  */
 export function translateCalendarError(err: unknown, ctx: ScopeErrorContext): unknown {
-  if (isMissingScopeError(err)) return scopeError(err, ctx);
-
-  const status = errorStatus(err);
-  if (status !== 403) return err;
-  if (isRateLimit403(status, err)) return err;
-
-  const original = err instanceof Error ? err.message : String(err);
-  const reasons = googleErrorReasons(err);
-
-  if (reasons.includes('accessnotconfigured') || API_DISABLED_RE.test(original)) {
-    return new Error(
-      `${ctx.tool}: the Google Calendar API is not enabled for the Cloud project behind this `
-      + `server's credentials. Enable it in the Google Cloud console (the link in the original `
-      + `error below goes straight there), then retry. Re-authenticating "${ctx.alias}" will not `
-      + `help — the token is fine, the API is switched off.\n\nOriginal error: ${original}`,
-    );
-  }
-
-  return new Error(
-    `${ctx.tool}: Google refused this Calendar request (403) for "${ctx.alias}". This is a `
-    + `permission on the calendar or the project, not a broken login, so re-authenticating is `
-    + `unlikely to change it.\n\nOriginal error: ${original}`,
-  );
+  return translateGoogleApiError(err, { ...ctx, api: CALENDAR_API });
 }
 
 /**
@@ -139,13 +96,7 @@ export function translateCalendarError(err: unknown, ctx: ScopeErrorContext): un
  * The translation sits inside the retry so it reads the raw Google error.
  */
 async function calendarCall<T>(ctx: ScopeErrorContext, fn: () => Promise<T>): Promise<T> {
-  return withRetry(async () => {
-    try {
-      return await fn();
-    } catch (err: unknown) {
-      throw translateCalendarError(err, ctx);
-    }
-  });
+  return googleApiCall({ ...ctx, api: CALENDAR_API }, fn);
 }
 
 // ---------------------------------------------------------------------------
