@@ -323,3 +323,43 @@ scratch. The live checkout was never touched and is still on `main` at the basel
 
 This is the commit-as-you-go rule earning its keep: the at-risk window was exactly one
 unit, and one unit is what had to be redone.
+
+---
+
+## ROUND COMPLETE — all twelve units (G1-G12) done
+
+- **Branch:** `feat/round2-enhancements`, 26 commits off baseline
+  `a513a81089f46e6c5c8d1b1d383f3c657d8f7609`. **Not pushed** (forbidden, and correctly so).
+- **Final gate:** `npm test` → **20 files, 709 passed, 0 failed**; `npm run typecheck` →
+  clean, exit 0. Baseline for comparison was **13 files, 578 passed** — so **+131 tests,
+  zero failures, zero pre-existing tests deleted**.
+- **Tool roster: 51** (`grep -c "server.tool(" src/tools/*.ts` = 51), up from 50 — the one
+  addition is `update_google_doc`.
+- **Worktree is clean.** Nothing uncommitted.
+
+### Tests RESTATED rather than loosened (the full list, for the reviewer)
+Every one of these changed a CALL SITE because the contract of the thing being called
+changed. **No assertion was weakened, and no test was deleted.**
+1. `deleteLabel({ labelId: 'L1' })` → `+ confirm: true` (G1 — confirmation is now enforced).
+2. The mailto-unsubscribe fallback test → `+ confirm: true` (G1 — the send is now gated).
+3. `get_google_doc`'s expected scope, `documents.readonly` → `auth/documents` (G11 — the
+   scope that tool requires genuinely changed).
+
+### Work done BEYOND the contract's literal words (flagged, all reversible)
+1. **G6 also fixed `From`**, not just `Reply-To` — identical defect three lines above, and
+   the larger blast radius (From carries the account's own display name on every message).
+2. **G3 lifted `translateCalendarError` into a shared module** rather than copying it into
+   four tools; Calendar delegates and its 49 tests are untouched and green.
+3. **G8 folded in one `capBuffer`** for both Drive read paths, so a document cut at the cap
+   no longer ends in a U+FFFD replacement glyph.
+4. **G10 also wired `get_chat_message` into the G3 honesty path** — it was the fifth
+   Chat/Drive/Docs read tool and the only one still on bare `withRetry`.
+5. **G7 removed the `build` script and set `noEmit`** rather than keeping a script that
+   could silently produce a divergent artifact (the contract explicitly permitted this).
+
+### Left for the chair
+- The consent round: `npm run auth -- <alias>` for every alias, for the `documents` scope.
+- Live acceptance (image-block read, unsubscribe refusal, shared-drive search, Docs write).
+- `rm -rf /Users/steve/Claude-Projects/2-backbone/advanced-gmail-mcp/dist` (see G7).
+- Two chair calls recorded in `QUESTIONS-FOR-FABLE.md` under `## ROUND 2 QUESTIONS`
+  (R2-Q1: whether `update_google_doc` should take a `confirm`; R2-Q2: the `dist/` residue).
