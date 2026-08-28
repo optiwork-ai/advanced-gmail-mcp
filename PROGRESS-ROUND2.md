@@ -177,3 +177,33 @@ Evidence pack: `round2-sweep-evidence.json` (normative for unit scope).
   contract's concurrency rule forbids me outright. It is already gitignored, so it can
   never be committed; it is now also unreproducible. The chair should run, at acceptance:
   `rm -rf /Users/steve/Claude-Projects/2-backbone/advanced-gmail-mcp/dist`
+
+### G8 — export-streaming hardening (chair ruling Q12) — DONE
+- Commit: `8f6e898` (code) + this docs commit
+- FAIL-before: **13 failed (13)** in the new `src/tools/drive-read-file.test.ts` (neither
+  `readStreamToCap` nor `capBuffer` existed).
+- PASS-after: full suite **642 passed (642)**, 16 files, typecheck clean.
+- The `files.export` branch now uses `responseType: 'stream'` and `readStreamToCap`, which
+  reads until one byte past the cap, then **destroys the stream** so the transfer actually
+  stops. A 50MB exported Doc no longer lands whole in the shared MCP process. The
+  `alt=media` branch keeps its Range header (Drive honours Range there; export ignores it).
+- Truncation detection unchanged in meaning: exactly at the cap is NOT truncated, one byte
+  over IS.
+- **Small correctness improvement folded in:** both read paths now cut through one shared
+  `capBuffer`, which drops an incomplete trailing UTF-8 sequence instead of decoding it to
+  U+FFFD. The old `capContent` left a replacement glyph at the boundary — corruption in the
+  middle of the user's document rather than a visible cut. `capContent` delegates, so the
+  two branches cannot disagree about what a truncated document looks like.
+- A mid-transfer failure rejects rather than returning half a document as if whole.
+
+## ⚠️ ENVIRONMENT INCIDENT — the machine's disk filled up during G8
+
+Between the G8 code landing and its docs commit, the root volume hit **0 bytes free**.
+Every `Bash` call and every file write failed with `ENOSPC` for several minutes; no shell
+command could run at all. Space then returned (~350-500MB free) and G8 was committed
+immediately. Nothing was lost: the FAIL-before/PASS-after runs above were real and had
+already completed before the outage.
+
+**This is a real operational risk for the rest of the round.** Free space is hovering under
+1GB on a 228GB volume. If a later unit reports as blocked, check `df -h /` first — it is far
+more likely to be this than anything in the code.
