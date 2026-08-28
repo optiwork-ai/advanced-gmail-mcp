@@ -454,7 +454,7 @@ on `feat/round2-enhancements`.
 - Full suite after: **20 files, 724 passed** (+3), typecheck clean.
 
 ### WR-4 — the docs stated a falsehood about the scope swap — FIXED
-- Commit: `PENDING`
+- Commit: `1d3a06f`
 - **Verified independently before rewriting** (this is the finding's whole substance):
   `SCOPES` is referenced exactly once in the codebase — `src/gmail/auth.ts:149`, inside
   `generateAuthUrl`. `getAuthClient` (`src/gmail/auth.ts:95-131`) only reads the token file and
@@ -477,3 +477,31 @@ on `feat/round2-enhancements`.
 - `src/gmail/auth.ts` and `src/docs/client.ts` were checked and need no change — both already
   scope their re-consent statements to `update_google_doc`.
 - Full suite after: **20 files, 724 passed** (unchanged — docs only), typecheck clean.
+
+## FIX PASS — final gate
+
+- `npm test` → **20 files, 724 passed, 0 failed.**
+  Fix-pass baseline was **709 passed**, so **+15 tests, zero failures, zero tests deleted.**
+  The only removed lines in any test file are two mock DECLARATIONS that were widened
+  (`driveApi.files` gained `get`/`export`; the audit-log `messages` mock gained `send`).
+  No assertion was weakened.
+- `npm run typecheck` → **clean, exit 0.**
+- Worktree clean; branch `feat/round2-enhancements`.
+
+### Commits, in order
+| Finding | Commit | What it fixes |
+|---|---|---|
+| WR-1 | `fcf2d75` | `read_drive_file` can open a shared-drive file (both `files.get` calls declare support; metadata carries `driveId`) |
+| WR-3 | `d3919b3` | `read_drive_file` joins the honest-403 path (`googleApiCall`) — a per-file permission no longer says "re-authenticate" |
+| WR-2 | `6fcaa9c` | a cursor proved foreign is never written to the watcher store; the note names the cure for an account wedged earlier |
+| WR-5 | `9cda2ca` | the unsubscribe mailto send logs its OUTCOME, through the round's own `audited()` helper |
+| WR-4 | `1d3a06f` | the scope swap is read-compatible: docs corrected in README, CHANGELOG and the tool description |
+
+### Scope notes for the validator
+- All five confirmed findings are in the **gmail** repo. The CRM worktree
+  (`crm-api-lambda-wt/contact-company-filter`, head `d97f353`) had no finding and was **not
+  touched** — not a file read into, not a command run in it beyond `git log -1`.
+- Nothing was skipped and nothing went to QUESTIONS as a blocker. One item was RECORDED there
+  (`R2-Q3`): whether a watcher cursor poisoned before this fix should heal itself automatically
+  or stay clearable by hand. The poisoning path is closed either way.
+- The repo's LIVE checkout was never touched in this pass.
