@@ -49,3 +49,24 @@ Evidence pack: `round2-sweep-evidence.json` (normative for unit scope).
   contract changed — `deleteLabel({ labelId: 'L1' })` → `+ confirm: true`, and the
   "falls back to the mailto unsubscribe" test → `+ confirm: true`. No assertion in either
   test was changed or removed.
+
+### G2 — image attachments returned as MCP image content blocks — DONE
+- Commit: `PENDING-SHA-G2`
+- FAIL-before: `npx vitest run src/tools/get-attachment.test.ts` → **10 failed (10)**
+  (the module exported neither `attachmentContentBlocks` nor `isViewableImage`).
+- PASS-after: full suite **597 passed (597)**, 14 files, typecheck clean.
+- What changed: new pure `attachmentContentBlocks(result)` in `src/tools/get-attachment.ts`
+  decides the content array; the handler just calls it.
+  - A PNG/JPEG/GIF/WebP fetched **without** `save_dir` now returns a real
+    `{ type: 'image' }` block, so the model can see the picture.
+  - The JSON metadata block is kept alongside it, minus `data_base64` (the bytes are
+    already in the image block; repeating them would double the cost of every image
+    read) and plus a `returned_as` line saying where they went.
+  - Deliberate **whitelist**, not `image/*`: SVG is a script vector and TIFF/HEIC are not
+    required to render, so those keep the old base64 behaviour rather than risking the
+    whole tool call being rejected. Mime type is matched case-insensitively and with
+    parameters stripped (`image/jpeg; name="scan.jpg"`).
+  - Size cap honored twice: `getAttachment` still refuses >1MB inline, and the block
+    builder independently refuses to build an image block above the cap.
+  - `save_dir` reads are unchanged (bytes went to disk; no image block is fabricated),
+    and non-image attachments are byte-for-byte the same response as before.

@@ -127,7 +127,7 @@ Then use `/email` or `/checkemail` in Claude Code.
 | `get_labels` | List all labels (`include_counts` for message counts) |
 | `get_history_baseline` | Get the mailbox's current change cursor (`historyId`) — the starting point for watching for new mail |
 | `get_mail_changes` | What arrived / was deleted / was relabelled since a cursor you supply, plus the next cursor. No server-side state |
-| `get_attachment` | Fetch an attachment — including an image embedded in the body: writes it to `save_dir`, or returns base64 for files up to 1MB |
+| `get_attachment` | Fetch an attachment — including an image embedded in the body: writes it to `save_dir`, or returns it inline for files up to 1MB. PNG/JPEG/GIF/WebP come back as a **viewable image**, so Claude can read what is in the picture; everything else as base64 |
 | `send_email` | Send a new email (Gmail-native HTML + text, signature, attachments, `inline_images` embedded via `cid:`) |
 | `draft_email` | Create a draft (same composition as `send_email`) |
 | `reply_email` | Reply with proper threading, `Reply-To` handling and quoted history |
