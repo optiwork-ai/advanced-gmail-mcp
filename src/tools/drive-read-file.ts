@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { getDriveClient } from '../drive/client.js';
-import { withRetry } from '../gmail/client.js';
+import { DRIVE_READONLY_SCOPE, getDriveClient } from '../drive/client.js';
+import { resolveAccount } from '../config.js';
+import { googleApiCall } from '../google-api-error.js';
 
 export const readDriveFileParams = {
   file_id: z.string().describe('The Drive file id to read.'),
@@ -157,9 +158,22 @@ export function registerReadDriveFile(server: McpServer): void {
     readDriveFileParams,
     async ({ file_id, account }) => {
       try {
-        const drive = await getDriveClient(account ?? undefined);
+        const resolved = resolveAccount(account ?? undefined);
+        const drive = await getDriveClient(resolved);
+        // The honest-error path the other Chat/Drive/Docs read tools already
+        // travel. Drive's commonest 403 is a permission on the FILE — "you do
+        // not have access to this file" — which re-authenticating cannot fix,
+        // and which bare withRetry rewrote into "Re-authenticate with: npx tsx
+        // src/auth.ts". Search now returns files from shared drives the account
+        // may only partly reach, so this sits directly on the widened path.
+        const ctx = {
+          tool: 'read_drive_file',
+          api: 'Google Drive',
+          scope: DRIVE_READONLY_SCOPE,
+          alias: resolved.alias,
+        };
 
-        const metaResp = await withRetry(() =>
+        const metaResp = await googleApiCall(ctx, () =>
           drive.files.get({
             fileId: file_id,
             fields: 'id,name,mimeType,size,modifiedTime,owners,webViewLink,parents,driveId',
@@ -192,7 +206,7 @@ export function registerReadDriveFile(server: McpServer): void {
             // reading instead: the body arrives as a stream and the read stops
             // at the cap, so a 50MB exported Doc no longer lands whole in a
             // process every account shares.
-            const resp = await withRetry(() =>
+            const resp = await googleApiCall(ctx, () =>
               drive.files.export(
                 { fileId: file_id, mimeType: exportMime },
                 { responseType: 'stream' }
@@ -217,7 +231,7 @@ export function registerReadDriveFile(server: McpServer): void {
           // byte past the cap so capContent can detect that the file was
           // actually larger and flag truncation. Google Drive honors Range on
           // alt=media downloads (responds 206 Partial Content).
-          const resp = await withRetry(() =>
+          const resp = await googleApiCall(ctx, () =>
             drive.files.get(
               { fileId: file_id, alt: 'media', supportsAllDrives: true },
               {

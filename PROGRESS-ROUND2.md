@@ -392,7 +392,7 @@ on `feat/round2-enhancements`.
 ## Findings
 
 ### WR-1 — read_drive_file could not open the shared-drive files G5 made findable — FIXED
-- Commit: `PENDING`
+- Commit: `fcf2d75`
 - **FAIL-before (real):** added a handler-level describe to `src/tools/read-only-tools.test.ts`
   (the file that already mocks the Drive client) pinning the parameters of both `files.get`
   calls. Three failures at HEAD: `supportsAllDrives` undefined on the metadata call, undefined
@@ -402,3 +402,18 @@ on `feat/round2-enhancements`.
   says when a file lives in a shared drive. `files.export` takes no such parameter and was left
   alone. The tool description now states that shared drives are read too.
 - Full suite after: **20 files, 713 passed** (+4), typecheck clean.
+
+### WR-3 — read_drive_file was the last Drive/Docs read tool on bare withRetry — FIXED
+- Commit: `PENDING`
+- **FAIL-before (real):** added `read_drive_file` to the existing 403-honesty case table in
+  `src/tools/read-only-tools.test.ts` (the four-tool `describe.each`). Three failures at HEAD:
+  the missing-scope, disabled-API and ordinary-forbidden cases all came back as
+  "Authentication error (403) … Re-authenticate with: npx tsx src/auth.ts". The 401 case
+  passed before and after — re-login IS the fix there, and it stays on that path.
+- **Fix:** the same three-line shape the other five tools use — `resolveAccount`, build the
+  `ctx` (`read_drive_file` / Google Drive / `DRIVE_READONLY_SCOPE` / alias), and swap all three
+  `withRetry` calls for `googleApiCall`. No new machinery; `withRetry` is no longer imported here.
+- Why it matters more after G5: Drive's commonest 403 is a permission on the FILE, which
+  re-authenticating cannot fix, and search now returns shared-drive files the account may only
+  partly reach.
+- Full suite after: **20 files, 717 passed** (+4), typecheck clean.

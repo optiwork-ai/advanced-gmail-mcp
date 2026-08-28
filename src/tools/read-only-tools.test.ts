@@ -117,6 +117,19 @@ const cases = [
     scope: 'drive.readonly',
   },
   {
+    // WR-3: read_drive_file was the one Drive/Docs read tool left on bare
+    // withRetry. Drive's commonest 403 by far is a per-FILE permission, which
+    // re-authenticating cannot fix — and after G5 the search hands back files
+    // from shared drives the account may only partially reach, so the honesty
+    // gap sat directly on the newly widened path.
+    label: 'read_drive_file',
+    register: registerReadDriveFile,
+    mock: driveApi.files.get,
+    args: { file_id: 'f1' },
+    api: 'Google Drive',
+    scope: 'drive.readonly',
+  },
+  {
     label: 'get_google_doc',
     register: registerGetGoogleDoc,
     mock: docsApi.documents.get,
