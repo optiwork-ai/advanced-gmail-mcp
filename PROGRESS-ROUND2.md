@@ -419,7 +419,7 @@ on `feat/round2-enhancements`.
 - Full suite after: **20 files, 717 passed** (+4), typecheck clean.
 
 ### WR-2 — a foreign history_id permanently poisoned an account's remembered cursor — FIXED
-- Commit: `PENDING`
+- Commit: `6fcaa9c`
 - **FAIL-before (real):** four new tests in `src/gmail/api.test.ts` under "getMailChanges
   remembers where it got to". At HEAD all four failed: polling with `history_id: 999999999`
   against a mailbox at 5000 wrote `999999999` into the store, which then could never be
@@ -441,3 +441,14 @@ on `feat/round2-enhancements`.
   replay mail as new. Skipping the write is safe in every case; healing is not. Recorded as an
   open item in `QUESTIONS-FOR-FABLE.md`.
 - Full suite after: **20 files, 721 passed** (+4), typecheck clean.
+
+### WR-5 — the unsubscribe mailto send logged intent, not outcome — FIXED
+- Commit: `PENDING`
+- **FAIL-before (real):** added `unsubscribe_mailto` to the existing G9 both-edges case table in
+  `src/gmail/audit-log.test.ts` (its api mock gained `messages.send`). Two failures at HEAD: no
+  completion line on success, and no failure line when the send threw — the intent line stood
+  alone and read exactly like a delivered unsubscribe.
+- **Fix (`src/gmail/client.ts`):** the send is wrapped in the round's own `audited()` helper, the
+  same as the other seven destructive paths. Intent line before, `phase: 'done'` after, or
+  `phase: 'failed'` at error level with the reason; the error is re-thrown untouched.
+- Full suite after: **20 files, 724 passed** (+3), typecheck clean.

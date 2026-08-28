@@ -2146,16 +2146,18 @@ export async function unsubscribeFromEmail(opts: {
       plain_text_only: true,
     });
 
-    log('info', 'unsubscribe_mailto', {
-      account: resolved.alias,
-      message_id: opts.messageId,
-    });
-
-    await withRetry(() =>
-      gmail.users.messages.send({
-        userId: 'me',
-        requestBody: { raw },
-      })
+    // Both edges, like every other destructive path. This one puts mail in
+    // someone else's inbox, so a trail that cannot tell a delivered
+    // unsubscribe from a failed one is worse here than anywhere else.
+    await audited(
+      'unsubscribe_mailto',
+      { account: resolved.alias, message_id: opts.messageId },
+      () => withRetry(() =>
+        gmail.users.messages.send({
+          userId: 'me',
+          requestBody: { raw },
+        })
+      ),
     );
 
     return {

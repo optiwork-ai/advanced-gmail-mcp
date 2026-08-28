@@ -14,7 +14,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const api = {
   getProfile: vi.fn(),
-  messages: { trash: vi.fn(), batchModify: vi.fn(), get: vi.fn() },
+  messages: { trash: vi.fn(), batchModify: vi.fn(), get: vi.fn(), send: vi.fn() },
   threads: { get: vi.fn(), modify: vi.fn(), trash: vi.fn() },
   drafts: { delete: vi.fn(), send: vi.fn() },
   labels: { delete: vi.fn() },
@@ -43,6 +43,7 @@ const {
   sendDraft,
   trashMessage,
   trashThread,
+  unsubscribeFromEmail,
 } = await import('./client.js');
 
 function ok<T>(data: T) {
@@ -129,6 +130,24 @@ const cases: Array<{
       ? api.drafts.send.mockRejectedValue(gone())
       : api.drafts.send.mockResolvedValue(ok({ id: 'm9', threadId: 't9' })),
     run: () => sendDraft({ draftId: 'd1' }),
+  },
+  {
+    // WR-5 — the unsubscribe mailto fallback was the one outbound send still
+    // logging its intent and nothing else, so a send that threw left a line
+    // indistinguishable from a delivered one. It puts mail in someone else's
+    // inbox, which makes it the worst place in the server for that.
+    event: 'unsubscribe_mailto',
+    identifier: 'message_id',
+    arm: fail => {
+      api.messages.get.mockResolvedValue(ok({
+        id: 'm1',
+        payload: { headers: [{ name: 'List-Unsubscribe', value: '<mailto:unsub@example.com>' }] },
+      }));
+      return fail
+        ? api.messages.send.mockRejectedValue(gone())
+        : api.messages.send.mockResolvedValue(ok({ id: 'sent1' }));
+    },
+    run: () => unsubscribeFromEmail({ messageId: 'm1', confirm: true }),
   },
 ];
 
