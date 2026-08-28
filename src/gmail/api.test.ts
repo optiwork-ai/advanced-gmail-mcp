@@ -1802,6 +1802,47 @@ describe('attachment listing includes inline parts', () => {
     ]);
   });
 
+  it('carries Gmail\'s stable partId through to read_email', async () => {
+    api.messages.get.mockResolvedValue(
+      ok({
+        id: 'm1',
+        payload: {
+          partId: '',
+          mimeType: 'multipart/mixed',
+          parts: [
+            { partId: '0', mimeType: 'text/plain', body: { data: b64url('body') } },
+            {
+              partId: '0.1',
+              mimeType: 'image/png',
+              filename: 'ow.png',
+              body: { attachmentId: 'ANGjdJ-rotates', size: 512 },
+            },
+          ],
+        },
+      }),
+    );
+
+    const email = await getMessage({ messageId: 'm1' });
+
+    expect(email.attachments).toEqual([
+      {
+        attachmentId: 'ANGjdJ-rotates',
+        partId: '0.1',
+        filename: 'ow.png',
+        mimeType: 'image/png',
+        size: 512,
+      },
+    ]);
+  });
+
+  it('omits partId rather than inventing one when Gmail did not send it', async () => {
+    api.messages.get.mockResolvedValue(messageWithInlineImage());
+
+    const email = await getMessage({ messageId: 'm1' });
+
+    expect(email.attachments[0]).not.toHaveProperty('partId');
+  });
+
   it('does not report the body as an attachment when Gmail offloads it', async () => {
     // A big text/plain body arrives with an attachmentId and no data — and
     // sometimes an inline disposition. It has no Content-ID, so it is a body.

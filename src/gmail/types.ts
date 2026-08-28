@@ -148,7 +148,20 @@ export interface UnsubscribeResult {
  * every embedded image from `read_email`, `get_thread` and `get_attachment`.
  */
 export interface AttachmentInfo {
+  /**
+   * Gmail's handle for the BYTES. It is not stable: two consecutive
+   * `messages.get` calls on the same message can return different
+   * attachmentIds for the same part, so it must never be used as the identity
+   * of a part across fetches. `partId` is the stable key.
+   */
   attachmentId: string;
+  /**
+   * Gmail's position of this part inside the message payload ("0", "0.1", …).
+   * Stable across fetches, which is what makes it usable as an identifier —
+   * pass it back to `get_attachment` as `part_id`. Absent only when Gmail
+   * omitted it (an unusual payload, or a hand-built test message).
+   */
+  partId?: string;
   filename: string;
   mimeType: string;
   size: number;

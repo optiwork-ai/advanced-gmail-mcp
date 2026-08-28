@@ -238,8 +238,14 @@ function extractAttachments(payload: gmail_v1.Schema$MessagePart): AttachmentInf
   const isInline = contentId.length > 0 || /^\s*inline/i.test(disposition);
 
   if (payload.body?.attachmentId && (filename.length > 0 || contentId.length > 0)) {
+    const partId = payload.partId ?? '';
     attachments.push({
       attachmentId: payload.body.attachmentId,
+      // The part's POSITION in the payload ("0.1"), which — unlike the
+      // attachmentId — is the same on every fetch of the message. Carrying it
+      // out through read_email is what lets get_attachment name the exact part
+      // later; see findAttachmentInfo.
+      ...(partId.length > 0 ? { partId } : {}),
       filename: filename.length > 0 ? filename : contentId,
       mimeType: payload.mimeType || 'application/octet-stream',
       size: payload.body.size || 0,
