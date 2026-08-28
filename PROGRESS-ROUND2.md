@@ -209,7 +209,7 @@ already completed before the outage.
 more likely to be this than anything in the code.
 
 ### G9 — audit log outcome edges — DONE
-- Commit: `PENDING-SHA-G9`
+- Commit: `a23f8ca`
 - FAIL-before: **15 failed | 8 passed (23)** in the new `src/gmail/audit-log.test.ts`.
 - PASS-after: full suite **665 passed (665)**, 17 files, typecheck clean.
 - New private `audited(event, fields, fn)` in client.ts wraps six of the seven paths:
