@@ -135,3 +135,20 @@ Evidence pack: `round2-sweep-evidence.json` (normative for unit scope).
 - `driveId` added to the requested fields, so a result that came from a shared drive can be
   told apart from one in My Drive. Description and README row updated.
 - No new scope: the existing `drive.readonly` grant already covers shared-drive reads.
+
+### G6 — Reply-To (and From) through encodeAddressList + foldHeader — DONE
+- Commit: `PENDING-SHA-G6`
+- FAIL-before: `3 failed | 160 passed (163)` in mime.test.ts.
+- PASS-after: full suite **629 passed (629)**, typecheck clean.
+- ⚠️ **BEYOND THE CONTRACT'S LETTER, flagged for the reviewer:** the contract named
+  Reply-To only. Reading the builder showed `From` on the same unencoded path — the same
+  one-line defect, three lines above, and the MORE likely one to bite: From carries the
+  account's own Gmail display name on **every message it ever sends**, so the first
+  account with an accented name garbles everything, not just replies. Fixing one and
+  leaving the other in the same edit would have been indefensible, so both moved to
+  `addAddressHeader`. If the chair wants From reverted to keep the unit's blast radius at
+  exactly the contract's words, it is a one-word change.
+- Zero risk to existing sends: `encodeAddressList` is the identity on any pure-ASCII list,
+  and `foldHeader` is a no-op below 78 chars — pinned by a new byte-identical test over the
+  four ASCII shapes real sends use, and by the pre-existing From assertion in the forward
+  tests, which still passes unmodified.

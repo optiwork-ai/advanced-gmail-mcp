@@ -1320,6 +1320,93 @@ describe('address-list display names — RFC 2047 (acceptance P4)', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// G6 — the two address headers the RFC 2047 fix (ad84625) did not reach.
+//
+// To/Cc/Bcc were fixed; From and Reply-To still went out as raw 8-bit octets.
+// Both are filled from the account's own sendAs profile, which is why nobody
+// had been bitten yet — and exactly why it would bite the first account whose
+// Gmail display name carries an accent.
+// ---------------------------------------------------------------------------
+
+describe('From and Reply-To display names — RFC 2047', () => {
+  it('encodes a non-ASCII Reply-To display name and leaves its address alone', () => {
+    const raw = decode(
+      buildMimeMessage({
+        to: 'a@b.com',
+        reply_to: 'José Müller <jose@x.com>',
+        subject: 'Hi',
+        body: 'Hello',
+      }).rawBase64Url,
+    );
+    const value = headerValue(raw, 'Reply-To') ?? '';
+    expect(value).toMatch(/^=\?UTF-8\?B\?[A-Za-z0-9+/=]+\?= <jose@x\.com>$/);
+    expect(decodeWords(value)).toBe('José Müller <jose@x.com>');
+  });
+
+  it('encodes a non-ASCII From display name and leaves its address alone', () => {
+    const raw = decode(
+      buildMimeMessage({
+        from: 'Renée Dupont <renee@x.com>',
+        to: 'a@b.com',
+        subject: 'Hi',
+        body: 'Hello',
+      }).rawBase64Url,
+    );
+    const value = headerValue(raw, 'From') ?? '';
+    expect(value).toMatch(/^=\?UTF-8\?B\?[A-Za-z0-9+/=]+\?= <renee@x\.com>$/);
+    expect(decodeWords(value)).toBe('Renée Dupont <renee@x.com>');
+  });
+
+  it('leaves the whole header block pure ASCII when either name is accented', () => {
+    const raw = decode(
+      buildMimeMessage({
+        from: 'Søren <s@y.com>',
+        to: 'a@b.com',
+        reply_to: 'Zoë <z@x.com>',
+        subject: 'Hi',
+        body: 'Hello',
+      }).rawBase64Url,
+    );
+    expect(/^[\x00-\x7F]*$/.test(raw.split('\r\n\r\n')[0])).toBe(true);
+  });
+
+  it('is byte-identical for the ASCII values every send uses today', () => {
+    for (const value of [
+      'a@b.com',
+      'Alice <a@b.com>',
+      '"Angelo, Steve" <a@b.c>',
+      '=?UTF-8?B?Sm9zw6k=?= <j@x.com>',
+    ]) {
+      const raw = decode(
+        buildMimeMessage({
+          from: value,
+          to: 'x@y.com',
+          reply_to: value,
+          subject: 'Hi',
+          body: 'Hello',
+        }).rawBase64Url,
+      );
+      expect(headerValue(raw, 'From')).toBe(value);
+      expect(headerValue(raw, 'Reply-To')).toBe(value);
+    }
+  });
+
+  it('does not split a quoted comma in a Reply-To display name', () => {
+    const raw = decode(
+      buildMimeMessage({
+        to: 'a@b.com',
+        reply_to: '"Angelo, Steve" <a@b.c>',
+        subject: 'Hi',
+        body: 'Hello',
+      }).rawBase64Url,
+    );
+    const value = headerValue(raw, 'Reply-To') ?? '';
+    expect(value).toBe('"Angelo, Steve" <a@b.c>');
+    expect(value.match(/@/g)).toHaveLength(1);
+  });
+});
+
 describe('encodeAddressList', () => {
   it('is the identity on any pure-ASCII value', () => {
     for (const value of [

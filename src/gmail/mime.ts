@@ -1053,11 +1053,16 @@ export function buildMimeMessage(opts: MimeOptions): BuiltMessage {
     headers.push(foldHeader(name, clean));
   };
 
-  addHeader('From', opts.from);
+  // From and Reply-To are address headers like the rest. ad84625 fixed
+  // To/Cc/Bcc and left these two on the plain path because both are filled
+  // from the account's own sendAs profile — which is precisely why the bug
+  // would first appear on an account whose Gmail display name has an accent,
+  // on every message it ever sends.
+  addAddressHeader('From', opts.from);
   headers.push(foldHeader('To', encodeAddressList(sanitizeHeaderValue(opts.to ?? ''))));
   addAddressHeader('Cc', opts.cc);
   addAddressHeader('Bcc', opts.bcc);
-  addHeader('Reply-To', opts.reply_to);
+  addAddressHeader('Reply-To', opts.reply_to);
   headers.push(
     foldHeader('Subject', encodeHeaderValue(sanitizeHeaderValue(opts.subject ?? ''))),
   );
