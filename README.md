@@ -39,7 +39,7 @@ npm install
    - Add your email address(es) as test users
    - Add scopes: `gmail.readonly`, `gmail.modify`, `gmail.send`, `gmail.compose`
    - For Chat/Drive/Docs, also add: `chat.spaces.readonly`, `chat.messages.readonly`, `drive.readonly`, `documents`, then re-run the auth flow for each alias (`npm run auth -- <alias>`) so the new scopes are granted
-   - **`documents` replaced `documents.readonly` on 2026-08-28** so that `update_google_doc` can write. It covers reading too, so both Docs tools travel on the one grant — but every alias must re-consent before either works again
+   - **`documents` replaced `documents.readonly` on 2026-08-28** so that `update_google_doc` can write. It covers reading too, so both Docs tools travel on the one grant from now on. The swap is **read-compatible**: an account authenticated before then keeps the grants it was issued, so `get_google_doc` goes on working — only `update_google_doc` needs the re-consent
    - For Calendar, also add: `calendar.events`, `calendar.freebusy`, `calendar.calendarlist.readonly`
    - For `upload_drive_file`, also add: `drive.file` — the narrow Drive scope, which reaches only the files this server itself creates
    - For the mail-rule and vacation-responder tools, also add: `gmail.settings.basic`
@@ -84,7 +84,7 @@ npm run auth:check
 
 The auth flow opens a browser window for each account. Tokens are saved to `./tokens/`.
 
-> **Adding a scope means re-consenting.** A token carries exactly the permissions that were granted when it was issued — editing the scope list does nothing to a token already on disk. **`documents` replaced `documents.readonly` on 2026-08-28**, so on any account authenticated before then, BOTH `get_google_doc` and `update_google_doc` answer 403 until that alias runs `npm run auth -- <alias>` again. **`drive.file` and `gmail.settings.basic` were added on 2026-08-27**, so on any account authenticated before then, `upload_drive_file`, `list_filters`, `create_filter`, `delete_filter`, `get_vacation` and `set_vacation` answer **403 until that alias runs `npm run auth -- <alias>` again**. Those tools say so in their own error messages. Everything else keeps working untouched in the meantime — nothing about sending, reading or the Gmail signature depends on the new grants.
+> **Adding a scope means re-consenting.** A token carries exactly the permissions that were granted when it was issued — editing the scope list does nothing to a token already on disk. That cuts both ways, and it is why **`documents` replacing `documents.readonly` on 2026-08-28 does NOT break reading**: an older token still carries `documents.readonly` (and `drive.readonly`), either of which Google accepts for `documents.get`, so `get_google_doc` keeps working untouched. Only `update_google_doc` — the write — answers 403 until that alias runs `npm run auth -- <alias>` again, and it says so in its own error message. **`drive.file` and `gmail.settings.basic` were added on 2026-08-27**, so on any account authenticated before then, `upload_drive_file`, `list_filters`, `create_filter`, `delete_filter`, `get_vacation` and `set_vacation` answer **403 until that alias runs `npm run auth -- <alias>` again**. Those tools say so in their own error messages. Everything else keeps working untouched in the meantime — nothing about sending, reading or the Gmail signature depends on the new grants.
 
 ### 5. Add to Claude Code
 
@@ -180,7 +180,7 @@ Chat is **strictly read-only** — nothing is posted, created, updated, or delet
 | `list_chat_messages` | List messages in a Chat space (requires a space name/id; newest first). Returns name, sender, createTime, text, thread, plus attachments when a file was shared |
 | `get_chat_message` | Read a single Chat message by resource name |
 | `search_drive_files` | Search Drive files with Drive `q` query syntax — My Drive **and** shared (team) drives by default (`include_shared_drives: false` to narrow) |
-| `read_drive_file` | Read a Drive file's metadata + text (Docs/Sheets/Slides exported to text; binary types return metadata only; ~1MB cap; read `contentNote` — a Sheets export is first-sheet-only) |
+| `read_drive_file` | Read a Drive file's metadata + text, from My Drive **or** a shared (team) drive (Docs/Sheets/Slides exported to text; binary types return metadata only; ~1MB cap; read `contentNote` — a Sheets export is first-sheet-only) |
 | `upload_drive_file` | **Uploads a local file to Drive** (absolute path, optional `folder_id` and `name`; 100MB ceiling) and returns its id, name, size and `webViewLink`. Always creates a new file — it never overwrites one. Needs `drive.file` |
 | `get_google_doc` | Read a Google Doc as title + flattened plain text |
 | `update_google_doc` | Edit a Google Doc: append text at the end and/or replace text you name. No index arithmetic — the result reports how many occurrences each replacement actually changed |

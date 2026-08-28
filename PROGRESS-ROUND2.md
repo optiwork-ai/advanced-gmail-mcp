@@ -443,7 +443,7 @@ on `feat/round2-enhancements`.
 - Full suite after: **20 files, 721 passed** (+4), typecheck clean.
 
 ### WR-5 — the unsubscribe mailto send logged intent, not outcome — FIXED
-- Commit: `PENDING`
+- Commit: `9cda2ca`
 - **FAIL-before (real):** added `unsubscribe_mailto` to the existing G9 both-edges case table in
   `src/gmail/audit-log.test.ts` (its api mock gained `messages.send`). Two failures at HEAD: no
   completion line on success, and no failure line when the send threw — the intent line stood
@@ -452,3 +452,28 @@ on `feat/round2-enhancements`.
   same as the other seven destructive paths. Intent line before, `phase: 'done'` after, or
   `phase: 'failed'` at error level with the reason; the error is re-thrown untouched.
 - Full suite after: **20 files, 724 passed** (+3), typecheck clean.
+
+### WR-4 — the docs stated a falsehood about the scope swap — FIXED
+- Commit: `PENDING`
+- **Verified independently before rewriting** (this is the finding's whole substance):
+  `SCOPES` is referenced exactly once in the codebase — `src/gmail/auth.ts:149`, inside
+  `generateAuthUrl`. `getAuthClient` (`src/gmail/auth.ts:95-131`) only reads the token file and
+  refreshes it; there is no scope validation anywhere. So editing the SCOPES array revokes
+  nothing: an existing token still carries `documents.readonly` (and `drive.readonly`), either
+  of which Google accepts for `documents.get`. **`get_google_doc` does not break. Only
+  `update_google_doc` 403s.**
+- **Not testable** — the claim is about Google's authorization server, not about this code. It
+  is a documentation correction, and the corrected text is what the chair's live acceptance
+  will be read against.
+- **Fixed in four places:** `README.md` (the consent-screen bullet and the "Adding a scope means
+  re-consenting" blockquote — the swap is now stated as read-compatible), `CHANGELOG.md` (the
+  1.7.0 `documents` bullet), and `src/tools/docs-update-document.ts` (the tool description now
+  says the 403 is on THIS tool and that reading is unaffected).
+- **Four other 1.7.0 release-note bullets brought in line with what actually shipped in this fix
+  pass**, so the notes are not a second source of falsehood: shared drives can now be READ as
+  well as searched; the 403-honesty fix covers reading a Drive file; a cursor from another
+  account is never written down; the audit trail's list of destructive acts includes the
+  unsubscribe send.
+- `src/gmail/auth.ts` and `src/docs/client.ts` were checked and need no change — both already
+  scope their re-consent statements to `update_google_doc`.
+- Full suite after: **20 files, 724 passed** (unchanged — docs only), typecheck clean.

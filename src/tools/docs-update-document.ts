@@ -168,8 +168,9 @@ export function registerUpdateGoogleDoc(server: McpServer): void {
     + 'The result says how many occurrences each replacement actually changed, and calls out any '
     + 'that matched nothing — do not report an edit as done without reading it. '
     + 'REQUIRES the "documents" scope, which replaced "documents.readonly" on 2026-08-28: an '
-    + 'account whose token predates it answers 403 until it re-consents with '
-    + '"npm run auth -- <alias>".',
+    + 'account whose token predates it answers 403 on THIS tool until it re-consents with '
+    + '"npm run auth -- <alias>". Reading is unaffected — an older token still carries the '
+    + 'read-only grant, so get_google_doc keeps working.',
     updateGoogleDocParams,
     async ({ document_id, append_text, replacements, account }) => {
       try {
