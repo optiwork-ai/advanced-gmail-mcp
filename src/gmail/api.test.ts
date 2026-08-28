@@ -78,6 +78,7 @@ const {
   listMessages,
   modifyMessage,
   modifyThread,
+  readDraft,
   safeAttachmentFilename,
   searchMessages,
   trashMessage,
@@ -842,6 +843,21 @@ describe('modifyMessage', () => {
       id: 'm1',
       labels: ['STARRED'],
     });
+  });
+});
+
+describe('readDraft on a draft with no message', () => {
+  it('explains what is wrong and what to do, instead of a bare one-liner', async () => {
+    api.drafts.get.mockResolvedValue(ok({ id: 'd1' }));
+
+    const failure = await readDraft({ draftId: 'd1' }).catch((e: Error) => e);
+    const message = (failure as Error).message;
+
+    expect(message).toContain('d1');
+    // It says what this state IS, not just that a field was missing.
+    expect(message).toMatch(/empty|no content|never saved/i);
+    // And it names a way out.
+    expect(message).toMatch(/delete_draft|Gmail/);
   });
 });
 

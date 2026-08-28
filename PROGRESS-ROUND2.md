@@ -226,3 +226,24 @@ more likely to be this than anything in the code.
   account, so the two edges can be paired up in the log.
 - Pinned by test: a `delete_label` refused by the G1 confirm gate logs **nothing at all** —
   the guard runs before the trail, so a refusal leaves no "delete_label" footprint.
+
+### G10 — small roughness (Chat id formats, broken-draft read) — DONE
+- Commit: `PENDING-SHA-G10`
+- FAIL-before: `1 failed | 125 passed (126)` in api.test.ts for the draft error, plus
+  `src/chat/names.test.ts` unable to resolve its module at all (`./names.js` did not exist).
+- PASS-after: full suite **675 passed (675)**, 18 files, typecheck clean.
+- New `src/chat/names.ts` holds `toSpaceParent` (moved out of chat-list-messages.ts, where
+  it was private) and a new `toMessageName`. One module, so the two tools' acceptance
+  cannot drift apart again. `get_chat_message` now takes the name with or without the
+  leading `spaces/`, exactly as its sibling takes the space id, and a **bare message id is
+  refused with an explanation** rather than passed to Google to fail as a malformed name —
+  a message genuinely cannot be found from its id alone, since it belongs to a space.
+- `get_chat_message` also picked up the G3 honesty wiring (`googleApiCall` with the Chat
+  messages scope) while it was being edited — it is the fifth Chat/Drive/Docs read tool and
+  was the only one still on the bare `withRetry` path.
+- `readDraft` on a draft with no message now says what that state IS (a shell created and
+  never saved with content) and names a way out (`delete_draft`, or open it in Gmail),
+  instead of "Draft X has no underlying message."
+- **NOT done, and deliberately:** the evidence pack also mentions `get_chat_message` having
+  no size cap. The contract's G10 names exactly two items and that is not one of them, so
+  it was left alone rather than widened. Flagging it so the reviewer knows it was seen.

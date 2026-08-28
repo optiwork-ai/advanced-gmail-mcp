@@ -2522,7 +2522,16 @@ export async function readDraft(opts: {
 
   const msg = response.data.message;
   if (!msg) {
-    throw new Error(`Draft ${opts.draftId} has no underlying message.`);
+    // Gmail returned the draft but no message inside it. This is a draft that
+    // exists as a shell and has never held content — usually one created and
+    // abandoned before anything was saved. "has no underlying message" told
+    // the reader a field was missing and left them to guess what to do about it.
+    throw new Error(
+      `Draft ${opts.draftId} exists but is empty — Gmail is holding a draft with no message `
+      + `in it at all, so there is nothing to read. This is normally a draft that was `
+      + `created and never saved with content. Remove it with delete_draft, or open it in `
+      + `Gmail if you think it should have content.`,
+    );
   }
 
   return {

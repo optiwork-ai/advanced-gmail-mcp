@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { chat_v1 } from 'googleapis';
 import { CHAT_MESSAGES_SCOPE, getChatClient } from '../chat/client.js';
+import { toSpaceParent } from '../chat/names.js';
 import { resolveAccount } from '../config.js';
 import { googleApiCall } from '../google-api-error.js';
 
@@ -68,14 +69,6 @@ export function projectChatMessage(message: chat_v1.Schema$Message): Record<stri
   if (attachments.length > 0) out.attachments = attachments;
 
   return out;
-}
-
-/**
- * Normalize a space id or full resource name into "spaces/{id}".
- */
-function toSpaceParent(space: string): string {
-  const trimmed = space.trim();
-  return trimmed.startsWith('spaces/') ? trimmed : `spaces/${trimmed}`;
 }
 
 /**
