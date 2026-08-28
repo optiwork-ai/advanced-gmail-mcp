@@ -280,7 +280,7 @@ more likely to be this than anything in the code.
 - Consent round + live acceptance are the CHAIR's step, per the contract.
 
 ### G12 — RULED BUILD: watcher server-side cursor persistence — DONE
-- Commit: `PENDING-SHA-G12`
+- Commit: `5347551`
 - FAIL-before: `13 failed | 133 passed (146)` across api.test.ts + the new
   `src/gmail/cursor-store.test.ts`.
 - PASS-after: full suite **709 passed (709)**, 20 files, typecheck clean.
