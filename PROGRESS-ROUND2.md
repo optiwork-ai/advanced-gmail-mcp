@@ -589,3 +589,61 @@ call in the server — was corrected rather than left to become a second falseho
 bullet now names both `drive.file` tools and says creation needs no Docs scope, and the
 read-only/write summary paragraph rewritten. `CHANGELOG.md`: a `create_google_doc` bullet in the
 1.7.0 entry plus a one-line roster statement (50 → 52) under the heading.
+
+## CF2 — pre-merge honesty: the code stops calling itself stateless — DONE
+
+- Commit: `dad92ef`
+- **No FAIL-before:** this unit has no testable defect — three of the four items are comments
+  and the fourth is a tool description. Suite unchanged at **21 files, 735 passed**, typecheck
+  clean. (Line numbers were re-verified fresh against HEAD before editing; the contract's
+  `types.ts:63-64` and `client.ts:899` were still exact, `index.ts:63` had moved to `:64`.)
+- **Why it is not cosmetic:** G12 gave `get_mail_changes` a server-side cursor store, and these
+  four passages still described the tool it replaced. A reader trusting them keeps its own
+  bookmark and never learns the server has one — or reads `fromHistoryId` as a value it must
+  have sent.
+- The four:
+  1. `src/tools/index.ts` — "Stateless — the caller stores the cursor between polls" → the
+     server remembers the last complete position per account, and a supplied cursor still wins.
+  2. `src/gmail/types.ts` — the `MailChanges` doc comment claimed "there is no server-side
+     state". Same correction.
+  3. `src/gmail/client.ts` — `getMailChanges`' "Stateless by design: the caller owns the
+     cursor" now describes BOTH paths: the remembered default, and the caller (a scheduled job
+     with durable state of its own) that passes one and overrides it.
+  4. `src/tools/mail-changes.ts` — "Store the returned historyId as your next cursor ONLY when
+     complete is true" was an instruction to a caller holding the state. It now says the SERVER
+     remembers only on a complete read, gives the reason (the returned cursor is the mailbox's
+     current position, not the end of the page), and keeps the same rule in parentheses for a
+     caller that does keep its own cursor.
+- **`resumedFrom` added to the `MailChanges` interface.** `getMailChanges` has returned it since
+  G12 — set when the poll continued from the remembered position — but the return type never
+  declared it. It typechecked only because a conditional spread escapes excess-property
+  checking, so the one field that explains why `fromHistoryId` is a value the caller never sent
+  was invisible to every consumer of the type.
+- Swept for any remaining claim of caller-owned state: `grep -rn "stateless\|caller stores\|Store the returned" src README.md` → **no matches.**
+
+---
+
+## CLOSURE PASS — final gate
+
+- `npm test` → **21 files, 735 passed, 0 failed.** Closure baseline was **724 passed**, so
+  **+11 tests, zero failures, zero tests deleted, no assertion weakened.**
+- `npm run typecheck` → **clean, exit 0.**
+- **Tool roster: 52** (`grep -c "server.tool(" src/tools/*.ts` = 52), up from 51.
+- Worktree clean; branch `feat/round2-enhancements`, head after this docs commit.
+- Nothing was skipped; nothing went to `QUESTIONS-FOR-FABLE.md` as a blocker, and no new
+  question was raised — both units were fully specified by the chair's F1/F2 rulings.
+- The repo's LIVE checkout was never touched in this pass.
+
+### Commits, in order
+| Unit | Commit | What it does |
+|---|---|---|
+| CF1 | `d347181` | `create_google_doc` — creation via Drive `files.create` with a Google-Doc target mimeType; no new scope; roster 51 → 52 |
+| CF1 | `ed637b9` | progress entry for CF1 |
+| CF2 | `dad92ef` | the three stale "stateless" comments, the `get_mail_changes` description phrase, and `resumedFrom` on the `MailChanges` interface |
+
+### For the chair's acceptance
+`create_google_doc` is the ONE new tool of this round that needs **no consent round** — it runs
+on the `drive.file` grant every alias already has from 2026-08-27. It can therefore be
+exercised live before the `documents` re-consent, and the natural acceptance is: create a
+throwaway doc with `initial_text`, then `update_google_doc` on its returned id (which WILL 403
+until that alias re-consents — that 403 is the honest one, not a failure of CF1).
