@@ -8,7 +8,7 @@ A Gmail [MCP server](https://modelcontextprotocol.io) for [Claude Code](https://
 
 - **51 tools** spanning Gmail (read, compose, draft management, modify, attachments, mailbox-change watching, thread and label management, mail rules and the vacation responder), Google Calendar, Google Drive (read plus upload), Google Docs (read plus append/find-replace), and read-only Google Chat — see the [Tools](#tools) table
 - **Gmail-native outbound mail** — everything you send goes out as `multipart/alternative` (HTML plus a plain-text alternative), with your account's Gmail signature, quoted history on replies, and a proper `Name <address>` sender. Attachments supported on send, draft and reply; images can be embedded in the body with `inline_images` and referenced as `cid:filename`; forwards re-attach the original's files and keep its embedded images embedded
-- **Watch for new mail without polling the whole inbox** — `get_history_baseline` hands you a cursor, `get_mail_changes` tells you what arrived, was deleted or was relabelled since it. Stateless: you keep the cursor
+- **Watch for new mail without polling the whole inbox** — `get_history_baseline` hands you a cursor, `get_mail_changes` tells you what arrived, was deleted or was relabelled since it. Call it with no cursor for since-last-time: the server remembers the last complete position per account (in gitignored `cursors/`, beside `tokens/`). Passing your own cursor still works, and always wins
 - **Multi-account** support with simple aliases
 - **OAuth2** authentication with interactive CLI flow
 - **Token auto-refresh** — re-authenticates transparently
@@ -127,7 +127,7 @@ Then use `/email` or `/checkemail` in Claude Code.
 | `get_thread` | Get full thread with all messages, bodies and attachment metadata |
 | `get_labels` | List all labels (`include_counts` for message counts) |
 | `get_history_baseline` | Get the mailbox's current change cursor (`historyId`) — the starting point for watching for new mail |
-| `get_mail_changes` | What arrived / was deleted / was relabelled since a cursor you supply, plus the next cursor. No server-side state |
+| `get_mail_changes` | What arrived / was deleted / was relabelled since a cursor, plus the next cursor. Omit `history_id` to continue from where this account was last read to; a supplied cursor still wins |
 | `get_attachment` | Fetch an attachment — including an image embedded in the body: writes it to `save_dir`, or returns it inline for files up to 1MB. PNG/JPEG/GIF/WebP come back as a **viewable image**, so Claude can read what is in the picture; everything else as base64 |
 | `send_email` | Send a new email (Gmail-native HTML + text, signature, attachments, `inline_images` embedded via `cid:`) |
 | `draft_email` | Create a draft (same composition as `send_email`) |
