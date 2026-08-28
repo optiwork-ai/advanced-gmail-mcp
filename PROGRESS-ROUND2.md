@@ -51,7 +51,7 @@ Evidence pack: `round2-sweep-evidence.json` (normative for unit scope).
   test was changed or removed.
 
 ### G2 — image attachments returned as MCP image content blocks — DONE
-- Commit: `PENDING-SHA-G2`
+- Commit: `5e3f867`
 - FAIL-before: `npx vitest run src/tools/get-attachment.test.ts` → **10 failed (10)**
   (the module exported neither `attachmentContentBlocks` nor `isViewableImage`).
 - PASS-after: full suite **597 passed (597)**, 14 files, typecheck clean.
