@@ -98,7 +98,7 @@ Evidence pack: `round2-sweep-evidence.json` (normative for unit scope).
   re-authenticating really is the fix.
 
 ### G4 — Chat list field projection — DONE
-- Commit: `PENDING-SHA-G4`
+- Commit: `30bb921`
 - FAIL-before: 4 of the 8 new projection assertions failed (`23 tests: 4 failed | 19
   passed`) — the four that already passed were the "absent field" and spaces-description
   cases, which were accidentally correct.
