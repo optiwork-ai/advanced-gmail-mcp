@@ -15,10 +15,15 @@ import { withScopeHint } from '../scope-error.js';
 // Mirrors the caching idiom in src/gmail/client.ts.
 //
 // Everything in this module is READ-ONLY except `uploadFile`, which creates a
-// new file and is the only mutating Drive call in the server. It runs under
-// `drive.file` — the scope that grants access to files THIS APP creates and to
-// nothing else in the user's Drive — so no code path here can update or delete
-// a document the user already had.
+// new file. Drive writes run under `drive.file` — the scope that grants access
+// to files THIS APP creates and to nothing else in the user's Drive — so no
+// code path here can update or delete a document the user already had.
+//
+// One other tool writes through this client rather than through this module:
+// `create_google_doc` (src/tools/docs-create-document.ts) issues its own
+// `files.create`, the same way the Drive read tools issue their own
+// `files.list` / `files.get`. It is CREATE-only and rides the same
+// `drive.file` scope, so the paragraph above still holds for the whole server.
 // ---------------------------------------------------------------------------
 
 interface CachedClient {
@@ -77,6 +82,14 @@ export const DRIVE_FILE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 export const DRIVE_READONLY_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
 
 /**
+ * Drive's own type for "this file IS a Google Doc" — as opposed to a .docx or a
+ * .txt that merely sits in Drive. Naming it as the TARGET mimeType of a
+ * `files.create` is what makes Drive convert the upload into a real document
+ * rather than store the bytes.
+ */
+export const GOOGLE_DOC_MIME = 'application/vnd.google-apps.document';
+
+/**
  * Per-file upload ceiling, decimal MB to match every other ceiling in this
  * codebase (see the mime module's `mb()`). Drive itself allows far more; the
  * limit here is about this process, which streams the file but still holds an
@@ -118,10 +131,20 @@ export interface UploadFileResult {
  */
 export function driveFileName(supplied: string | undefined, filePath: string): string {
   const source = supplied && supplied.trim() ? supplied : path.basename(filePath);
-  const cleaned = path.basename(source)
-    .replace(/[\u0000-\u001f\u007f]/g, '')
-    .trim();
+  const cleaned = cleanDriveName(path.basename(source));
   return cleaned || path.basename(filePath) || 'upload';
+}
+
+/**
+ * Strip what has no business in a Drive display name: control characters
+ * (CR/LF/NUL and friends), plus surrounding whitespace.
+ *
+ * Kept separate from `driveFileName` because a document TITLE is not a
+ * filename — a title may legitimately contain a slash ("Q3/Q4 planning") and
+ * must not be basenamed down to "Q4 planning".
+ */
+export function cleanDriveName(raw: string): string {
+  return raw.replace(/[\u0000-\u001f\u007f]/g, '').trim();
 }
 
 /**

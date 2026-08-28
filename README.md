@@ -6,7 +6,7 @@ A Gmail [MCP server](https://modelcontextprotocol.io) for [Claude Code](https://
 
 ## Features
 
-- **51 tools** spanning Gmail (read, compose, draft management, modify, attachments, mailbox-change watching, thread and label management, mail rules and the vacation responder), Google Calendar, Google Drive (read plus upload), Google Docs (read plus append/find-replace), and read-only Google Chat — see the [Tools](#tools) table
+- **52 tools** spanning Gmail (read, compose, draft management, modify, attachments, mailbox-change watching, thread and label management, mail rules and the vacation responder), Google Calendar, Google Drive (read plus upload), Google Docs (read, create, and append/find-replace), and read-only Google Chat — see the [Tools](#tools) table
 - **Gmail-native outbound mail** — everything you send goes out as `multipart/alternative` (HTML plus a plain-text alternative), with your account's Gmail signature, quoted history on replies, and a proper `Name <address>` sender. Attachments supported on send, draft and reply; images can be embedded in the body with `inline_images` and referenced as `cid:filename`; forwards re-attach the original's files and keep its embedded images embedded
 - **Watch for new mail without polling the whole inbox** — `get_history_baseline` hands you a cursor, `get_mail_changes` tells you what arrived, was deleted or was relabelled since it. Call it with no cursor for since-last-time: the server remembers the last complete position per account (in gitignored `cursors/`, beside `tokens/`). Passing your own cursor still works, and always wins
 - **Multi-account** support with simple aliases
@@ -41,7 +41,7 @@ npm install
    - For Chat/Drive/Docs, also add: `chat.spaces.readonly`, `chat.messages.readonly`, `drive.readonly`, `documents`, then re-run the auth flow for each alias (`npm run auth -- <alias>`) so the new scopes are granted
    - **`documents` replaced `documents.readonly` on 2026-08-28** so that `update_google_doc` can write. It covers reading too, so both Docs tools travel on the one grant from now on. The swap is **read-compatible**: an account authenticated before then keeps the grants it was issued, so `get_google_doc` goes on working — only `update_google_doc` needs the re-consent
    - For Calendar, also add: `calendar.events`, `calendar.freebusy`, `calendar.calendarlist.readonly`
-   - For `upload_drive_file`, also add: `drive.file` — the narrow Drive scope, which reaches only the files this server itself creates
+   - For `upload_drive_file` and `create_google_doc`, also add: `drive.file` — the narrow Drive scope, which reaches only the files this server itself creates. `create_google_doc` makes its document through Drive, so it needs **no** Docs scope and no extra consent beyond this one
    - For the mail-rule and vacation-responder tools, also add: `gmail.settings.basic`
 5. Create **OAuth credentials**:
    - APIs & Services → Credentials → Create Credentials → OAuth client ID
@@ -172,7 +172,7 @@ These need `gmail.settings.basic` (added 2026-08-27), so they **403 on any alias
 
 ### Chat / Drive / Docs
 
-Chat is **strictly read-only** — nothing is posted, created, updated, or deleted. Drive is read-only except `upload_drive_file`, which creates new files under the narrow `drive.file` scope (it reaches only files this server itself created, never the rest of your Drive). Docs is read plus exactly one write, `update_google_doc`, whose surface is append-text and find-replace — there is no way to insert at a position, because a position is a number in a document the caller cannot see. These tools require the extra scopes above; re-run the auth flow per alias after adding them.
+Chat is **strictly read-only** — nothing is posted, created, updated, or deleted. Drive is read-only except `upload_drive_file` and `create_google_doc`, both of which only ever CREATE, under the narrow `drive.file` scope (it reaches only files this server itself created, never the rest of your Drive). Docs is read plus two writes: `create_google_doc`, which makes a new document through Drive and therefore needs no Docs scope at all, and `update_google_doc`, whose surface is append-text and find-replace — there is no way to insert at a position, because a position is a number in a document the caller cannot see. These tools require the extra scopes above; re-run the auth flow per alias after adding them.
 
 | Tool | Description |
 |------|-------------|
@@ -183,6 +183,7 @@ Chat is **strictly read-only** — nothing is posted, created, updated, or delet
 | `read_drive_file` | Read a Drive file's metadata + text, from My Drive **or** a shared (team) drive (Docs/Sheets/Slides exported to text; binary types return metadata only; ~1MB cap; read `contentNote` — a Sheets export is first-sheet-only) |
 | `upload_drive_file` | **Uploads a local file to Drive** (absolute path, optional `folder_id` and `name`; 100MB ceiling) and returns its id, name, size and `webViewLink`. Always creates a new file — it never overwrites one. Needs `drive.file` |
 | `get_google_doc` | Read a Google Doc as title + flattened plain text |
+| `create_google_doc` | **Creates a real Google Doc** (title required, optional plain-text `initial_text` and `folder_id`) and returns its `documentId`, title and `webViewLink`. Made through Drive's `files.create`, so it needs `drive.file` — already granted since 2026-08-27 — and no Docs consent |
 | `update_google_doc` | Edit a Google Doc: append text at the end and/or replace text you name. No index arithmetic — the result reports how many occurrences each replacement actually changed |
 
 ### Calendar

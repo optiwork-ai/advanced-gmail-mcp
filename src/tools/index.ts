@@ -41,6 +41,7 @@ import { registerSearchDriveFiles } from './drive-search-files.js';
 import { registerReadDriveFile } from './drive-read-file.js';
 import { registerUploadDriveFile } from './drive-upload-file.js';
 import { registerGetGoogleDoc } from './docs-get-document.js';
+import { registerCreateGoogleDoc } from './docs-create-document.js';
 import { registerUpdateGoogleDoc } from './docs-update-document.js';
 // Calendar tools (three read-only + create_calendar_event)
 import { registerListCalendars } from './calendar-list-calendars.js';
@@ -98,11 +99,13 @@ export function registerAllTools(server: McpServer): void {
   registerFilterTools(server);
   registerVacationTools(server);
 
-  // Chat / Drive / Docs. Chat stays strictly read-only. Drive has exactly one
-  // write — upload_drive_file — under the narrow drive.file scope, which
-  // reaches only the files this server creates. Docs gained one write on
-  // 2026-08-28 — update_google_doc — under the `documents` scope that replaced
-  // `documents.readonly`; its surface is append-text and find-replace only.
+  // Chat / Drive / Docs. Chat stays strictly read-only. Everything that writes
+  // here creates rather than overwrites: upload_drive_file and
+  // create_google_doc both run under the narrow drive.file scope, which reaches
+  // only the files this server itself created. The one exception is
+  // update_google_doc (2026-08-28), which edits an existing document under the
+  // `documents` scope that replaced `documents.readonly`; its surface is
+  // append-text and find-replace only, so it cannot rewrite by miscounting.
   registerListChatSpaces(server);
   registerListChatMessages(server);
   registerGetChatMessage(server);
@@ -110,6 +113,7 @@ export function registerAllTools(server: McpServer): void {
   registerReadDriveFile(server);
   registerUploadDriveFile(server);
   registerGetGoogleDoc(server);
+  registerCreateGoogleDoc(server);
   registerUpdateGoogleDoc(server);
 
   // Calendar: three read-only tools plus create_calendar_event, whose
