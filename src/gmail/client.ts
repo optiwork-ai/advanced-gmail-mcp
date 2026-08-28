@@ -23,6 +23,7 @@ import {
 } from './mime.js';
 import { getSendAsProfile } from './settings.js';
 import { assertPublicHttpsUrl } from './url-guard.js';
+import { readCursor, writeCursor } from './cursor-store.js';
 import type {
   Attachment,
   DraftPage,
@@ -912,7 +913,12 @@ async function hydrateArrivals(
  *    cursor until then.
  */
 export async function getMailChanges(opts: {
-  historyId: string;
+  /**
+   * The position to poll from. OMIT it to continue from where this account was
+   * last read to — the server remembers the last COMPLETE position per account.
+   * A supplied value always wins over the remembered one.
+   */
+  historyId?: string;
   account?: string;
   historyTypes?: HistoryType[];
   labelId?: string;
@@ -920,8 +926,21 @@ export async function getMailChanges(opts: {
   pageToken?: string;
   includeSummaries?: boolean;
 }): Promise<MailChanges> {
-  const startHistoryId = assertHistoryId(opts.historyId);
   const resolved = resolveAccount(opts.account);
+
+  // "Since last time": the caller may omit the cursor entirely and continue
+  // from the last COMPLETE read of this account.
+  const remembered = opts.historyId === undefined ? readCursor(resolved.alias) : null;
+  if (opts.historyId === undefined && remembered === null) {
+    throw new Error(
+      `No remembered position for account "${resolved.alias}" (${resolved.email}), and no `
+      + 'history_id was given. Call get_history_baseline for a cursor and pass it once as '
+      + 'history_id; from then on this account can be polled with no cursor at all. '
+      + 'Starting from "now" silently would report no changes for a mailbox that may have a '
+      + 'week of them.',
+    );
+  }
+  const startHistoryId = assertHistoryId(opts.historyId ?? (remembered as string));
   const gmail = await getGmailClient(resolved);
 
   const maxResults = Math.min(
@@ -1028,11 +1047,25 @@ export async function getMailChanges(opts: {
     summaries = await hydrateArrivals(gmail, arrivals);
   }
 
+  // Remember the position — but ONLY on a complete read. Gmail's response
+  // carries the mailbox's CURRENT position rather than the end of this page, so
+  // storing it mid-pagination would skip every page not yet read. The tool has
+  // always documented that trap; storing only on completion makes it impossible
+  // to fall into.
+  const complete = !nextPageToken;
+  if (complete) {
+    const outcome = writeCursor(resolved.alias, nextHistoryId);
+    if (!outcome.stored && outcome.reason) {
+      notes.push(`The remembered cursor was not updated: it ${outcome.reason}.`);
+    }
+  }
+
   return {
     account: resolved.alias,
     fromHistoryId: startHistoryId,
+    ...(remembered !== null ? { resumedFrom: 'the remembered cursor' } : {}),
     historyId: nextHistoryId,
-    complete: !nextPageToken,
+    complete,
     ...(nextPageToken ? { nextPageToken } : {}),
     added: summaries,
     deleted: [...deleted.values()],

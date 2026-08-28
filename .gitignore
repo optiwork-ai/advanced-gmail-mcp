@@ -7,6 +7,8 @@ dist/
 credentials.json
 tokens/
 accounts.json
+# The mail watcher's remembered position per account — per-machine state.
+cursors/
 
 # Environment
 .env

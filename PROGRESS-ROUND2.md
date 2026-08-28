@@ -278,3 +278,48 @@ more likely to be this than anything in the code.
   genuinely changed. No other assertion in that file moved.
 - Unit tests mock the Docs API throughout. **No live document was touched.**
 - Consent round + live acceptance are the CHAIR's step, per the contract.
+
+### G12 — RULED BUILD: watcher server-side cursor persistence — DONE
+- Commit: `PENDING-SHA-G12`
+- FAIL-before: `13 failed | 133 passed (146)` across api.test.ts + the new
+  `src/gmail/cursor-store.test.ts`.
+- PASS-after: full suite **709 passed (709)**, 20 files, typecheck clean.
+- New `src/gmail/cursor-store.ts` (+ `getCursorDir()` in config.ts) stores the last
+  position per account in `cursors/<alias>.json`, **beside `tokens/` and gitignored**.
+  `GMAIL_MCP_CURSOR_DIR` overrides the location — the same escape hatch the log has, and
+  how the tests keep their writes out of the project.
+- `get_mail_changes` gains the "since last time" default: `history_id` is now **optional**,
+  and omitting it continues from the remembered position. **A supplied cursor still wins** —
+  remembering is a default, not a lock.
+- Three rules, each pinned by test:
+  1. **Only a COMPLETE read is stored.** Gmail returns the mailbox's current position, not
+     the end of the page, so storing mid-pagination would skip every unread page. The tool
+     always documented that trap; this makes it structurally impossible to fall into.
+  2. **The store only moves forward.** A write that would rewind is refused — a rewind
+     replays a window already reported, which reads as the same mail arriving twice.
+     Compared with BigInt, so a history id past 2^53 keeps its precision.
+  3. **Best-effort, never breaks a poll.** A corrupt file reads as "nothing remembered"; a
+     failed write is reported in the result's `note` rather than silently implying the
+     bookmark moved.
+- **No silent start from "now".** With nothing remembered and nothing supplied, the call is
+  refused with instructions, because starting at "now" would report a mailbox with a week
+  of unseen changes as having none.
+- The alias is sanitized before it becomes a filename, so an alias containing a slash
+  cannot write outside the cursor directory (pinned by test).
+- `get_history_baseline` deliberately does NOT write the store: it returns "now", so
+  storing it could clobber an older remembered position and lose the window between.
+
+## ⚠️ SECOND ENVIRONMENT INCIDENT — the scratchpad worktree was DELETED mid-G12
+
+After the earlier disk-full outage, a system cleanup freed ~4GB by **deleting the contents
+of the scratchpad**, including this worktree's entire checkout and its `.git` file. The
+in-progress (uncommitted) G12 edits were lost with it.
+
+**Nothing committed was lost.** A worktree's objects and refs live in the REAL repo's
+`.git`, so every commit G1-G11 survived intact on `feat/round2-enhancements`. The worktree
+was recreated with `git worktree prune` + `git worktree add <path> feat/round2-enhancements`,
+`npm install` re-run, and the suite re-verified at **689 passed** before G12 was redone from
+scratch. The live checkout was never touched and is still on `main` at the baseline sha.
+
+This is the commit-as-you-go rule earning its keep: the at-risk window was exactly one
+unit, and one unit is what had to be redone.

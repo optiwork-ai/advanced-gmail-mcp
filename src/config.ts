@@ -97,3 +97,14 @@ export function getCredentialsPath(): string {
 export function getTokenPath(account: AccountConfig): string {
   return path.join(PROJECT_ROOT, 'tokens', `${account.alias}.json`);
 }
+
+/**
+ * Where the mail watcher's remembered cursors live — beside `tokens/`, and
+ * gitignored for the same reason: per-machine, per-account state, not source.
+ *
+ * GMAIL_MCP_CURSOR_DIR overrides it, which is how the tests keep their writes
+ * out of the project (the same escape hatch the log has).
+ */
+export function getCursorDir(): string {
+  return process.env.GMAIL_MCP_CURSOR_DIR || path.join(PROJECT_ROOT, 'cursors');
+}

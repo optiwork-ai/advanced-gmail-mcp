@@ -44,6 +44,18 @@ vi.mock('./auth.js', () => ({
   getAuthClient: vi.fn(async () => ({})),
 }));
 
+// G12: the on-disk cursor store is stubbed so these tests never write to the
+// real cursors/ directory, and so the store's own contract can be simulated.
+type CursorWrite = { stored: boolean; reason?: string };
+const cursorStore = {
+  readCursor: vi.fn((_alias: string): string | null => null),
+  writeCursor: vi.fn((_alias: string, _id: string): CursorWrite => ({ stored: true })),
+};
+vi.mock('./cursor-store.js', () => ({
+  readCursor: (alias: string) => cursorStore.readCursor(alias),
+  writeCursor: (alias: string, id: string) => cursorStore.writeCursor(alias, id),
+}));
+
 vi.mock('../config.js', () => ({
   resolveAccount: (input?: string) => ({
     alias: input ?? 'test',
@@ -1949,4 +1961,96 @@ describe('attachment listing includes inline parts', () => {
     expect(cidHeaders).toHaveLength(1);
   });
 
+});
+
+// ---------------------------------------------------------------------------
+// G12 — "since last time". The watcher now remembers the last COMPLETE
+// position per account, so a routine poll needs no cursor at all. A supplied
+// cursor still wins, and a partial read must NOT move the bookmark.
+// ---------------------------------------------------------------------------
+
+describe('getMailChanges remembers where it got to', () => {
+  const cursors = new Map<string, string>();
+
+  beforeEach(() => {
+    cursors.clear();
+    cursorStore.readCursor.mockImplementation((alias: string) => cursors.get(alias) ?? null);
+    cursorStore.writeCursor.mockImplementation((alias: string, id: string) => {
+      const existing = cursors.get(alias);
+      if (existing !== undefined && BigInt(id) < BigInt(existing)) {
+        return { stored: false, reason: `would rewind the remembered cursor from ${existing}` };
+      }
+      cursors.set(alias, id);
+      return { stored: true };
+    });
+  });
+
+  it('stores the position after a COMPLETE read', async () => {
+    api.history.list.mockResolvedValue(ok({ historyId: '5000', history: [] }));
+
+    await getMailChanges({ historyId: '4000', account: 'work' });
+
+    expect(cursorStore.writeCursor).toHaveBeenCalledWith('work', '5000');
+    expect(cursors.get('work')).toBe('5000');
+  });
+
+  it('does NOT store while pages remain — that would skip what was not read', async () => {
+    api.history.list.mockResolvedValue(
+      ok({ historyId: '5000', history: [], nextPageToken: 'page2' }),
+    );
+
+    const result = await getMailChanges({ historyId: '4000', account: 'work' });
+
+    expect(result.complete).toBe(false);
+    expect(cursorStore.writeCursor).not.toHaveBeenCalled();
+  });
+
+  it('continues from the remembered position when no cursor is given', async () => {
+    cursors.set('work', '4200');
+    api.history.list.mockResolvedValue(ok({ historyId: '5000', history: [] }));
+
+    const result = await getMailChanges({ account: 'work' });
+
+    expect(api.history.list.mock.calls[0][0].startHistoryId).toBe('4200');
+    expect(result.fromHistoryId).toBe('4200');
+  });
+
+  it('a supplied cursor still wins over the remembered one', async () => {
+    cursors.set('work', '4200');
+    api.history.list.mockResolvedValue(ok({ historyId: '5000', history: [] }));
+
+    await getMailChanges({ historyId: '100', account: 'work' });
+
+    expect(api.history.list.mock.calls[0][0].startHistoryId).toBe('100');
+  });
+
+  it('says what to do when there is nothing remembered and nothing supplied', async () => {
+    await expect(getMailChanges({ account: 'work' })).rejects.toThrow(/get_history_baseline/);
+    expect(api.history.list).not.toHaveBeenCalled();
+  });
+
+  it('never silently starts from "now" — that would report an empty week as no mail', async () => {
+    await expect(getMailChanges({ account: 'work' })).rejects.toThrow(/silently|no history_id/i);
+  });
+
+  it('reports it when the bookmark could not be moved, rather than implying it was', async () => {
+    cursors.set('work', '9000');
+    api.history.list.mockResolvedValue(ok({ historyId: '9000', history: [] }));
+    cursorStore.writeCursor.mockReturnValue({ stored: false, reason: 'could not be written' });
+
+    const result = await getMailChanges({ historyId: '8000', account: 'work' });
+
+    expect(result.note).toMatch(/remembered cursor was not updated/i);
+    expect(result.note).toMatch(/could not be written/);
+  });
+
+  it('keeps every account on its own bookmark', async () => {
+    api.history.list.mockResolvedValue(ok({ historyId: '5000', history: [] }));
+    await getMailChanges({ historyId: '4000', account: 'work' });
+    api.history.list.mockResolvedValue(ok({ historyId: '7000', history: [] }));
+    await getMailChanges({ historyId: '6000', account: 'personal' });
+
+    expect(cursors.get('work')).toBe('5000');
+    expect(cursors.get('personal')).toBe('7000');
+  });
 });

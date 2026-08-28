@@ -3,10 +3,13 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { HISTORY_TYPES, getMailChanges } from '../gmail/client.js';
 
 export const getMailChangesParams = {
-  history_id: z.string().describe(
+  history_id: z.string().optional().describe(
     'The cursor to poll from: the historyId returned by get_history_baseline, or by the last '
     + 'get_mail_changes call whose complete was true. Digits only — pass it back exactly as '
-    + 'given, never rounded or reformatted.',
+    + 'given, never rounded or reformatted. '
+    + 'OMIT IT to continue from where this account was last read to: the server remembers the '
+    + 'last complete position per account, so a routine "what has arrived since last time?" '
+    + 'needs no cursor at all. A value you do supply always wins over the remembered one.',
   ),
   account: z.string().optional().describe('Account alias or email address. Must be the SAME account the cursor came from.'),
   history_types: z
@@ -32,6 +35,9 @@ export function registerGetMailChanges(server: McpServer): void {
   server.tool(
     'get_mail_changes',
     'List what changed in the mailbox since a history cursor — the mail-arrival watcher. '
+    + 'CALL IT WITH NO history_id for the ordinary case: the server remembers where each '
+    + 'account was last read to and continues from there. The first poll on an account needs a '
+    + 'cursor from get_history_baseline, passed once; after that it is remembered. '
     + 'Returns { account, fromHistoryId, historyId, complete, nextPageToken, added, deleted, '
     + 'labelsAdded, labelsRemoved, note }: added carries message summaries, the other three '
     + 'carry ids/threadIds plus the label ids the change involved. '
@@ -45,7 +51,7 @@ export function registerGetMailChanges(server: McpServer): void {
     async ({ history_id, account, history_types, label_id, max_results, page_token, include_summaries }) => {
       try {
         const result = await getMailChanges({
-          historyId: history_id,
+          historyId: history_id ?? undefined,
           account: account ?? undefined,
           historyTypes: history_types ?? undefined,
           labelId: label_id ?? undefined,
