@@ -33,6 +33,21 @@ import { log } from '../log.js';
  *     is told to shorten a message that has NOT been half-posted;
  *   - a thread named in a different space than the one being posted to.
  *
+ * CP-1 — the `text` field is NOT inert, and the description used to say it
+ * was. Google's own words for it: "Plain-text body of the message. The first
+ * link to an image, video, or web page generates a preview chip. You can also
+ * @mention a Google Chat user, or everyone in the space." `<users/all>` in the
+ * body notifies every member of the space; `<users/{id}>` notifies one person.
+ *
+ * The text of an alert is routinely composed from something this same server
+ * just READ — an email body, a Drive file, a log line — so a literal
+ * "<users/all>" quoted out of a ticket at 3am would page a whole room with
+ * nobody in the loop to catch it. Mention markup is therefore defused by
+ * default (the angle brackets are dropped, so it reads as "users/all" and Chat
+ * treats it as ordinary words), and `allow_mentions: true` posts it as written
+ * for the case where the mention is the point. The result says how many were
+ * defused, so a caller that meant it is not left guessing.
+ *
  * Control characters are stripped for the same reason `mime.ts` sanitises
  * headers, though the risk is different: a Chat message body is a JSON string,
  * so there is no header-splitting trick to defend against. What stripping
@@ -60,6 +75,32 @@ export function sanitizeChatText(text: string): string {
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '');
 }
 
+/**
+ * Chat's text mention markup: "<users/all>" pages the whole space and
+ * "<users/{id}>" pages one person. Nothing else in `text` notifies anybody.
+ */
+const CHAT_MENTION = /<users\/[^>\s]*>/g;
+
+/**
+ * Make Chat mention markup inert by dropping its angle brackets, so
+ * "<users/all>" posts as the words "users/all" and notifies nobody.
+ *
+ * Removing the brackets rather than the whole token is deliberate: the reader
+ * still sees what the quoted text said, and the message still gets posted —
+ * an alert that refused to send would be a worse 3am outcome than one that
+ * reads slightly differently from its source.
+ *
+ * Exported for unit testing.
+ */
+export function neutralizeChatMentions(text: string): { text: string; defused: number } {
+  let defused = 0;
+  const neutralized = text.replace(CHAT_MENTION, (match) => {
+    defused += 1;
+    return match.slice(1, -1);
+  });
+  return { text: neutralized, defused };
+}
+
 /** Characters as a person counts them, so an emoji costs one, not two. */
 export function chatTextLength(text: string): number {
   return Array.from(text).length;
@@ -77,6 +118,11 @@ export interface PostChatMessageOptions {
   thread?: string;
   /** A key of your own that names a thread across posts. */
   threadKey?: string;
+  /**
+   * Post Chat mention markup as written, so "<users/all>" really does notify
+   * everyone in the space. Default false — see CP-1 in this module's header.
+   */
+  allowMentions?: boolean;
   account?: string | AccountConfig;
 }
 
@@ -96,6 +142,12 @@ export interface PostChatMessageResult {
    */
   repliedToThread?: boolean;
   requestedThread?: string;
+  /**
+   * How many Chat mentions were made inert before posting. Only present when
+   * at least one was — so a caller that meant to page somebody can see that it
+   * did not happen, and pass allow_mentions to mean it.
+   */
+  mentionsDefused?: number;
   note?: string;
 }
 
@@ -117,7 +169,16 @@ export async function postChatMessage(opts: PostChatMessageOptions): Promise<Pos
 
   const parent = toSpaceParent(opts.space ?? '');
 
-  const text = sanitizeChatText(opts.text ?? '').trim();
+  // Defusing runs BEFORE the length check, because it only ever shortens the
+  // text: a message that fits after defusing is not refused for a length it no
+  // longer has.
+  const sanitized = sanitizeChatText(opts.text ?? '');
+  const defused = opts.allowMentions === true
+    ? { text: sanitized, defused: 0 }
+    : neutralizeChatMentions(sanitized);
+  const mentionsDefused = defused.defused;
+
+  const text = defused.text.trim();
   if (text.length === 0) {
     throw new Error(
       'post_chat_message: text is required — an empty message is refused here rather than '
@@ -182,6 +243,7 @@ export async function postChatMessage(opts: PostChatMessageOptions): Promise<Pos
     text_chars: length,
     thread: requestedThread ?? null,
     thread_key: threadKey ?? null,
+    mentions_defused: mentionsDefused,
   };
   log('info', 'post_chat_message', { ...fields, phase: 'start' });
 
@@ -228,19 +290,35 @@ export async function postChatMessage(opts: PostChatMessageOptions): Promise<Pos
     account: resolved.alias,
   };
 
+  const notes: string[] = [];
+
   if (requestedThread) {
     const replied = landedThread === requestedThread;
     result.requestedThread = requestedThread;
     result.repliedToThread = replied;
     if (!replied) {
-      result.note = `The message was posted, but NOT into the thread that was asked for: Chat `
+      notes.push(
+        `The message was posted, but NOT into the thread that was asked for: Chat `
         + `could not use "${requestedThread}" and started a new thread instead`
-        + `${landedThread ? ` ("${landedThread}")` : ''}. Everyone in the space sees it either way.`;
+        + `${landedThread ? ` ("${landedThread}")` : ''}. Everyone in the space sees it either way.`,
+      );
     }
   } else if (threadKey) {
-    result.note = `Posted under thread_key "${threadKey}": later posts with the same key join `
-      + 'this thread.';
+    notes.push(
+      `Posted under thread_key "${threadKey}": later posts with the same key join this thread.`,
+    );
   }
+
+  if (mentionsDefused > 0) {
+    notes.push(
+      `${mentionsDefused} Chat @mention${mentionsDefused === 1 ? ' was' : 's were'} made inert `
+      + 'before posting, so nobody was notified by the message text. Pass '
+      + '"allow_mentions": true to post the mention as written.',
+    );
+    result.mentionsDefused = mentionsDefused;
+  }
+
+  if (notes.length > 0) result.note = notes.join(' ');
 
   log('info', 'post_chat_message', {
     ...fields,
@@ -277,11 +355,24 @@ export const postChatMessageParams = {
   text: z
     .string()
     .describe(
-      'The message, as PLAIN TEXT — this is what people in the space will read. Newlines and '
-      + 'tabs are kept; other control characters are stripped. Chat allows up to 4096 '
-      + 'characters and a longer message is refused before anything is posted. Chat renders a '
-      + 'small amount of its own markup (*bold*, _italic_, `code`); Markdown headings and links '
-      + 'arrive as literal characters.',
+      'The message body — this is what people in the space will read. It is NOT inert text: '
+      + 'Chat renders a little markup of its own (*bold*, _italic_, `code`), the FIRST link in '
+      + 'it becomes a preview chip, and Chat mention markup notifies people — "<users/all>" '
+      + 'notifies EVERYONE in the space and "<users/{id}>" notifies that person. Markdown '
+      + 'headings arrive as literal characters. Because message text is often quoted from an '
+      + 'email, a file or a log, mention markup is made inert before posting (the angle '
+      + 'brackets are dropped, so it reads as "users/all") and the answer says how many were '
+      + 'defused; pass "allow_mentions": true when the mention is deliberate. Newlines and tabs '
+      + 'are kept; other control characters are stripped. Chat allows up to 4096 characters and '
+      + 'a longer message is refused before anything is posted.',
+    ),
+  allow_mentions: z
+    .boolean()
+    .optional()
+    .describe(
+      'Post Chat mention markup as written, so "<users/all>" really does notify every member '
+      + 'of the space and "<users/{id}>" notifies that person. Defaults to false, which makes '
+      + 'such markup inert. Only pass true when you intend to notify people.',
     ),
   thread: z
     .string()
@@ -321,6 +412,9 @@ export function registerPostChatMessage(server: McpServer): void {
     + 'Chat afterwards. '
     + 'Returns the message name, the thread it landed in, createTime, the space and its display '
     + 'name, and the posting account. '
+    + 'The message text is not inert: the first link in it becomes a preview chip, and Chat '
+    + 'mention markup ("<users/all>", "<users/{id}>") notifies people — so mention markup is '
+    + 'made inert before posting unless you pass "allow_mentions": true. '
     + 'Pass "thread" to reply inside an existing conversation, or "thread_key" to keep repeated '
     + 'alerts together; when a reply cannot be threaded, Chat posts it as a new thread and the '
     + 'answer says so ("repliedToThread": false). '
@@ -328,13 +422,14 @@ export function registerPostChatMessage(server: McpServer): void {
     + 'with "npm run auth -- <alias>" this returns an error naming that exact scope. '
     + 'Nothing here edits or deletes an existing message.',
     postChatMessageParams,
-    async ({ space, text, thread, thread_key, account }) => {
+    async ({ space, text, thread, thread_key, allow_mentions, account }) => {
       try {
         const result = await postChatMessage({
           space,
           text,
           thread: thread ?? undefined,
           threadKey: thread_key ?? undefined,
+          allowMentions: allow_mentions ?? undefined,
           account: account ?? undefined,
         });
 

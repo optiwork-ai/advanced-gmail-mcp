@@ -37,6 +37,7 @@ const { CHAT_MESSAGES_CREATE_SCOPE } = await import('../chat/client.js');
 const {
   CHAT_TEXT_LIMIT,
   chatTextLength,
+  neutralizeChatMentions,
   postChatMessage,
   registerPostChatMessage,
   sanitizeChatText,
@@ -113,6 +114,35 @@ describe('sanitizeChatText', () => {
   });
 });
 
+/**
+ * CP-1 — Chat's `text` field is not inert. `<users/all>` notifies EVERYONE in
+ * the space, and message text is routinely composed from something read
+ * elsewhere (an email body, a Drive file, a log line) that this server also
+ * has access to. So the markup is defused unless the caller says otherwise.
+ */
+describe('neutralizeChatMentions', () => {
+  it('defuses the mention that pages the whole space', () => {
+    expect(neutralizeChatMentions('build is red <users/all>')).toEqual({
+      text: 'build is red users/all',
+      defused: 1,
+    });
+  });
+
+  it('defuses a mention of one person', () => {
+    expect(neutralizeChatMentions('<users/1234567890> please look').text)
+      .toBe('users/1234567890 please look');
+  });
+
+  it('counts every mention it defused', () => {
+    expect(neutralizeChatMentions('<users/all> and <users/123>').defused).toBe(2);
+  });
+
+  it('leaves ordinary angle brackets and code alone', () => {
+    const text = 'if (a < b) return <div>x</div> — see users/all';
+    expect(neutralizeChatMentions(text)).toEqual({ text, defused: 0 });
+  });
+});
+
 describe('chatTextLength', () => {
   it('counts an emoji as one character, the way a person does', () => {
     expect(chatTextLength('🎉')).toBe(1);
@@ -184,6 +214,33 @@ describe('postChatMessage — the post itself', () => {
   it('sends the SANITIZED text, not the raw text', async () => {
     await postChatMessage({ space: 'spaces/AAA', text: 'done\u0000 ok' });
     expect(chatApi.spaces.messages.create.mock.calls[0][0].requestBody.text).toBe('done ok');
+  });
+
+  it('does not page the whole space with text quoted from somewhere else', async () => {
+    // The realistic path: a session summarises an email whose body happens to
+    // contain the literal string, and posts the summary as a 3am alert.
+    const result = await postChatMessage({
+      space: 'AAA',
+      text: 'summary of ticket 88: "<users/all> the deploy is stuck"',
+    });
+
+    const sent = chatApi.spaces.messages.create.mock.calls[0][0].requestBody.text;
+    expect(sent).not.toContain('<users/all>');
+    expect(sent).toContain('users/all');
+    expect(result.note).toMatch(/mention/i);
+    expect(result.mentionsDefused).toBe(1);
+  });
+
+  it('lets a deliberate mention through when the caller asks for it', async () => {
+    const result = await postChatMessage({
+      space: 'AAA',
+      text: 'incident open <users/all>',
+      allowMentions: true,
+    });
+
+    expect(chatApi.spaces.messages.create.mock.calls[0][0].requestBody.text)
+      .toBe('incident open <users/all>');
+    expect(result.mentionsDefused).toBeUndefined();
   });
 
   it('still returns the message when the space name cannot be read', async () => {
@@ -327,6 +384,19 @@ describe('the registered tool', () => {
       name: 'spaces/AAA/messages/MMM',
       account: 'work',
     });
+  });
+
+  it('tells the composing model that text is NOT inert', async () => {
+    const { description } = capture();
+    expect(description).toMatch(/mention/i);
+  });
+
+  it('passes allow_mentions through, so a deliberate mention is still possible', async () => {
+    const { handler } = capture();
+    await handler({ space: 'AAA', text: 'all hands <users/all>', allow_mentions: true });
+
+    expect(chatApi.spaces.messages.create.mock.calls[0][0].requestBody.text)
+      .toBe('all hands <users/all>');
   });
 
   it('returns the refusal as an error, without posting', async () => {
