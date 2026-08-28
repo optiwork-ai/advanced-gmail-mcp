@@ -47,10 +47,58 @@ degrades the filename on save_dir writes. Mocks return stable ids, so 735 tests 
 
 ### AF3 — harness fixes (DONE, lane folder, not the repo)
 
-`/Users/steve/Claude-Projects/shared/active-work/2026-08-27-gmail-mcp-upgrade/round2-acceptance/acceptance.ts`:
-dynamic imports rooted at `REPO_ROOT`; check D exercises both the part_id and the no-part_id
-(size-fallback) paths; check B relabelled; new check B2 (existing non-app-created Doc, unmatchable
-find); check I trashes via `drive.files.update({trashed:true})`.
+`/Users/steve/Claude-Projects/shared/active-work/2026-08-27-gmail-mcp-upgrade/round2-acceptance/`:
+
+- **acceptance.ts** — static absolute imports replaced by dynamic imports rooted at
+  `process.env.REPO_ROOT` (default: the live checkout), so a candidate branch can be accepted
+  before merge. `import type` cannot follow a dynamic path, so the handful of fields the harness
+  reads are declared locally and partially — the SHIPPED code still runs.
+- **package.json** (new, 4 lines, `{"type":"module"}`) — the harness sits outside the repo's own
+  package scope, so tsx was treating it as CJS and refusing top-level `await import`. This marks
+  the folder ESM. It is the whole reason the documented `acceptance.ts` path could stay unchanged
+  instead of becoming `.mts`.
+- **check D** — now runs BOTH paths and FAILs if either misses the image block: with `part_id`
+  from read_email, and without it so the size fallback must identify the part. The no-part_id
+  path is the ordinary case and the one that was broken.
+- **check B** — relabelled. A success is now
+  `PASS (drive.file suffices for app-created docs — consent NOT implied)`; Round 1's
+  "PASS-POSTCONSENT" on this check was false.
+- **check B2** (new) — the honest consent test: an EXISTING Google Doc the app did not create
+  (Drive search `mimeType = 'application/vnd.google-apps.document'`, throwaway excluded), edited
+  only through a find/replace whose `find` is a fresh `randomUUID()`. Post-consent success is a
+  zero-match no-op; a non-zero change count is a FAIL. PASS-PRECONSENT / PASS-POSTCONSENT.
+- **check I** — trashes the throwaway via `drive.files.update({trashed:true})` on the server's own
+  `getDriveClient` (drive.file covers app-created files). No more litter, no manual step.
+- **README-RUN.md** — rewritten for `REPO_ROOT`, the symlink table, and the changed checks.
+
+Dry-run proof (no network): `--dry` with `REPO_ROOT` pointing at this worktree resolves every
+module and captures all four handlers; the same command with no `REPO_ROOT` resolves the live
+checkout and its accounts. The dry run prints whether the loaded checkout accepts `part_id`
+(worktree: "yes (AF2 present)"; live checkout: "NOT FOUND — predates the attachment fix"), so a
+run aimed at the wrong tree is visible in one line.
+
+The lane folder is UNTRACKED in the workspace repo (the chair never committed it), so nothing was
+committed there — the primary owns `shared/` edits. The files are on disk.
+
+## Symlinks the chair must create for a LIVE run against this worktree
+
+`src/config.ts` builds these from its OWN file location, so the worktree needs its own copies:
+
+```
+ln -s /Users/steve/Claude-Projects/2-backbone/advanced-gmail-mcp/accounts.json     /Users/steve/Claude-Projects/2-backbone/advanced-gmail-mcp-wt/attachment-fix/accounts.json
+ln -s /Users/steve/Claude-Projects/2-backbone/advanced-gmail-mcp/credentials.json  /Users/steve/Claude-Projects/2-backbone/advanced-gmail-mcp-wt/attachment-fix/credentials.json
+ln -s /Users/steve/Claude-Projects/2-backbone/advanced-gmail-mcp/tokens            /Users/steve/Claude-Projects/2-backbone/advanced-gmail-mcp-wt/attachment-fix/tokens
+```
+
+- `accounts.json` — `config.ts:23`, read only.
+- `credentials.json` — `config.ts:94`, read only.
+- `tokens/` (directory) — `config.ts:98`, read AND written (refreshed access tokens save back).
+  One symlinked directory keeps the worktree and the live checkout on one set of tokens.
+- `cursors/` (directory) — `config.ts:109`, written, **check H only**. Symlink it if H should
+  continue the live checkout's remembered position; otherwise leave it and set
+  `GMAIL_MCP_CURSOR_DIR`, and H will seed a fresh cursor and say so.
+
+All four are gitignored. Nothing else resolves a path against the project root.
 
 ## Standing constraints honored
 
