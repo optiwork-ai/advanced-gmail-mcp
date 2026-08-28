@@ -149,7 +149,9 @@ export function registerReadDriveFile(server: McpServer): void {
     'read_drive_file',
     'Read a Google Drive file: returns metadata plus text content where possible. Read-only. '
     + 'Google Docs/Sheets/Slides are exported to plain text/CSV; other text files are read '
-    + 'directly; binary/unknown types return metadata and a note (never raw bytes). Content is '
+    + 'directly; binary/unknown types return metadata and a note (never raw bytes). Reads files '
+    + 'in shared (team) drives as well as My Drive; the metadata carries driveId when the file '
+    + 'lives in a shared drive. Content is '
     + 'capped at ~1MB and truncation is flagged. Read contentNote before trusting the content: '
     + 'a Sheets export returns ONLY the first sheet, and a Slides export drops speaker notes.',
     readDriveFileParams,
@@ -160,7 +162,14 @@ export function registerReadDriveFile(server: McpServer): void {
         const metaResp = await withRetry(() =>
           drive.files.get({
             fileId: file_id,
-            fields: 'id,name,mimeType,size,modifiedTime,owners,webViewLink,parents',
+            fields: 'id,name,mimeType,size,modifiedTime,owners,webViewLink,parents,driveId',
+            // Drive v3 defaults this to FALSE, and refuses a shared-drive item
+            // to an app that has not declared support — with "File not found:
+            // <id>", which reads as "that file does not exist". Search now
+            // returns shared-drive files, so without this the file is found and
+            // then cannot be opened. This is the FIRST call, so it gates
+            // everything after it.
+            supportsAllDrives: true,
           })
         );
         const meta = metaResp.data;
@@ -210,7 +219,7 @@ export function registerReadDriveFile(server: McpServer): void {
           // alt=media downloads (responds 206 Partial Content).
           const resp = await withRetry(() =>
             drive.files.get(
-              { fileId: file_id, alt: 'media' },
+              { fileId: file_id, alt: 'media', supportsAllDrives: true },
               {
                 responseType: 'text',
                 headers: { Range: `bytes=0-${MAX_CONTENT_BYTES}` },

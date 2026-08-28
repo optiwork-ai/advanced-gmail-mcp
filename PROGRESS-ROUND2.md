@@ -370,3 +370,35 @@ three UNTRACKED items that are not mine and that I did not touch: `.vscode/`,
 `SIGNATURE-BANNER-MOCKUPS.md`, `sig-mockups/`. That is another session's work in progress.
 The live checkout is still on `main` at `a513a81` — its branch was never switched and no
 tracked file in it was modified by this build. Worktree isolation did its job.
+
+---
+
+# ROUND 2 FIX PASS (W-F) — the five confirmed review findings
+
+Worker: W-F (fix pass for the confirmed Round 2 review findings). Same frozen contract, same
+prohibitions. Worktree `/Users/steve/Claude-Projects/2-backbone/advanced-gmail-mcp-wt/round2`
+on `feat/round2-enhancements`.
+
+## Fix-pass baseline (read fresh, before any edit)
+
+- Branch head at start: **`736aebc`** — "docs(progress): note the concurrent session's
+  untracked files in the live checkout". Worktree **clean**.
+- `npm test` → **20 files, 709 passed, 0 failed. GREEN.**
+- `npm run typecheck` → **clean, exit 0.**
+- Gate for this pass: **709 + new tests, zero failures, nothing deleted or loosened.**
+- Disk before starting: `df -h /` → 5.8Gi available (the volume hit 0 once during the build).
+- The repo's LIVE checkout was not touched at any point in this pass.
+
+## Findings
+
+### WR-1 — read_drive_file could not open the shared-drive files G5 made findable — FIXED
+- Commit: `PENDING`
+- **FAIL-before (real):** added a handler-level describe to `src/tools/read-only-tools.test.ts`
+  (the file that already mocks the Drive client) pinning the parameters of both `files.get`
+  calls. Three failures at HEAD: `supportsAllDrives` undefined on the metadata call, undefined
+  on the `alt=media` call, and `driveId` absent from the metadata `fields`.
+- **Fix:** `supportsAllDrives: true` on the metadata `files.get` (`src/tools/drive-read-file.ts`)
+  and on the `alt=media` `files.get`; `driveId` added to the metadata `fields`, so the answer
+  says when a file lives in a shared drive. `files.export` takes no such parameter and was left
+  alone. The tool description now states that shared drives are read too.
+- Full suite after: **20 files, 713 passed** (+4), typecheck clean.

@@ -17,7 +17,7 @@ const chatApi = {
     messages: { list: vi.fn(), get: vi.fn() },
   },
 };
-const driveApi = { files: { list: vi.fn() } };
+const driveApi = { files: { list: vi.fn(), get: vi.fn(), export: vi.fn() } };
 const docsApi = { documents: { get: vi.fn() } };
 
 vi.mock('../chat/client.js', () => ({
@@ -46,6 +46,7 @@ const { registerListChatSpaces } = await import('./chat-list-spaces.js');
 const { registerListChatMessages } = await import('./chat-list-messages.js');
 const { registerSearchDriveFiles } = await import('./drive-search-files.js');
 const { registerGetGoogleDoc } = await import('./docs-get-document.js');
+const { registerReadDriveFile } = await import('./drive-read-file.js');
 
 // --- a fake McpServer that just captures the handler ----------------------
 
@@ -348,5 +349,64 @@ describe('search_drive_files sees shared drives', () => {
   it('says in its description that shared drives are included', () => {
     const { description } = capture(registerSearchDriveFiles as (server: never) => void);
     expect(description).toMatch(/shared drive/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WR-1 — the other half of G5. Search now RETURNS shared-drive files; opening
+// one has to work too. Drive v3 defaults `supportsAllDrives` to false and
+// answers "File not found: <id>" for a shared-drive item when an app has not
+// declared support — so without this the round's headline Drive fix makes team
+// files visible for the first time and every attempt to open one says the file
+// does not exist.
+// ---------------------------------------------------------------------------
+
+describe('read_drive_file can open what search now finds', () => {
+  /** Run the handler and return the parameters of each files.get call. */
+  async function callsFor(meta: Record<string, unknown>, body = 'hello') {
+    driveApi.files.get.mockImplementation((params: Record<string, unknown>) =>
+      params.alt === 'media'
+        ? Promise.resolve({ data: body })
+        : Promise.resolve({ data: meta }),
+    );
+    const { handler } = capture(registerReadDriveFile as (server: never) => void);
+    const result = await handler({ file_id: 'f1', account: 'work' });
+    return {
+      result,
+      calls: driveApi.files.get.mock.calls.map(c => c[0] as Record<string, unknown>),
+    };
+  }
+
+  it('declares shared-drive support on the metadata read, which gates everything after it', async () => {
+    const { calls } = await callsFor({ id: 'f1', name: 'notes.txt', mimeType: 'text/plain' });
+
+    expect(calls[0].fileId).toBe('f1');
+    expect(calls[0].supportsAllDrives).toBe(true);
+  });
+
+  it('declares it on the content read too, so a readable file is not lost at the second call', async () => {
+    const { calls } = await callsFor({ id: 'f1', name: 'notes.txt', mimeType: 'text/plain' });
+
+    const media = calls.find(c => c.alt === 'media');
+    expect(media).toBeDefined();
+    expect(media?.supportsAllDrives).toBe(true);
+  });
+
+  it('asks for driveId, so the answer says the file lives in a shared drive', async () => {
+    const { calls } = await callsFor({ id: 'f1', name: 'notes.txt', mimeType: 'text/plain' });
+
+    expect(String(calls[0].fields)).toContain('driveId');
+  });
+
+  it('still returns the file it read', async () => {
+    const { result } = await callsFor(
+      { id: 'f1', name: 'notes.txt', mimeType: 'text/plain', driveId: '0AB' },
+      'hello',
+    );
+    const payload = JSON.parse(result.content[0].text);
+
+    expect(result.isError).toBeUndefined();
+    expect(payload.content).toBe('hello');
+    expect(payload.metadata.driveId).toBe('0AB');
   });
 });
