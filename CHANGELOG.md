@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] — 2026-08-28
+
+Google Chat can now be posted to. Until today this server could only read Chat; the owner reversed that on 2026-08-28 ("lets get chat posting working as well"), and this release is that reversal.
+
+**This needs a fresh sign-in.** The posting permission is new, and a permission that did not exist when an account signed in cannot be used by it. Run `npm run auth -- <alias>` once for every account that should be able to post. Until you do, posting returns an error that names the permission and the command, and nothing else changes: reading Chat, mail, Drive, Docs and Calendar all go on working exactly as before.
+
+### Added
+- **`post_chat_message` — posts a real message into a Chat space, which everyone in that space sees.** It goes out as the account you name, the moment you ask for it: there is no draft, no preview and no "are you sure" step, which is the same footing sending an email has here. A post is attributed to the account that made it and can be deleted in Chat afterwards. The reason for that footing is the job it was built for — a scheduled session raising an alert at 3am has nobody to ask.
+- Replies. Point it at a conversation and it answers inside that conversation; you can name the conversation itself or simply the message you are replying to. If Chat cannot put the reply where you asked, it says the message into the room instead of failing — and the answer tells you which of the two happened, because "answered them" and "said it into the room" are not the same outcome.
+- Repeat alerts can be kept together. Give a run of related messages a key of your own, and they collect into one conversation rather than filling the space with separate ones.
+- Refusals happen before anything is posted, never halfway through: an empty message, a message longer than Chat's 4,096-character limit (with the actual length named so you know how much to cut), a conversation that belongs to a different space, and asking for a conversation two contradictory ways at once. Emoji count as one character each, the way a person counts them.
+- Stray control characters from a pasted log line are cleaned out so the message reads as it was meant to. Line breaks and tabs are kept.
+- Every post is recorded in the server's own log — which account, which space, how long the message was, and whether it landed — and the message text itself is never written there.
+
+### Changed
+- The tool count goes from 52 to **53**.
+- The documentation no longer says Chat is read-only, because it no longer is.
+
 ## [1.7.1] — 2026-08-28
 
 Polish on the 1.7.0 tools. No new tools, no new permissions, nothing to re-consent.
