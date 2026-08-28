@@ -1180,19 +1180,59 @@ export async function trashMessage(opts: {
   const resolved = resolveAccount(opts.account);
   const gmail = await getGmailClient(resolved);
 
-  log('info', 'trash_email', { account: resolved.alias, message_id: opts.messageId });
-
-  const response = await withRetry(() =>
-    gmail.users.messages.trash({
-      userId: 'me',
-      id: opts.messageId,
-    })
+  const response = await audited(
+    'trash_email',
+    { account: resolved.alias, message_id: opts.messageId },
+    () => withRetry(() =>
+      gmail.users.messages.trash({
+        userId: 'me',
+        id: opts.messageId,
+      })
+    ),
   );
 
   return {
     success: true,
     id: response.data.id || '',
   };
+}
+
+// ---------------------------------------------------------------------------
+// Audit trail — both edges of a destructive act
+// ---------------------------------------------------------------------------
+
+/**
+ * Run a destructive call, logging its INTENT before and its OUTCOME after.
+ *
+ * Every destructive path used to log once, above the API call, and nothing
+ * after it. A trash, a thread delete or a draft send that FAILED therefore left
+ * a line in the log saying it had happened — so anyone reading the trail later,
+ * including a future session reconstructing what the mailbox did, would believe
+ * an action completed that never did.
+ *
+ * The intent line stays: it is what proves the call was reached, and it is
+ * written before anything can go wrong. What is added is the closing line —
+ * `phase: 'done'` at info, or `phase: 'failed'` at error with the reason. The
+ * error is re-thrown untouched; this only watches.
+ */
+async function audited<T>(
+  event: string,
+  fields: Record<string, unknown>,
+  fn: () => Promise<T>,
+): Promise<T> {
+  log('info', event, { ...fields, phase: 'start' });
+  try {
+    const result = await fn();
+    log('info', event, { ...fields, phase: 'done' });
+    return result;
+  } catch (err: unknown) {
+    log('error', event, {
+      ...fields,
+      phase: 'failed',
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
 }
 
 /** Gmail's hard limit on one batchModify call. */
@@ -1270,7 +1310,8 @@ export async function batchTrash(opts: {
   const resolved = resolveAccount(opts.account);
   const gmail = await getGmailClient(resolved);
 
-  log('info', 'batch_trash', { account: resolved.alias, count: opts.messageIds.length });
+  const batchFields = { account: resolved.alias, count: opts.messageIds.length };
+  log('info', 'batch_trash', { ...batchFields, phase: 'start' });
 
   const trashed: string[] = [];
   const failures: Array<{ ids: string[]; error: string }> = [];
@@ -1291,6 +1332,22 @@ export async function batchTrash(opts: {
       if (result.error === null) trashed.push(result.id);
       else failures.push({ ids: [result.id], error: result.error });
     }
+  }
+
+  // batchTrash is the one destructive path that does not throw — it reports
+  // per-message failures instead. Its closing line therefore carries the tally,
+  // and a run where anything failed is logged at error rather than reported as
+  // a clean completion.
+  if (failures.length > 0) {
+    log('error', 'batch_trash', {
+      ...batchFields,
+      phase: 'failed',
+      trashed: trashed.length,
+      failed: failures.length,
+      error: failures[0].error,
+    });
+  } else {
+    log('info', 'batch_trash', { ...batchFields, phase: 'done', trashed: trashed.length });
   }
 
   return {
@@ -1489,13 +1546,15 @@ export async function deleteLabel(opts: {
   const resolved = resolveAccount(opts.account);
   const gmail = await getGmailClient(resolved);
 
-  log('info', 'delete_label', { account: resolved.alias, label_id: opts.labelId });
-
-  await withRetry(() =>
-    gmail.users.labels.delete({
-      userId: 'me',
-      id: opts.labelId,
-    })
+  await audited(
+    'delete_label',
+    { account: resolved.alias, label_id: opts.labelId },
+    () => withRetry(() =>
+      gmail.users.labels.delete({
+        userId: 'me',
+        id: opts.labelId,
+      })
+    ),
   );
 
   return { success: true, labelId: opts.labelId };
@@ -1551,19 +1610,21 @@ export async function modifyThread(opts: {
   const resolved = resolveAccount(opts.account);
   const gmail = await getGmailClient(resolved);
 
-  log('info', 'modify_thread', {
-    account: resolved.alias,
-    thread_id: opts.threadId,
-    add: add.length,
-    remove: remove.length,
-  });
-
-  const response = await withRetry(() =>
-    gmail.users.threads.modify({
-      userId: 'me',
-      id: opts.threadId,
-      requestBody: { addLabelIds: add, removeLabelIds: remove },
-    })
+  const response = await audited(
+    'modify_thread',
+    {
+      account: resolved.alias,
+      thread_id: opts.threadId,
+      add: add.length,
+      remove: remove.length,
+    },
+    () => withRetry(() =>
+      gmail.users.threads.modify({
+        userId: 'me',
+        id: opts.threadId,
+        requestBody: { addLabelIds: add, removeLabelIds: remove },
+      })
+    ),
   );
 
   // threads.modify returns the thread, whose messages carry the new labels.
@@ -1589,10 +1650,12 @@ export async function trashThread(opts: {
   const resolved = resolveAccount(opts.account);
   const gmail = await getGmailClient(resolved);
 
-  log('info', 'trash_thread', { account: resolved.alias, thread_id: opts.threadId });
-
-  const response = await withRetry(() =>
-    gmail.users.threads.trash({ userId: 'me', id: opts.threadId })
+  const response = await audited(
+    'trash_thread',
+    { account: resolved.alias, thread_id: opts.threadId },
+    () => withRetry(() =>
+      gmail.users.threads.trash({ userId: 'me', id: opts.threadId })
+    ),
   );
 
   return {
@@ -2549,10 +2612,12 @@ export async function deleteDraft(opts: {
   const resolved = resolveAccount(opts.account);
   const gmail = await getGmailClient(resolved);
 
-  log('info', 'delete_draft', { account: resolved.alias, draft_id: opts.draftId });
-
-  await withRetry(() =>
-    gmail.users.drafts.delete({ userId: 'me', id: opts.draftId })
+  await audited(
+    'delete_draft',
+    { account: resolved.alias, draft_id: opts.draftId },
+    () => withRetry(() =>
+      gmail.users.drafts.delete({ userId: 'me', id: opts.draftId })
+    ),
   );
 
   return { success: true, draft_id: opts.draftId };
@@ -2568,15 +2633,17 @@ export async function sendDraft(opts: {
   const resolved = resolveAccount(opts.account);
   const gmail = await getGmailClient(resolved);
 
-  log('info', 'send_draft', { account: resolved.alias, draft_id: opts.draftId });
-
-  const response = await withRetry(() =>
-    gmail.users.drafts.send({
-      userId: 'me',
-      requestBody: {
-        id: opts.draftId,
-      },
-    })
+  const response = await audited(
+    'send_draft',
+    { account: resolved.alias, draft_id: opts.draftId },
+    () => withRetry(() =>
+      gmail.users.drafts.send({
+        userId: 'me',
+        requestBody: {
+          id: opts.draftId,
+        },
+      })
+    ),
   );
 
   return {

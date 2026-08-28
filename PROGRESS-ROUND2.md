@@ -207,3 +207,22 @@ already completed before the outage.
 **This is a real operational risk for the rest of the round.** Free space is hovering under
 1GB on a 228GB volume. If a later unit reports as blocked, check `df -h /` first — it is far
 more likely to be this than anything in the code.
+
+### G9 — audit log outcome edges — DONE
+- Commit: `PENDING-SHA-G9`
+- FAIL-before: **15 failed | 8 passed (23)** in the new `src/gmail/audit-log.test.ts`.
+- PASS-after: full suite **665 passed (665)**, 17 files, typecheck clean.
+- New private `audited(event, fields, fn)` in client.ts wraps six of the seven paths:
+  intent line first (`phase: 'start'`), then `phase: 'done'` at info, or `phase: 'failed'`
+  at error with the reason. The error is re-thrown untouched — this only watches.
+- Six via the helper: trash_email, delete_label, modify_thread, trash_thread, delete_draft,
+  send_draft. **batch_trash is handled separately and deliberately:** it is the one path
+  that never throws (it collects per-message failures), so its closing line carries the
+  tally — `phase: 'failed'` at error with counts and the first reason when anything failed,
+  `phase: 'done'` with the trashed count otherwise.
+- The intent line was KEPT on every path, as the contract requires: it is what proves the
+  call was reached at all, and it is written before anything can go wrong. Every line keeps
+  its identifying field (message_id / thread_id / label_id / draft_id / count) and its
+  account, so the two edges can be paired up in the log.
+- Pinned by test: a `delete_label` refused by the G1 confirm gate logs **nothing at all** —
+  the guard runs before the trail, so a refusal leaves no "delete_label" footprint.
