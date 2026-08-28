@@ -162,8 +162,32 @@ stated in the entry. No other file referenced the version string.
 
 Final gate: `npm test` = 22 files, **772 passed, 0 failed**; `npm run typecheck` clean, exit 0.
 Net over baseline: **+26 tests, zero deleted, zero assertions weakened.**
-Commit: (recorded below)
+Commit: `7badd40`
 
 ## Units skipped
 
 None. No design fork was met, so nothing was appended to `QUESTIONS-FOR-FABLE.md`.
+
+## Commits (main @ 3e2a011 .. HEAD)
+
+- `8301ad2` P1 — resumedFrom carries the remembered cursor, not a sentence
+- `c88bf1e` P2 — an export failure says what Google said, not just a status code
+- `393becf` P3 — an upload refused for a real reason says the real reason
+- `d3bf6ab` P4 — a deleted or edited Chat message no longer reads as an ordinary one
+- `9eb69cf` P5 — two watchers with different filters stop eating each other's window
+- `7badd40` release 1.7.1
+
+## Final audit
+
+- `git diff main..HEAD -- '*.test.ts'` removes **16** lines, ALL of them the P5 harness
+  widening: the `cursorStore` stub's signatures and its `beforeEach` implementation (rewritten
+  to key by alias + filter, mirroring the real store), the test file's import line, and one
+  call-site restatement (`toHaveBeenCalledWith('work', '5000')` → `..., {}`). No assertion
+  loosened, no test deleted, no baseline artifact edited.
+- 16 files changed, +815 / -61.
+- No AI attribution in any commit (`grep -icE 'co-authored|claude|anthropic|generated with'`
+  over `%an|%B` → 0); sole author Steve Angelo.
+- `package-lock.json` unchanged across the branch (0 lines in the stat).
+- Nothing pushed: the branch has no upstream.
+- Live checkout `advanced-gmail-mcp` still on `main` @ `3e2a011`, `git status` empty.
+- Disk 5.1Gi free at close.
