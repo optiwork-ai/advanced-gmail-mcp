@@ -84,4 +84,28 @@ raw Google error, instead of after `withRetry` had already rewritten it.
 FAIL-before (real, behavioural): 2 failed | 23 passed. The retry and 401 tests pass on both
 sides by design — they are the regression guards that prove nothing was dropped.
 PASS-after: 22 files, 756 passed, 0 failed; typecheck clean.
+Commit: `393becf`
+
+## P4 — a deleted or edited Chat message says so — DONE
+
+G4's projection dropped `deletionMetadata` and `lastUpdateTime` along with the genuine noise,
+so a DELETED message and an EDITED one came back looking exactly like an ordinary one. A
+reader summarising a space could quote a message the author had retracted, or an old wording
+as though it were current, with nothing in the answer to warn them.
+
+- `src/tools/chat-list-messages.ts` — `projectChatMessage` emits `deleted: true` (plus
+  `deleteTime` and `deletedBy` when Chat reports them) and `edited: true` + `lastUpdateTime`.
+  Both absent on an ordinary message, so their presence means something.
+- Description updated: names both markers, says an edited message's `text` is the CURRENT
+  wording, and says not to quote a deleted message as though it stands.
+
+Beyond the literal ask, flagged and one-line reversible: `deleteTime` and `deletedBy`
+(`deletionMetadata.deletionType`) are carried too. `deletionType` is the whole content of
+`deletionMetadata` and it distinguishes "the author retracted this" from "an admin removed
+it"; dropping it would have meant reading the object and throwing away the only thing in it.
+
+FAIL-before (real, behavioural): 3 failed | 40 passed. The fourth new test (an ordinary
+message carries neither marker) passes on both sides by design — it is the guard that keeps
+the markers meaningful.
+PASS-after: 22 files, 760 passed, 0 failed; typecheck clean.
 Commit: (recorded below)

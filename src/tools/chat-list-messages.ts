@@ -60,6 +60,27 @@ export function projectChatMessage(message: chat_v1.Schema$Message): Record<stri
   if (!message.text && message.fallbackText) out.fallbackText = message.fallbackText;
   if (message.thread?.name != null) out.thread = message.thread.name;
 
+  // A deleted message and an edited one used to project identically to an
+  // ordinary one — name, sender, createTime, text — because deletionMetadata
+  // and lastUpdateTime were dropped with the rest of the raw object. A reader
+  // summarising a space could then quote a message the author had retracted, or
+  // an old wording as though it were the current one, with nothing in the
+  // answer to warn them. The markers are stated outright rather than handing
+  // back Chat's raw fields: a consumer should not have to know that
+  // "deleteTime is set" is how Chat says deleted.
+  if (message.deletionMetadata != null || message.deleteTime != null) {
+    out.deleted = true;
+    if (message.deleteTime != null) out.deleteTime = message.deleteTime;
+    if (message.deletionMetadata?.deletionType != null) {
+      out.deletedBy = message.deletionMetadata.deletionType;
+    }
+  }
+
+  if (message.lastUpdateTime != null) {
+    out.edited = true;
+    out.lastUpdateTime = message.lastUpdateTime;
+  }
+
   const attachments = (message.attachment ?? [])
     .map(a => ({
       ...(a.contentName != null ? { contentName: a.contentName } : {}),
@@ -81,6 +102,11 @@ export function registerListChatMessages(server: McpServer): void {
     + 'Returns, per message: name, sender (name, displayName, type), createTime, text, and '
     + 'thread — plus attachments (contentName, contentType) when a file was shared, and '
     + 'fallbackText when the message is a card with no text of its own. '
+    + 'A message that was deleted carries deleted: true (with deleteTime and deletedBy when '
+    + 'Chat reports them) and usually has no text left; one that was edited carries '
+    + 'edited: true and lastUpdateTime, and its text is the CURRENT wording, not what was '
+    + 'first sent. Both markers are absent on an ordinary message — do not quote a deleted '
+    + 'message as though it still stands. '
     + 'Newest first by default (order_by "createTime asc" for oldest first).',
     listChatMessagesParams,
     async ({ space, account, filter, max_results, order_by }) => {

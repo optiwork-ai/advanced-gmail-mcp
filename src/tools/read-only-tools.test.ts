@@ -317,6 +317,72 @@ describe('list_chat_messages field projection', () => {
     }
     expect(description).not.toMatch(/raw Chat message objects/);
   });
+
+  // P4 — the projection dropped deletionMetadata and lastUpdateTime along with
+  // the noise, so a DELETED message and an EDITED one came back looking exactly
+  // like an ordinary one: name, sender, createTime, text. A reader summarising
+  // a space could quote a message the author had already retracted, or an old
+  // wording as if it were the current one, with nothing in the answer to warn
+  // them. The markers are explicit rather than a raw field, because a consumer
+  // should not have to know that "deleteTime is set" is Chat's way of saying
+  // deleted.
+
+  it('marks a deleted message as deleted, so it is not read as an ordinary one', async () => {
+    chatApi.spaces.messages.list.mockResolvedValue({
+      data: {
+        messages: [{
+          name: 'spaces/A/messages/D',
+          createTime: '2026-08-20T10:00:00Z',
+          deleteTime: '2026-08-20T11:00:00Z',
+          deletionMetadata: { deletionType: 'CREATOR' },
+        }],
+      },
+    });
+    const { handler } = capture(registerListChatMessages as (server: never) => void);
+
+    const m = JSON.parse((await handler({ space: 'AAAA' })).content[0].text)[0];
+
+    expect(m.deleted).toBe(true);
+    expect(m.deletedBy).toBe('CREATOR');
+    expect(m.deleteTime).toBe('2026-08-20T11:00:00Z');
+  });
+
+  it('marks an edited message as edited and says when it was last changed', async () => {
+    chatApi.spaces.messages.list.mockResolvedValue({
+      data: {
+        messages: [{
+          name: 'spaces/A/messages/E',
+          createTime: '2026-08-20T10:00:00Z',
+          text: 'the corrected wording',
+          lastUpdateTime: '2026-08-20T12:30:00Z',
+        }],
+      },
+    });
+    const { handler } = capture(registerListChatMessages as (server: never) => void);
+
+    const m = JSON.parse((await handler({ space: 'AAAA' })).content[0].text)[0];
+
+    expect(m.edited).toBe(true);
+    expect(m.lastUpdateTime).toBe('2026-08-20T12:30:00Z');
+  });
+
+  it('an ordinary message carries neither marker — they mean something when present', async () => {
+    chatApi.spaces.messages.list.mockResolvedValue({ data: { messages: [RAW_MESSAGE] } });
+    const { handler } = capture(registerListChatMessages as (server: never) => void);
+
+    const m = JSON.parse((await handler({ space: 'AAAA' })).content[0].text)[0];
+
+    expect(m.deleted).toBeUndefined();
+    expect(m.edited).toBeUndefined();
+    expect(m.lastUpdateTime).toBeUndefined();
+    expect(m.deleteTime).toBeUndefined();
+  });
+
+  it('names the two markers in its description', () => {
+    const { description } = capture(registerListChatMessages as (server: never) => void);
+    expect(description).toContain('deleted');
+    expect(description).toContain('edited');
+  });
 });
 
 // ---------------------------------------------------------------------------
