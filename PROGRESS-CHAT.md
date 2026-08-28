@@ -3,7 +3,7 @@
 Branch `feat/chat-posting` off `main` @ e0bf9b1 (v1.7.1, 52 tools).
 Worktree: `/Users/steve/Claude-Projects/2-backbone/advanced-gmail-mcp-wt/chat-post`.
 Baseline before any change: **772 tests green, typecheck clean**.
-After the round: **807 tests green, typecheck clean, 53 tools, v1.8.0**.
+After the round: **808 tests green, typecheck clean, 53 tools, v1.8.0**.
 
 Context: Steve reversed the 2026-08-27 read-only-Chat ruling on 2026-08-28
 ("lets get chat posting working as well"). This round adds ONE tool,
@@ -42,8 +42,13 @@ Context: Steve reversed the 2026-08-27 read-only-Chat ruling on 2026-08-28
   automated alerting from scheduled sessions is the use case, posts are attributed
   and deletable, and this mirrors `send_email`. The honesty lives in the tool
   description's first sentence instead.
-- **Not retried on an ambiguous failure.** `googleApiCall` retries only rate-limit
-  and transient failures; a post that landed is never re-issued.
+- **The post is not retried at all (CP2b).** The shared `googleApiCall` retries
+  500/502/503/504, and a gateway failure can arrive AFTER Chat accepted the
+  message — retrying would say the same thing twice in front of the space and
+  return the id of only one. `googleApiCall` gained a pass-through `maxRetries`
+  and the post uses 0; the two reads around it keep their retries.
+  FAIL-before demonstrated: with the pass-through removed, the 503 test sees the
+  post issued 4 times.
 - **Display name is fetched AFTER the post**, best-effort and silent on failure, so
   a missing `chat.spaces.readonly` can never make a posted message look failed.
 - **A thread in another space is refused**, not silently re-pointed at the space

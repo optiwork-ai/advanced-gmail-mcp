@@ -102,11 +102,13 @@ export interface PostChatMessageResult {
 /**
  * Post one message to a Google Chat space.
  *
- * NOT retried on its own account — `googleApiCall` wraps it, and that helper's
- * retry only fires on rate-limit and transient failures, where Chat has not
- * accepted the message. A retry after a post that actually landed would
- * duplicate it, which is why `thread_key` exists on Google's side and why
- * nothing here re-issues the call on an ambiguous failure.
+ * The post itself is NOT retried (`maxRetries: 0`). The shared helper retries
+ * 500/502/503/504, and a gateway timeout can arrive after Chat has already
+ * accepted the message — retrying then says the same thing twice in front of
+ * everyone in the space, and returns the id of only one of them. A failure is
+ * reported instead, and the caller decides. The two READS around it (looking a
+ * thread up, reading the space's display name) keep the retries, because
+ * repeating a read costs nothing.
  */
 export async function postChatMessage(opts: PostChatMessageOptions): Promise<PostChatMessageResult> {
   const resolved = typeof opts.account === 'string' || opts.account === undefined
@@ -203,6 +205,8 @@ export async function postChatMessage(opts: PostChatMessageOptions): Promise<Pos
           ...(thread ? { thread } : {}),
         },
       }),
+      // See postChatMessage's note: a retried post is a duplicate message.
+      { maxRetries: 0 },
     );
   } catch (err: unknown) {
     log('error', 'post_chat_message', {

@@ -92,10 +92,18 @@ export function translateGoogleApiError(err: unknown, ctx: GoogleApiErrorContext
 /**
  * Run one Google API call with retries AND honest error reporting.
  * The translation sits inside the retry so it reads the raw Google error.
+ *
+ * `maxRetries: 0` turns the retrying off while keeping the honesty, which is
+ * what a call that CREATES something visible needs: `withRetry` retries 500,
+ * 502, 503 and 504, and a gateway timeout can arrive after the write actually
+ * landed. Retrying then posts the thing twice and returns the id of only one.
+ * A write whose duplicate would be seen by other people (post_chat_message)
+ * therefore reports the failure instead of guessing.
  */
 export async function googleApiCall<T>(
   ctx: GoogleApiErrorContext,
   fn: () => Promise<T>,
+  opts: { maxRetries?: number } = {},
 ): Promise<T> {
   return withRetry(async () => {
     try {
@@ -103,5 +111,5 @@ export async function googleApiCall<T>(
     } catch (err: unknown) {
       throw translateGoogleApiError(err, ctx);
     }
-  });
+  }, opts);
 }

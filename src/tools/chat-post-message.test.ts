@@ -263,6 +263,19 @@ describe('postChatMessage — honest failures', () => {
     );
   });
 
+
+  it('does NOT retry a transient failure — a retried post is a duplicate message', async () => {
+    // 503 is on the shared helper's retry list, and a gateway failure can
+    // arrive after Chat has already accepted the message. Retrying would say
+    // the same thing twice in front of everyone in the space.
+    const err = new Error('Service Unavailable') as Error & { code: number };
+    err.code = 503;
+    chatApi.spaces.messages.create.mockRejectedValue(err);
+
+    await expect(postChatMessage({ space: 'AAA', text: 'hi' })).rejects.toThrow(/Service Unavailable/);
+    expect(chatApi.spaces.messages.create).toHaveBeenCalledTimes(1);
+  });
+
   it('does not tell the reader to re-authenticate when Chat refuses the space', async () => {
     const err = new Error('The caller does not have permission') as Error & { code: number };
     err.code = 403;
