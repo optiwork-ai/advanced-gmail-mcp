@@ -41,12 +41,20 @@ vi.mock('../log.js', () => ({
 }));
 
 const {
+  CONVERTIBLE_EXTENSIONS,
+  CONVERT_TARGET_BY_SOURCE_MIME,
   DRIVE_FILE_SCOPE,
+  GOOGLE_DOC_MIME,
+  GOOGLE_SHEET_MIME,
+  GOOGLE_SLIDES_MIME,
   MAX_DRIVE_UPLOAD_BYTES,
+  convertTargetForFilename,
   driveFileName,
   getDriveClient,
   uploadFile,
 } = await import('./client.js');
+
+const { mimeTypeForFilename } = await import('../gmail/mime.js');
 
 /** Write a temp file and return its absolute path. */
 function tempFile(name: string, contents = 'hello drive'): string {
@@ -363,5 +371,317 @@ describe('upload_drive_file tells the truth about a 403 that is not a missing sc
     const filePath = tempFile('summary.pdf');
 
     await expect(uploadFile({ filePath })).rejects.toThrow(/Authentication error \(401\)/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CV — convert-on-upload.
+//
+// An uploaded .xlsx used to land in Drive as a stored Office file: clicking it
+// opens a preview, not a spreadsheet you can edit. The mechanism that fixes it
+// already existed in this repo for `create_google_doc` — naming the TARGET
+// google-apps mimeType on a `files.create` makes Drive convert the media rather
+// than store it — and these pin that mechanism generalised to uploads, plus the
+// two things that must NOT change: the default path, and the refusal for a
+// source type Google cannot convert.
+// ---------------------------------------------------------------------------
+
+describe('the conversion map', () => {
+  it('names the three Google types by their real mimeTypes', () => {
+    // Pinned as literals on purpose: every behavioural assertion below compares
+    // against these strings, and two undefined constants would agree with each
+    // other perfectly while proving nothing.
+    expect(GOOGLE_SHEET_MIME).toBe('application/vnd.google-apps.spreadsheet');
+    expect(GOOGLE_DOC_MIME).toBe('application/vnd.google-apps.document');
+    expect(GOOGLE_SLIDES_MIME).toBe('application/vnd.google-apps.presentation');
+  });
+
+  it('maps every spreadsheet source Google accepts, and only to a Google Sheet', () => {
+    for (const source of [
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // xlsx
+      'application/vnd.ms-excel', // xls
+      'application/vnd.oasis.opendocument.spreadsheet', // ods
+      'text/csv',
+      'text/tab-separated-values',
+    ]) {
+      expect(CONVERT_TARGET_BY_SOURCE_MIME[source]).toBe(GOOGLE_SHEET_MIME);
+    }
+  });
+
+  it('maps the document sources to a Google Doc', () => {
+    for (const source of [
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // docx
+      'application/msword', // doc
+      'application/vnd.oasis.opendocument.text', // odt
+      'application/rtf',
+      'text/plain',
+    ]) {
+      expect(CONVERT_TARGET_BY_SOURCE_MIME[source]).toBe(GOOGLE_DOC_MIME);
+    }
+  });
+
+  it('maps the presentation sources to Google Slides', () => {
+    for (const source of [
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation', // pptx
+      'application/vnd.ms-powerpoint', // ppt
+      'application/vnd.oasis.opendocument.presentation', // odp
+    ]) {
+      expect(CONVERT_TARGET_BY_SOURCE_MIME[source]).toBe(GOOGLE_SLIDES_MIME);
+    }
+  });
+
+  it('invents nothing beyond those thirteen — every entry is one Google can import', () => {
+    // The live harness (H-A0) checks this map against Google's own
+    // about.get(importFormats). Keeping the map closed is what makes that
+    // check meaningful: a guessed entry would fail live rather than here.
+    expect(Object.keys(CONVERT_TARGET_BY_SOURCE_MIME).sort()).toEqual([
+      'application/msword',
+      'application/rtf',
+      'application/vnd.ms-excel',
+      'application/vnd.ms-powerpoint',
+      'application/vnd.oasis.opendocument.presentation',
+      'application/vnd.oasis.opendocument.spreadsheet',
+      'application/vnd.oasis.opendocument.text',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'text/csv',
+      'text/plain',
+      'text/tab-separated-values',
+    ]);
+  });
+
+  it('does not offer to convert a PDF or an image — Drive stores those as they are', () => {
+    expect(CONVERT_TARGET_BY_SOURCE_MIME['application/pdf']).toBeUndefined();
+    expect(CONVERT_TARGET_BY_SOURCE_MIME['image/png']).toBeUndefined();
+  });
+
+  it('every extension the refusal advertises really does resolve into the map', () => {
+    // The refusal names extensions, because that is what a caller has. This is
+    // the join between the two vocabularies: an extension in the message that
+    // mimeTypeForFilename cannot type would be advice that does not work.
+    for (const ext of CONVERTIBLE_EXTENSIONS) {
+      const mime = mimeTypeForFilename(`sample.${ext}`);
+      expect(mime, `mimeTypeForFilename could not type .${ext}`).not.toBe('application/octet-stream');
+      expect(CONVERT_TARGET_BY_SOURCE_MIME[mime], `.${ext} → ${mime} is not in the map`).toBeDefined();
+    }
+  });
+
+  it('advertises all thirteen extensions, so nothing supported is hidden from the caller', () => {
+    expect([...CONVERTIBLE_EXTENSIONS].sort()).toEqual(
+      ['csv', 'doc', 'docx', 'odp', 'ods', 'odt', 'ppt', 'pptx', 'rtf', 'tsv', 'txt', 'xls', 'xlsx'],
+    );
+  });
+});
+
+describe('convertTargetForFilename', () => {
+  it('answers with the Google type an upload of that name would become', () => {
+    expect(convertTargetForFilename('budget.xlsx')).toBe('application/vnd.google-apps.spreadsheet');
+    expect(convertTargetForFilename('notes.TXT')).toBe('application/vnd.google-apps.document');
+    expect(convertTargetForFilename('deck.pptx')).toBe('application/vnd.google-apps.presentation');
+  });
+
+  it('answers undefined for anything Google will not convert', () => {
+    expect(convertTargetForFilename('scan.pdf')).toBeUndefined();
+    expect(convertTargetForFilename('archive.zip')).toBeUndefined();
+    expect(convertTargetForFilename('noextension')).toBeUndefined();
+  });
+});
+
+describe('uploadFile with convert', () => {
+  function convertedResponse(over: Record<string, unknown> = {}) {
+    // A converted Google file: no `size` at all — Drive does not report a byte
+    // size for its own formats. `okResponse` carries one, so this shape is the
+    // one the result-building code has to survive.
+    return {
+      data: {
+        id: 'sheet-1',
+        name: 'fixture.csv',
+        mimeType: 'application/vnd.google-apps.spreadsheet',
+        webViewLink: 'https://docs.google.com/spreadsheets/d/sheet-1/edit',
+        ...over,
+      },
+    };
+  }
+
+  it('names the TARGET google type on the metadata and keeps the real type on the media', async () => {
+    api.files.create.mockResolvedValueOnce(convertedResponse());
+    const filePath = tempFile('fixture.csv', 'a,b\n1,2\n');
+
+    await uploadFile({ filePath, convert: true, account: 'work' });
+
+    const args = api.files.create.mock.calls[0][0];
+    // The whole mechanism, in two lines: metadata says what it should BECOME,
+    // media says what the bytes actually ARE.
+    expect(args.requestBody.mimeType).toBe('application/vnd.google-apps.spreadsheet');
+    expect(args.media.mimeType).toBe('text/csv');
+  });
+
+  it('reports the type Google actually returned, and says the file was converted', async () => {
+    api.files.create.mockResolvedValueOnce(convertedResponse());
+    const filePath = tempFile('fixture.csv', 'a,b\n1,2\n');
+
+    const result = await uploadFile({ filePath, convert: true });
+
+    expect(result.converted).toBe(true);
+    expect(result.mimeType).toBe('application/vnd.google-apps.spreadsheet');
+    expect(result.webViewLink).toBe('https://docs.google.com/spreadsheets/d/sheet-1/edit');
+  });
+
+  it('does not pass off the local byte count as the Drive size when Google reports none', async () => {
+    api.files.create.mockResolvedValueOnce(convertedResponse());
+    const filePath = tempFile('fixture.csv', 'a,b\n1,2\n');
+
+    const result = await uploadFile({ filePath, convert: true });
+
+    expect(result.driveSize).toBeUndefined();
+    expect(result.size).toBe('a,b\n1,2\n'.length); // the local stat, named as such
+  });
+
+  it('converts a .txt into a Google Doc', async () => {
+    api.files.create.mockResolvedValueOnce(convertedResponse({
+      id: 'doc-1', name: 'fixture.txt', mimeType: 'application/vnd.google-apps.document',
+    }));
+    const filePath = tempFile('fixture.txt', 'hello');
+
+    const result = await uploadFile({ filePath, convert: true });
+
+    expect(api.files.create.mock.calls[0][0].requestBody.mimeType).toBe('application/vnd.google-apps.document');
+    expect(api.files.create.mock.calls[0][0].media.mimeType).toBe('text/plain');
+    expect(result.mimeType).toBe('application/vnd.google-apps.document');
+  });
+
+  it('decides from the NAME the file will have in Drive, not just the local one', async () => {
+    api.files.create.mockResolvedValueOnce(convertedResponse());
+    const filePath = tempFile('blob');
+
+    await uploadFile({ filePath, name: 'data.csv', convert: true });
+
+    expect(api.files.create.mock.calls[0][0].requestBody.mimeType)
+      .toBe('application/vnd.google-apps.spreadsheet');
+  });
+
+  it('still parents into a folder when one is given', async () => {
+    api.files.create.mockResolvedValueOnce(convertedResponse());
+    const filePath = tempFile('fixture.csv', 'a,b\n');
+
+    await uploadFile({ filePath, folderId: 'folder-9', convert: true });
+
+    const body = api.files.create.mock.calls[0][0].requestBody;
+    expect(body.parents).toEqual(['folder-9']);
+    expect(body.mimeType).toBe('application/vnd.google-apps.spreadsheet');
+  });
+
+  it('records the conversion in the log, still without the local path', async () => {
+    api.files.create.mockResolvedValueOnce(convertedResponse());
+    const filePath = tempFile('fixture.csv', 'a,b\n');
+
+    await uploadFile({ filePath, convert: true, account: 'work' });
+
+    const entry = logCalls.find(c => c.message === 'upload_drive_file');
+    expect(entry?.fields.convert_to).toBe('application/vnd.google-apps.spreadsheet');
+    expect(JSON.stringify(entry?.fields)).not.toContain(filePath);
+  });
+});
+
+describe('uploadFile refuses a conversion Google cannot do', () => {
+  it('refuses a PDF before any network call, and names what it can convert', async () => {
+    const filePath = tempFile('scan.pdf', 'not really a pdf');
+
+    await expect(uploadFile({ filePath, convert: true })).rejects.toThrow(
+      /cannot be converted/i,
+    );
+    // The caller has an extension in their hand, so the cure is stated in
+    // extensions — and the refusal costs nothing, because it happens here.
+    await expect(uploadFile({ filePath, convert: true })).rejects.toThrow(/xlsx/);
+    await expect(uploadFile({ filePath, convert: true })).rejects.toThrow(/docx/);
+    expect(api.files.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses a file with no extension at all rather than uploading it unconverted', async () => {
+    const filePath = tempFile('blob');
+
+    await expect(uploadFile({ filePath, convert: true })).rejects.toThrow(/cannot be converted/i);
+    expect(api.files.create).not.toHaveBeenCalled();
+  });
+
+  it('says which type it was asked to convert, so the message is diagnosable', async () => {
+    const filePath = tempFile('scan.pdf');
+
+    await expect(uploadFile({ filePath, convert: true })).rejects.toThrow(/application\/pdf/);
+  });
+
+  it('uploads that same PDF happily when convert is not asked for', async () => {
+    api.files.create.mockResolvedValueOnce(okResponse());
+    const filePath = tempFile('scan.pdf');
+
+    const result = await uploadFile({ filePath });
+
+    expect(result.id).toBe('file-123');
+    expect(api.files.create).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The default path, pinned. `convert` is an opt-in: a call that does not pass
+// it must produce byte-for-byte the request v1.9.0 produced, because every
+// existing caller is making exactly that call.
+// ---------------------------------------------------------------------------
+
+describe('the default upload path is untouched by the convert option', () => {
+  it('sends NO mimeType in the metadata when convert is unset', async () => {
+    api.files.create.mockResolvedValueOnce(okResponse());
+    const filePath = tempFile('summary.pdf');
+
+    await uploadFile({ filePath });
+
+    const body = api.files.create.mock.calls[0][0].requestBody;
+    expect('mimeType' in body).toBe(false);
+    expect(Object.keys(body)).toEqual(['name']);
+  });
+
+  it('sends NO mimeType in the metadata when convert is explicitly false', async () => {
+    api.files.create.mockResolvedValueOnce(okResponse({ mimeType: 'text/csv', name: 'fixture.csv' }));
+    const filePath = tempFile('fixture.csv', 'a,b\n');
+
+    const result = await uploadFile({ filePath, convert: false });
+
+    const body = api.files.create.mock.calls[0][0].requestBody;
+    expect('mimeType' in body).toBe(false);
+    expect(result.mimeType).toBe('text/csv');
+  });
+
+  it('keeps the whole request shape it had in v1.9.0', async () => {
+    api.files.create.mockResolvedValueOnce(okResponse());
+    const filePath = tempFile('summary.pdf');
+
+    await uploadFile({ filePath, folderId: 'folder-9' });
+
+    const args = api.files.create.mock.calls[0][0];
+    expect(Object.keys(args).sort()).toEqual(['fields', 'media', 'requestBody', 'supportsAllDrives']);
+    expect(args.requestBody).toEqual({ name: 'summary.pdf', parents: ['folder-9'] });
+    expect(args.media.mimeType).toBe('application/pdf');
+    expect(args.fields).toBe('id,name,mimeType,size,webViewLink,webContentLink,parents');
+    expect(args.supportsAllDrives).toBe(true);
+  });
+
+  it('reports no `converted` flag at all when nothing was converted', async () => {
+    api.files.create.mockResolvedValueOnce(okResponse());
+    const filePath = tempFile('summary.pdf');
+
+    const result = await uploadFile({ filePath });
+
+    expect(result.converted).toBeUndefined();
+    expect('converted' in result).toBe(false);
+  });
+
+  it('logs convert_to as null when no conversion was asked for', async () => {
+    api.files.create.mockResolvedValueOnce(okResponse());
+    const filePath = tempFile('summary.pdf');
+
+    await uploadFile({ filePath });
+
+    const entry = logCalls.find(c => c.message === 'upload_drive_file');
+    expect(entry?.fields.convert_to).toBeNull();
   });
 });

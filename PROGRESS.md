@@ -1,3 +1,87 @@
+# PROGRESS — feat/drive-convert-sheets-write (base 24d811b)
+
+Branch `feat/drive-convert-sheets-write`, cut from `24d811b` (v1.9.0, 846 tests, typecheck
+clean). Contract: `shared/active-work/2026-09-01-drive-convert-sheets-write/BUILD-CONTRACT.md`.
+
+Builder session. NO live Google call was made from this branch. The harness in the lane
+folder is written here and RUN BY THE CHAIR.
+
+## Baseline, measured in this worktree before any change
+
+```
+Test Files  24 passed (24)
+     Tests  846 passed (846)
+npm run typecheck → clean (no output)
+```
+
+## Units
+
+| # | Unit | Commit | State |
+| --- | --- | --- | --- |
+| 1 | Piece A tests (convert-on-upload) | see git log | DONE |
+| 2 | Piece A implementation | | |
+| 3 | Piece B tests (Sheets write) | | |
+| 4 | Piece B implementation + registration | | |
+| 5 | Docs + CHANGELOG 1.10.0 + version | | |
+| 6 | Live-acceptance harness + fixtures | | |
+
+## FAIL-before evidence
+
+Recorded per unit below, as the failing summary from `npm test` run against the tests-first
+commit with the implementation absent.
+
+### Unit 1 — Piece A tests, run against v1.9.0 code (no implementation)
+
+Command: `npm test` in this worktree, at the unit-1 commit.
+
+```
+Test Files  3 failed | 22 passed (25)
+     Tests  29 failed | 855 passed (884)
+```
+
+Every failure is missing behaviour, not a syntax error: the exports the tests reach for
+(`CONVERT_TARGET_BY_SOURCE_MIME`, `CONVERTIBLE_EXTENSIONS`, `convertTargetForFilename`,
+`GOOGLE_SHEET_MIME`, `GOOGLE_SLIDES_MIME`), the `convert` option on `uploadFile` and on the
+tool, the `convert_to` log field, and five `mimeTypeForFilename` extensions do not exist yet.
+The 855 that pass are the untouched suite plus the pins on behaviour v1.9.0 already had.
+
+`npm run typecheck` at this commit reports those same absences — a tests-first commit does not
+typecheck clean by construction. It is clean again at unit 2.
+
+The 29 failures:
+
+- `src/drive/client.test.ts > the conversion map > names the three Google types by their real mimeTypes`
+- `src/drive/client.test.ts > the conversion map > maps every spreadsheet source Google accepts, and only to a Google Sheet`
+- `src/drive/client.test.ts > the conversion map > maps the document sources to a Google Doc`
+- `src/drive/client.test.ts > the conversion map > maps the presentation sources to Google Slides`
+- `src/drive/client.test.ts > the conversion map > invents nothing beyond those thirteen — every entry is one Google can import`
+- `src/drive/client.test.ts > the conversion map > does not offer to convert a PDF or an image — Drive stores those as they are`
+- `src/drive/client.test.ts > the conversion map > every extension the refusal advertises really does resolve into the map`
+- `src/drive/client.test.ts > the conversion map > advertises all thirteen extensions, so nothing supported is hidden from the caller`
+- `src/drive/client.test.ts > convertTargetForFilename > answers with the Google type an upload of that name would become`
+- `src/drive/client.test.ts > convertTargetForFilename > answers undefined for anything Google will not convert`
+- `src/drive/client.test.ts > uploadFile with convert > names the TARGET google type on the metadata and keeps the real type on the media`
+- `src/drive/client.test.ts > uploadFile with convert > reports the type Google actually returned, and says the file was converted`
+- `src/drive/client.test.ts > uploadFile with convert > converts a .txt into a Google Doc`
+- `src/drive/client.test.ts > uploadFile with convert > decides from the NAME the file will have in Drive, not just the local one`
+- `src/drive/client.test.ts > uploadFile with convert > still parents into a folder when one is given`
+- `src/drive/client.test.ts > uploadFile with convert > records the conversion in the log, still without the local path`
+- `src/drive/client.test.ts > uploadFile refuses a conversion Google cannot do > refuses a PDF before any network call, and names what it can convert`
+- `src/drive/client.test.ts > uploadFile refuses a conversion Google cannot do > refuses a file with no extension at all rather than uploading it unconverted`
+- `src/drive/client.test.ts > uploadFile refuses a conversion Google cannot do > says which type it was asked to convert, so the message is diagnosable`
+- `src/drive/client.test.ts > the default upload path is untouched by the convert option > logs convert_to as null when no conversion was asked for`
+- `src/gmail/mime.test.ts > mimeTypeForFilename > maps a.ods`
+- `src/gmail/mime.test.ts > mimeTypeForFilename > maps a.odt`
+- `src/gmail/mime.test.ts > mimeTypeForFilename > maps a.odp`
+- `src/gmail/mime.test.ts > mimeTypeForFilename > maps a.tsv`
+- `src/gmail/mime.test.ts > mimeTypeForFilename > maps a.rtf`
+- `src/tools/drive-upload-file.test.ts > upload_drive_file exposes the convert option > declares a convert parameter`
+- `src/tools/drive-upload-file.test.ts > upload_drive_file exposes the convert option > describes what convert does in terms of what the user gets, not the mechanism`
+- `src/tools/drive-upload-file.test.ts > upload_drive_file exposes the convert option > says in the tool description that an upload can land as a real Google file`
+- `src/tools/drive-upload-file.test.ts > upload_drive_file exposes the convert option > passes convert:true straight through to the uploader`
+
+---
+
 # PROGRESS — feat/calendar-meet-link (base b8adaa6)
 
 `add_meet` on `create_calendar_event`: create the event WITH a Google Meet room,

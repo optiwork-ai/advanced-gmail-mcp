@@ -912,6 +912,19 @@ describe('mimeTypeForFilename', () => {
   ])('maps %s', (name, expected) => {
     expect(mimeTypeForFilename(name)).toBe(expected);
   });
+
+  // CV — the five office/open-document types convert-on-upload needs. Until
+  // 2026-09-01 each of these typed as application/octet-stream, which Drive
+  // cannot import and Gmail attaches as an anonymous blob.
+  it.each([
+    ['a.ods', 'application/vnd.oasis.opendocument.spreadsheet'],
+    ['a.odt', 'application/vnd.oasis.opendocument.text'],
+    ['a.odp', 'application/vnd.oasis.opendocument.presentation'],
+    ['a.tsv', 'text/tab-separated-values'],
+    ['a.rtf', 'application/rtf'],
+  ])('maps %s', (name, expected) => {
+    expect(mimeTypeForFilename(name)).toBe(expected);
+  });
 });
 
 describe('loadAttachment', () => {
