@@ -1,3 +1,61 @@
+# PROGRESS — feat/calendar-meet-link (base b8adaa6)
+
+`add_meet` on `create_calendar_event`: create the event WITH a Google Meet room,
+return the link and its status, re-read a `pending` room until the link exists.
+Contract: `shared/active-work/2026-09-01-gmail-meet-link/BUILD-CONTRACT.md`.
+Worktree: `/Users/steve/Claude-Projects/2-backbone/advanced-gmail-mcp-wt/meet-link`.
+
+## Baseline at b8adaa6 (measured, not assumed)
+
+- `npm test`: **829 tests, 828 pass, 1 FAIL** — `src/gmail/settings-api.test.ts >
+  setVacation > refuses an inverted window`. **Pre-existing and unrelated to this
+  lane**: the test hardcodes `2026-09-08` → `2026-09-01`, and as of today
+  (2026-09-01) the *already-ended* refusal fires before the *inverted* one, so the
+  assertion on `/must be after/` misses. A date bomb, not a regression. The file is
+  outside this contract's allowed file list, so it is left alone and written to
+  `QUESTIONS-FOR-FABLE.md`.
+- `npm run typecheck`: clean.
+
+## Units
+
+- [x] **U1 — tests first, demonstrated failing** (`src/calendar/client.test.ts`) — SHA in U2's entry.
+      17 new tests (13 in `describe('createEvent with add_meet')`, 4 in
+      `describe('extractMeetLink')`) plus one existing test extended for the two new
+      log fields the contract mandates (`add_meet`, `meet_status`) — that extension is
+      the only edit to an existing test in this lane, and it is required by §2's
+      logging instruction, not by the response shape (which is untouched when
+      `add_meet` is unset).
+      **FAIL-before evidence** — `npx vitest run src/calendar/client.test.ts` on the
+      UNCHANGED client: `Tests  16 failed | 50 passed (66)`, i.e. every new assertion
+      that needs the implementation fails, listed here in full:
+      - createEvent > logs the creation with ids and counts only — no attendee addresses
+      - createEvent with add_meet > asks Google for a hangoutsMeet room when add_meet is true
+      - createEvent with add_meet > gives every request its own requestId
+      - createEvent with add_meet > returns the link and a success status when the room is ready straight away
+      - createEvent with add_meet > re-reads the event until the pending room turns into a link
+      - createEvent with add_meet > reports a still-pending room without fabricating a link
+      - createEvent with add_meet > reports a failed room, keeps the event, and does not poll
+      - createEvent with add_meet > stops polling the moment Google reports failure
+      - createEvent with add_meet > reads the link from the video entry point when hangoutLink is absent
+      - createEvent with add_meet > keeps the created event when the re-read itself fails
+      - createEvent with add_meet > logs whether a room was asked for and how it ended — never the link
+      - createEvent with add_meet > logs add_meet false and a null meet_status on an ordinary event
+      - extractMeetLink > prefers hangoutLink (TypeError: extractMeetLink is not a function)
+      - extractMeetLink > falls back to the video entry point
+      - extractMeetLink > ignores a video entry point with no uri
+      - extractMeetLink > returns undefined when the event carries no conference at all
+      The two add_meet tests that pass at this commit are the (a) pair — "adds nothing
+      to the request when add_meet is unset / false" — which pass because today's code
+      already sends nothing; they are the guard that the request stays byte-identical.
+      `npm run typecheck` FAILS at this commit by design (`extractMeetLink`, `addMeet`
+      and `sleep` do not exist yet); it is clean again at U2.
+- [ ] **U2 — `createEvent()` gains `addMeet`, the poll and the link extraction** (`src/calendar/client.ts`)
+- [ ] **U3 — the tool gains `add_meet`** (`src/tools/calendar-create-event.ts`)
+- [ ] **U4 — README + CHANGELOG 1.9.0 + version bump**
+- [ ] **U5 — live-acceptance harness** (chair runs it; this session makes no live call)
+
+---
+
 # PROGRESS — feat/gmail-native-outbound (base 536a9be)
 
 Unit A of `shared/active-work/2026-08-27-gmail-mcp-upgrade/BUILD-CONTRACT.md`

@@ -10,7 +10,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const api = {
   calendarList: { list: vi.fn() },
-  events: { list: vi.fn(), insert: vi.fn() },
+  events: { list: vi.fn(), insert: vi.fn(), get: vi.fn() },
   freebusy: { query: vi.fn() },
 };
 
@@ -42,6 +42,7 @@ const {
   MAX_EVENT_PAGE_SIZE,
   buildEventDateTime,
   createEvent,
+  extractMeetLink,
   getCalendarClient,
   translateCalendarError,
   listCalendars,
@@ -519,6 +520,8 @@ describe('createEvent', () => {
       event_id: 'evt1',
       attendee_count: 1,
       send_updates: 'none',
+      add_meet: false,
+      meet_status: null,
     });
     expect(JSON.stringify(entry!.fields)).not.toContain('secret@example.com');
   });
@@ -531,6 +534,302 @@ describe('createEvent', () => {
     ).rejects.toThrow('boom');
 
     expect(logCalls.find(c => c.message === 'create_calendar_event')).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createEvent + Google Meet (add_meet)
+//
+// A conference createRequest is ASYNCHRONOUS. The insert response can come back
+// `pending` with no link on it at all, and the link appears on a later read of
+// the same event — so "read the link off the insert response" would hand back a
+// meeting whose link is the empty string. These tests drive the pending path
+// through the same mocked client the rest of the file uses, with the sleep
+// injected so the poll costs no wall-clock time.
+// ---------------------------------------------------------------------------
+
+describe('createEvent with add_meet', () => {
+  const LINK = 'https://meet.google.com/abc-defg-hij';
+
+  const base = {
+    summary: 'Meet test',
+    start: '2026-09-01T14:00:00Z',
+    end: '2026-09-01T15:00:00Z',
+  };
+
+  /** An events.insert / events.get response carrying a createRequest status. */
+  function withConference(statusCode: string, extras: Record<string, unknown> = {}) {
+    return {
+      data: {
+        id: 'evt-meet',
+        status: 'confirmed',
+        summary: 'Meet test',
+        conferenceData: {
+          createRequest: {
+            requestId: 'req-1',
+            conferenceSolutionKey: { type: 'hangoutsMeet' },
+            status: { statusCode },
+          },
+        },
+        ...extras,
+      },
+    };
+  }
+
+  /** Records what the poll WOULD have waited, and waits nothing. */
+  function recordingSleep(): { waits: number[]; sleep: (ms: number) => Promise<void> } {
+    const waits: number[] = [];
+    return {
+      waits,
+      sleep: async (ms: number) => {
+        waits.push(ms);
+      },
+    };
+  }
+
+  const plainOk = {
+    data: {
+      id: 'evt1',
+      status: 'confirmed',
+      summary: 'Meet test',
+      htmlLink: 'https://calendar.example/evt1',
+      start: { dateTime: '2026-09-01T14:00:00Z' },
+      end: { dateTime: '2026-09-01T15:00:00Z' },
+    },
+  };
+
+  // (a) the request is byte-identical to today's when no room was asked for
+  it('adds nothing to the request and nothing to the result when add_meet is unset', async () => {
+    api.events.insert.mockResolvedValueOnce(plainOk);
+
+    const result = await createEvent({ ...base });
+
+    const args = api.events.insert.mock.calls[0][0];
+    expect('conferenceDataVersion' in args).toBe(false);
+    expect('conferenceData' in args.requestBody).toBe(false);
+    expect('meetLink' in result).toBe(false);
+    expect('meetStatus' in result).toBe(false);
+    expect(api.events.get).not.toHaveBeenCalled();
+    expect(result.notice).toBe(
+      'No invitation emails were sent (send_updates: "none"). '
+      + 'Attendees see the event only if they check their calendar.',
+    );
+  });
+
+  it('adds nothing to the request when add_meet is explicitly false', async () => {
+    api.events.insert.mockResolvedValueOnce(plainOk);
+
+    const result = await createEvent({ ...base, addMeet: false });
+
+    const args = api.events.insert.mock.calls[0][0];
+    expect('conferenceDataVersion' in args).toBe(false);
+    expect('conferenceData' in args.requestBody).toBe(false);
+    expect('meetStatus' in result).toBe(false);
+  });
+
+  // (b) the request Google actually needs to build a room
+  it('asks Google for a hangoutsMeet room when add_meet is true', async () => {
+    api.events.insert.mockResolvedValueOnce(withConference('success', { hangoutLink: LINK }));
+
+    await createEvent({ ...base, addMeet: true });
+
+    const args = api.events.insert.mock.calls[0][0];
+    expect(args.conferenceDataVersion).toBe(1);
+    const createRequest = args.requestBody.conferenceData.createRequest;
+    expect(typeof createRequest.requestId).toBe('string');
+    expect(createRequest.requestId.length).toBeGreaterThan(0);
+    expect(createRequest.conferenceSolutionKey.type).toBe('hangoutsMeet');
+  });
+
+  it('gives every request its own requestId', async () => {
+    api.events.insert.mockResolvedValue(withConference('success', { hangoutLink: LINK }));
+
+    await createEvent({ ...base, addMeet: true });
+    await createEvent({ ...base, addMeet: true });
+
+    const first = api.events.insert.mock.calls[0][0].requestBody.conferenceData.createRequest.requestId;
+    const second = api.events.insert.mock.calls[1][0].requestBody.conferenceData.createRequest.requestId;
+    expect(first).not.toBe(second);
+  });
+
+  // (c) the happy path: the room is ready on the insert response
+  it('returns the link and a success status when the room is ready straight away', async () => {
+    api.events.insert.mockResolvedValueOnce(withConference('success', { hangoutLink: LINK }));
+
+    const result = await createEvent({ ...base, addMeet: true });
+
+    expect(result.meetLink).toBe(LINK);
+    expect(result.meetStatus).toBe('success');
+    expect(api.events.get).not.toHaveBeenCalled();
+    expect(result.notice).toMatch(/Google Meet room is attached/);
+  });
+
+  // (d) the asynchronous path: the room arrives on a later read
+  //
+  // The re-read is `events.get({ calendarId, eventId })`. It deliberately does
+  // NOT carry conferenceDataVersion: that parameter is not part of events.get in
+  // Google's discovery document (see Params$Resource$Events$Get in googleapis)
+  // and reads return conferenceData regardless. Recorded as the one literal
+  // deviation from the contract's G2(d) in QUESTIONS-FOR-FABLE.md.
+  it('re-reads the event until the pending room turns into a link', async () => {
+    api.events.insert.mockResolvedValueOnce(withConference('pending'));
+    api.events.get.mockResolvedValueOnce(withConference('pending'));
+    api.events.get.mockResolvedValueOnce(withConference('success', { hangoutLink: LINK }));
+    const { waits, sleep } = recordingSleep();
+
+    const result = await createEvent({ ...base, addMeet: true, sleep });
+
+    expect(result.meetLink).toBe(LINK);
+    expect(result.meetStatus).toBe('success');
+    expect(api.events.get).toHaveBeenCalledTimes(2);
+    const getArgs = api.events.get.mock.calls[0][0];
+    expect(getArgs.calendarId).toBe('primary');
+    expect(getArgs.eventId).toBe('evt-meet');
+    expect(waits).toEqual([1000, 2000]);
+  });
+
+  // (e) the room never arrives: say so, and never invent a link
+  it('reports a still-pending room without fabricating a link', async () => {
+    api.events.insert.mockResolvedValueOnce(withConference('pending'));
+    api.events.get.mockResolvedValue(withConference('pending'));
+    const { waits, sleep } = recordingSleep();
+
+    const result = await createEvent({ ...base, addMeet: true, sleep });
+
+    expect(result.meetStatus).toBe('pending');
+    expect('meetLink' in result).toBe(false);
+    expect(result.id).toBe('evt-meet');
+    expect(api.events.get).toHaveBeenCalledTimes(5);
+    expect(waits).toEqual([1000, 2000, 3000, 4000, 5000]);
+    expect(result.notice).toMatch(/requested/i);
+    expect(result.notice).toMatch(/list_calendar_events/);
+  });
+
+  // (f) Google says it cannot build one: stop, and keep the event
+  it('reports a failed room, keeps the event, and does not poll', async () => {
+    api.events.insert.mockResolvedValueOnce(withConference('failure'));
+
+    const result = await createEvent({ ...base, addMeet: true });
+
+    expect(result.meetStatus).toBe('failure');
+    expect('meetLink' in result).toBe(false);
+    expect(result.id).toBe('evt-meet');
+    expect(api.events.get).not.toHaveBeenCalled();
+    expect(result.notice).toMatch(/could not attach a Google Meet room/i);
+  });
+
+  it('stops polling the moment Google reports failure', async () => {
+    api.events.insert.mockResolvedValueOnce(withConference('pending'));
+    api.events.get.mockResolvedValueOnce(withConference('failure'));
+    const { sleep } = recordingSleep();
+
+    const result = await createEvent({ ...base, addMeet: true, sleep });
+
+    expect(result.meetStatus).toBe('failure');
+    expect(api.events.get).toHaveBeenCalledTimes(1);
+  });
+
+  // (g) the link is not always on hangoutLink
+  it('reads the link from the video entry point when hangoutLink is absent', async () => {
+    api.events.insert.mockResolvedValueOnce(
+      withConference('success', {
+        conferenceData: {
+          createRequest: { status: { statusCode: 'success' } },
+          entryPoints: [
+            { entryPointType: 'phone', uri: 'tel:+1-555-0100' },
+            { entryPointType: 'video', uri: LINK },
+          ],
+        },
+      }),
+    );
+
+    const result = await createEvent({ ...base, addMeet: true });
+
+    expect(result.meetLink).toBe(LINK);
+    expect(result.meetStatus).toBe('success');
+  });
+
+  // A created event must survive a failing read-back: the event EXISTS on
+  // Google's side, so turning the poll's error into a thrown createEvent would
+  // report a creation that happened as a creation that did not.
+  it('keeps the created event when the re-read itself fails', async () => {
+    api.events.insert.mockResolvedValueOnce(withConference('pending'));
+    api.events.get.mockRejectedValue(Object.assign(new Error('boom'), { code: 400 }));
+    const { sleep } = recordingSleep();
+
+    const result = await createEvent({ ...base, addMeet: true, sleep });
+
+    expect(result.id).toBe('evt-meet');
+    expect(result.meetStatus).toBe('pending');
+    expect('meetLink' in result).toBe(false);
+  });
+
+  it('logs whether a room was asked for and how it ended — never the link', async () => {
+    api.events.insert.mockResolvedValueOnce(withConference('success', { hangoutLink: LINK }));
+
+    await createEvent({ ...base, addMeet: true, account: 'steve-ah' });
+
+    const entry = logCalls.find(c => c.message === 'create_calendar_event');
+    expect(entry).toBeDefined();
+    expect(entry!.fields).toEqual({
+      account: 'steve-ah',
+      calendar_id: 'primary',
+      event_id: 'evt-meet',
+      attendee_count: 0,
+      send_updates: 'none',
+      add_meet: true,
+      meet_status: 'success',
+    });
+    expect(JSON.stringify(entry!.fields)).not.toContain('meet.google.com');
+  });
+
+  it('logs add_meet false and a null meet_status on an ordinary event', async () => {
+    api.events.insert.mockResolvedValueOnce(plainOk);
+
+    await createEvent({ ...base });
+
+    const entry = logCalls.find(c => c.message === 'create_calendar_event');
+    expect(entry!.fields).toMatchObject({ add_meet: false, meet_status: null });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractMeetLink — the one place the link is read out of an event
+// ---------------------------------------------------------------------------
+
+describe('extractMeetLink', () => {
+  it('prefers hangoutLink', () => {
+    expect(
+      extractMeetLink({
+        hangoutLink: 'https://meet.google.com/aaa-bbbb-ccc',
+        conferenceData: {
+          entryPoints: [{ entryPointType: 'video', uri: 'https://meet.google.com/zzz-zzzz-zzz' }],
+        },
+      }),
+    ).toBe('https://meet.google.com/aaa-bbbb-ccc');
+  });
+
+  it('falls back to the video entry point', () => {
+    expect(
+      extractMeetLink({
+        conferenceData: {
+          entryPoints: [
+            { entryPointType: 'more', uri: 'https://tel.meet/aaa-bbbb-ccc' },
+            { entryPointType: 'video', uri: 'https://meet.google.com/aaa-bbbb-ccc' },
+          ],
+        },
+      }),
+    ).toBe('https://meet.google.com/aaa-bbbb-ccc');
+  });
+
+  it('ignores a video entry point with no uri', () => {
+    expect(
+      extractMeetLink({ conferenceData: { entryPoints: [{ entryPointType: 'video' }] } }),
+    ).toBeUndefined();
+  });
+
+  it('returns undefined when the event carries no conference at all', () => {
+    expect(extractMeetLink({ id: 'evt1' })).toBeUndefined();
   });
 });
 
