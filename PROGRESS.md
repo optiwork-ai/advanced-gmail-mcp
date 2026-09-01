@@ -20,7 +20,7 @@ npm run typecheck → clean (no output)
 | --- | --- | --- | --- |
 | 1 | Piece A tests (convert-on-upload) | see git log | DONE |
 | 2 | Piece A implementation | see git log | DONE — 884 pass, typecheck clean |
-| 3 | Piece B tests (Sheets write) | | |
+| 3 | Piece B tests (Sheets write) | see git log | DONE |
 | 4 | Piece B implementation + registration | | |
 | 5 | Docs + CHANGELOG 1.10.0 + version | | |
 | 6 | Live-acceptance harness + fixtures | | |
@@ -103,6 +103,38 @@ Judgment calls worth a validator's eye:
   and is called out here rather than buried.
 - `size` in the result stays the local stat and is documented as such; `driveSize` is simply
   absent for a converted file rather than being filled in from the local number.
+
+### Unit 3 — Piece B tests, run with no Sheets module in the tree
+
+Command: `npm test` in this worktree, at the unit-3 commit.
+
+```
+Test Files  3 failed | 24 passed (27)
+     Tests  3 failed | 882 passed (885)
+```
+
+Two of the three failing FILES cannot even load, which is the honest shape of "the thing
+does not exist yet":
+
+```
+Error: Failed to load url ../sheets/client.js (resolved id: ../sheets/client.js) in
+  .../src/tools/sheets-write.test.ts. Does the file exist?
+```
+
+- `src/tools/sheets-write.test.ts` — 34 assertions across the two tools; the whole file is
+  blocked on `src/sheets/client.ts`, `./sheets-update-values.js` and `./sheets-append-rows.js`.
+- `src/gmail/auth-scopes.test.ts` — same missing module, reached through its new import of
+  `SHEETS_SCOPE`. Its four pre-existing tests are collateral at this commit and green again
+  at unit 4.
+- `src/tools/index.test.ts` — loads fine and fails on the substance, which is the useful
+  half of the evidence:
+  - `registers 55 tools` — got 53;
+  - `is exactly the read side plus the write side` — the two Sheets names are listed on the
+    write side and are not in the roster;
+  - `actually registers both of them`.
+
+No existing assertion was weakened anywhere. The only edit to an existing test file is
+`auth-scopes.test.ts`, which gains two tests and changes none.
 
 ---
 
