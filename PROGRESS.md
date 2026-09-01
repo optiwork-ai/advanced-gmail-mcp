@@ -22,7 +22,7 @@ npm run typecheck → clean (no output)
 | 2 | Piece A implementation | see git log | DONE — 884 pass, typecheck clean |
 | 3 | Piece B tests (Sheets write) | see git log | DONE |
 | 4 | Piece B implementation + registration | see git log | DONE — 928 pass, typecheck clean |
-| 5 | Docs + CHANGELOG 1.10.0 + version | | |
+| 5 | Docs + CHANGELOG 1.10.0 + version | see git log | DONE |
 | 6 | Live-acceptance harness + fixtures | | |
 
 ## FAIL-before evidence
@@ -164,6 +164,25 @@ Roster 53 → 55. Judgment calls worth a validator's eye:
 - `src/tools/index.test.ts` is a NEW test the repo did not have: it pins all 55 tool names
   split into a read list and a write list, so a write tool can never be added without being
   named as one.
+
+### Unit 5 — docs, CHANGELOG 1.10.0, version 1.10.0
+
+Suite unchanged and green (27 files / 928 tests), typecheck clean.
+
+- `README.md`: features line 53 → 55 tools; two new Cloud-setup bullets (no scope needed for
+  Sheets, and the one project switch that IS needed); the `upload_drive_file` row rewritten
+  with `convert` and the full convertible list; a new **Sheets** section explaining the
+  drive.file boundary and the upload-converted-then-write loop; the Chat/Drive/Docs heading
+  now says Sheets too.
+- `CHANGELOG.md`: `## [1.10.0] — 2026-09-01`, Keep-a-Changelog voice. It says in the second
+  paragraph that NO fresh sign-in is needed, and in the third that one console switch may be
+  needed once and that the error itself names it.
+- `package.json`: 1.10.0. (`package-lock.json` says 1.0.0 and always has — it never tracked
+  this version, so it was left alone rather than quietly changed here.)
+- `.claude/commands/email.md`: the `upload_drive_file` row gains `convert`, and the two
+  Sheets tools are added to the table with their limits. Not named in the contract's G5, but
+  the file is a tool table this release makes wrong, and leaving it stale is how a caller
+  learns about `convert` from nowhere.
 
 ---
 

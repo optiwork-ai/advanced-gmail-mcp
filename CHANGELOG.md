@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.0] — 2026-09-01
+
+Two things that go together: an uploaded spreadsheet can now land as a *real* Google Sheet, and a real Google Sheet can now be written to.
+
+**No fresh sign-in needed.** Neither piece asks for a new permission — both ride the Drive permission every account granted back in August. Nothing you do today changes: an upload that does not ask to be converted sends exactly the request it sent yesterday and comes back with the same answer.
+
+**One switch may need flipping, once, and it is not a sign-in.** The Google Sheets API has to be turned on for the Cloud project behind this server. If it is off, the first write to a spreadsheet says so and names the console page to open — and says plainly that re-authenticating will not help, because the permission is fine and the API is simply switched off.
+
+### Added
+- **`upload_drive_file` can convert as it uploads: `convert: true`.** A spreadsheet uploaded this way lands as a genuine Google Sheet you can open and edit, rather than an `.xlsx` sitting in Drive that only previews. The same goes for documents and slide decks. This was the actual complaint that started this release: clicking an uploaded workbook and not getting a spreadsheet.
+- **What it will convert, and what it says when it will not.** Spreadsheets from `xlsx, xls, ods, csv, tsv`; documents from `docx, doc, odt, rtf, txt`; slides from `pptx, ppt, odp`. Ask it to convert anything else — a PDF, a zip, an image — and it refuses *before* uploading anything, naming the formats that do work. It never quietly uploads the file unconverted and lets you find out later that it did not become what you asked for.
+- **`update_sheet_values` — replace a block of cells in a spreadsheet.** You name the range, you pass the rows, and what was there is replaced. The description says "overwrites" because that is what it does; the only way back is the spreadsheet's own version history. Values are read as if a person typed them, so a formula behaves as a formula and `5%` behaves as a percentage, unless you ask for them to be stored literally.
+- **`append_sheet_rows` — add rows to the end of a table without overwriting anything.** Rows are inserted, so a note sitting below the table is pushed down rather than replaced. Google's own default would have written straight over it.
+- **Both tools say why they cannot reach a spreadsheet, when they cannot.** This is the one thing worth knowing before using them: they can write only to spreadsheets **this server created** — which is exactly what a converted upload produces. A spreadsheet you made in Google Sheets yourself is not merely off limits to them, it is invisible, and Google reports it with the same "not found" it uses for a file that never existed. Rather than pass that on, both tools explain the difference and name the cure: upload the workbook with `convert: true` and write to the copy that creates.
+- **Neither tool can be asked to do too much in one call.** More than 1,000 rows or 10,000 cells is refused before anything is sent, with a message saying to send it in several calls. One long call would hold this shared server open for everything else using it.
+- **An append is never retried after a server error.** A timeout can arrive after the rows have actually landed; retrying then would add every one of them a second time and report only the first. So a failure is reported honestly instead of guessed at. Replacing a range *is* retried, because writing the same cells twice leaves the sheet exactly as writing them once does.
+- Five file types that had no type at all — `.ods`, `.odt`, `.odp`, `.tsv`, `.rtf` — are recognised properly now. As well as making them convertible, it means one of them attached to an email arrives as what it is rather than as an anonymous blob.
+
+### Changed
+- The tool count goes from 53 to **55**.
+- Nothing about the existing upload path moved. With `convert` left off, the request is the same one v1.9.0 sent, down to the field; the answer carries no new fields; and a file that was stored as-is yesterday is stored as-is today.
+
+### Fixed
+- A converted Google file has no byte size of its own, and the answer no longer fills that gap with the size of the local file it came from. The local size is still reported, and still called what it is.
+
 ## [1.9.0] — 2026-09-01
 
 A calendar event can now be created with a Google Meet room on it, in the same step.

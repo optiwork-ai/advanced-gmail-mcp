@@ -54,9 +54,13 @@ Before using any tool, run `ToolSearch` with query `+gmail` to load them.
 | `delete_filter` | Delete a mail rule permanently (filter_id, account) — confirm with user first |
 | `get_vacation` | Read the vacation-responder settings (account) — read-only |
 | `set_vacation` | Turn the vacation responder on/off (enable, confirm?, subject?, body?, is_html?, start_time?, end_time?, restrict_to_contacts?, restrict_to_domain?, account) — while ON the account auto-replies to everyone. `enable: true` REQUIRES `confirm: true` and is refused when the saved window already ended; `enable: false` needs neither |
-| `upload_drive_file` | Upload a local file to Drive (file_path absolute, folder_id?, name?, account) — always creates a NEW file; 100MB cap |
+| `upload_drive_file` | Upload a local file to Drive (file_path absolute, folder_id?, name?, convert?, account) — always creates a NEW file; 100MB cap. `convert: true` lands it as a real Google Sheet/Doc/Slides (xlsx, xls, ods, csv, tsv / docx, doc, odt, rtf, txt / pptx, ppt, odp); any other type is refused before uploading |
+| `update_sheet_values` | Overwrite a range of a Google Sheet (spreadsheet_id, range in A1 notation, values, value_input_option?, account) — only works on spreadsheets this server created (upload with `convert: true` first); max 1,000 rows / 10,000 cells |
+| `append_sheet_rows` | Add rows to the end of a table (spreadsheet_id, range as an anchor like `Sheet1`, values, value_input_option?, account) — inserts rather than overwriting; same creator limit and same caps; NOT retried on a server error |
 
 > The five settings tools and `upload_drive_file` need scopes added on 2026-08-27 (`gmail.settings.basic`, `drive.file`). An account authenticated before then answers **403** until it re-runs `npm run auth -- <alias>`; the error message says so.
+>
+> The two Sheets tools need **no** new scope — they ride the same `drive.file` grant, which is why they reach only spreadsheets this server created. They do need the **Google Sheets API enabled** on the Cloud project; the first write says so and names the console page if it is not.
 
 ## Actions
 
