@@ -11,9 +11,9 @@ Worktree: `/Users/steve/Claude-Projects/2-backbone/advanced-gmail-mcp-wt/meet-li
   setVacation > refuses an inverted window`. **Pre-existing and unrelated to this
   lane**: the test hardcodes `2026-09-08` → `2026-09-01`, and as of today
   (2026-09-01) the *already-ended* refusal fires before the *inverted* one, so the
-  assertion on `/must be after/` misses. A date bomb, not a regression. The file is
-  outside this contract's allowed file list, so it is left alone and written to
-  `QUESTIONS-FOR-FABLE.md`.
+  assertion on `/must be after/` misses. A date bomb, not a regression. It was outside
+  this contract's allowed file list, so it was written to `QUESTIONS-FOR-FABLE.md`
+  instead of being fixed — **and the chair then ruled it fixed here: see U6.**
 - `npm run typecheck`: clean.
 
 ## Units
@@ -96,12 +96,45 @@ Worktree: `/Users/steve/Claude-Projects/2-backbone/advanced-gmail-mcp-wt/meet-li
       NOT committed to the workspace repo — that tree holds a lot of unrelated in-flight
       work and the Round 2 harness was left untracked too (see QUESTIONS-FOR-FABLE.md #5).
 
+- [x] **U6 — the vacation window tests stop expiring with the calendar**
+      (`src/gmail/settings-api.test.ts`) — added on the chair's ruling, one commit, its
+      SHA is the branch tip. Two tests carried fixed 2026-09 dates: the epoch-ms
+      conversion test (`2026-09-01` → `2026-09-08`, which would have started failing on
+      2026-09-08) and the inverted-window test (`2026-09-08` → `2026-09-01`, already
+      failing today). Both now build their window from `daysFromNow(n)`, the relative
+      idiom this file already used further down, and the conversion test asserts the
+      epoch strings computed from those same values. The inverted-window test keeps BOTH
+      ends in the future on purpose, because `setVacation` refuses an already-ended
+      window one guard EARLIER than an inverted one — that ordering is exactly what the
+      fixed dates had walked into. No assertion was weakened, no production code touched,
+      no fake timers introduced. The file's remaining date literals are the deliberately
+      stale 2016 window (permanently in the past by design) and prose in comments.
+      **Suite now 846 passed / 0 failed; typecheck clean.**
+
+## Rulings received from the chair (2026-09-01)
+
+- **Q1 — `events.get` without `conferenceDataVersion`: deviation STANDS.** Verified
+  independently against `googleapis` v3.d.ts; the contract's G2(d) was wrong. No change.
+- **Q2 — fix it now, on this branch, as its own unit.** Done as U6 above.
+
+## Live harness result (run by the chair against this worktree, credentials since removed)
+
+- **`add_meet` PASSED on all five accounts** — `meetStatus=success`, real
+  `meet.google.com` links, throwaway events deleted — **including the consumer
+  (`personal`) account.** That answers the lane's open question: a consumer @gmail.com
+  account CAN have a Meet room attached through the API.
+- **H1 (the pre-check) FAILED on all five with "Insufficient Permission"**:
+  `calendars.get` needs a scope this server does not request. That is a HARNESS-ONLY
+  limitation — it does not touch `add_meet`, which passed on every account — and the
+  chair's ruling is to leave the harness as it is.
+
 ## Open items for the chair / validator
 
 - `shared/active-work/2026-09-01-gmail-meet-link/QUESTIONS-FOR-FABLE.md` — two rulings
   wanted: the `events.get` `conferenceDataVersion` deviation (G2 d), and the pre-existing
   red test that keeps `npm test` from being wholly green (G1).
-- The live harness has not been run. No live Google call was made by this session.
+- The live harness HAS now been run by the chair (result above). No live Google call
+  was made by this builder session, before or after.
 
 ---
 

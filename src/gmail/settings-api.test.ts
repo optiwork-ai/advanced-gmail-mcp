@@ -306,7 +306,19 @@ describe('getVacation', () => {
 
 // ---------------------------------------------------------------------------
 // set_vacation
+//
+// Window dates here are RELATIVE to now, never written out. Fixed dates were a
+// time bomb: `setVacation` refuses a saved window whose end has passed BEFORE it
+// checks whether the window is inverted, so once the calendar caught up with a
+// hardcoded date the earlier guard answered first and a test named for the later
+// guard failed against a server that was working correctly. A window expressed
+// as "seven days from now" keeps each test pointed at the guard it names.
 // ---------------------------------------------------------------------------
+
+/** An ISO 8601 timestamp `days` from now — the idiom already used further down. */
+function daysFromNow(days: number): string {
+  return new Date(Date.now() + days * 24 * 3600 * 1000).toISOString();
+}
 
 describe('setVacation', () => {
   it('merges over the saved settings instead of replacing them', async () => {
@@ -423,17 +435,14 @@ describe('setVacation', () => {
     v.getVacation.mockResolvedValueOnce({ data: {} });
     v.updateVacation.mockResolvedValueOnce({ data: { enableAutoReply: true } });
 
-    await setVacation({
-      enable: true,
-      confirm: true,
-      body: 'Away',
-      startTime: '2026-09-01T00:00:00.000Z',
-      endTime: '2026-09-08T00:00:00.000Z',
-    });
+    const startTime = daysFromNow(7);
+    const endTime = daysFromNow(14);
+
+    await setVacation({ enable: true, confirm: true, body: 'Away', startTime, endTime });
 
     const body = v.updateVacation.mock.calls[0][0].requestBody;
-    expect(body.startTime).toBe(String(Date.parse('2026-09-01T00:00:00.000Z')));
-    expect(body.endTime).toBe(String(Date.parse('2026-09-08T00:00:00.000Z')));
+    expect(body.startTime).toBe(String(Date.parse(startTime)));
+    expect(body.endTime).toBe(String(Date.parse(endTime)));
   });
 
   it('refuses to enable with no body anywhere — nothing saved, nothing supplied', async () => {
@@ -461,14 +470,17 @@ describe('setVacation', () => {
     expect(v.updateVacation).not.toHaveBeenCalled();
   });
 
+  // Both ends are in the FUTURE on purpose, so the only thing wrong with this
+  // window is its order — which is the refusal under test. An end date in the
+  // past would be refused a step earlier, for a different and correct reason.
   it('refuses an inverted window', async () => {
     v.getVacation.mockResolvedValueOnce({ data: { responseBodyPlainText: 'Away' } });
 
     await expect(setVacation({
       enable: true,
       confirm: true,
-      startTime: '2026-09-08T00:00:00.000Z',
-      endTime: '2026-09-01T00:00:00.000Z',
+      startTime: daysFromNow(14),
+      endTime: daysFromNow(7),
     })).rejects.toThrow(/must be after/);
     expect(v.updateVacation).not.toHaveBeenCalled();
   });
