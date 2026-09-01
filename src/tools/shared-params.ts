@@ -62,3 +62,38 @@ export const includeAttachmentsParam = z
   .boolean()
   .optional()
   .describe("Re-attach the original message's attachments (default: true).");
+
+// ---------------------------------------------------------------------------
+// Sheets writes (2026-09-01). update_sheet_values and append_sheet_rows differ
+// only in what they do with the range, so everything else is stated once here.
+// ---------------------------------------------------------------------------
+
+/**
+ * What a cell may be. `null` writes a blank rather than deleting the cell,
+ * which is what "leave this one empty" has to mean in a fixed-width row.
+ */
+export const sheetCellSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+
+export const spreadsheetIdParam = z
+  .string()
+  .describe(
+    'The Google Sheets spreadsheet id. This server can only write to spreadsheets it created '
+    + 'itself — typically one that upload_drive_file put there with convert:true.',
+  );
+
+export const sheetValuesParam = z
+  .array(z.array(sheetCellSchema))
+  .describe(
+    'The rows to write: outer array = rows, inner = cells across. Strings, numbers, booleans '
+    + 'and null (a blank cell) are all allowed. Up to 1,000 rows and 10,000 cells per call; '
+    + 'send more than that as several calls.',
+  );
+
+export const valueInputOptionParam = z
+  .enum(['raw', 'user_entered'])
+  .optional()
+  .describe(
+    'How Google should read what you send. "user_entered" (the default) behaves as if a person '
+    + 'typed it, so "=SUM(A1:A2)" becomes a formula and "5%" becomes a percentage. "raw" stores '
+    + 'every value literally as text or a number, formulas included.',
+  );

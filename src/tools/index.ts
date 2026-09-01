@@ -44,6 +44,10 @@ import { registerUploadDriveFile } from './drive-upload-file.js';
 import { registerGetGoogleDoc } from './docs-get-document.js';
 import { registerCreateGoogleDoc } from './docs-create-document.js';
 import { registerUpdateGoogleDoc } from './docs-update-document.js';
+// Sheets writes (2026-09-01). Both ride the drive.file grant the aliases
+// already hold, so they reach only spreadsheets this server created.
+import { registerUpdateSheetValues } from './sheets-update-values.js';
+import { registerAppendSheetRows } from './sheets-append-rows.js';
 // Calendar tools (three read-only + create_calendar_event)
 import { registerListCalendars } from './calendar-list-calendars.js';
 import { registerListCalendarEvents } from './calendar-list-events.js';
@@ -122,6 +126,15 @@ export function registerAllTools(server: McpServer): void {
   registerGetGoogleDoc(server);
   registerCreateGoogleDoc(server);
   registerUpdateGoogleDoc(server);
+
+  // Sheets: two writes and no read. Reading a spreadsheet already worked —
+  // read_drive_file exports one as CSV — so what was missing was putting a
+  // revised version back without re-uploading the whole workbook. Both reach
+  // only spreadsheets this server created, which is what upload_drive_file's
+  // convert:true now produces. update_sheet_values REPLACES a range;
+  // append_sheet_rows inserts after a table and overwrites nothing.
+  registerUpdateSheetValues(server);
+  registerAppendSheetRows(server);
 
   // Calendar: three read-only tools plus create_calendar_event, whose
   // send_updates defaults to 'none' so the default path emails nobody.

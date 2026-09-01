@@ -21,7 +21,7 @@ npm run typecheck → clean (no output)
 | 1 | Piece A tests (convert-on-upload) | see git log | DONE |
 | 2 | Piece A implementation | see git log | DONE — 884 pass, typecheck clean |
 | 3 | Piece B tests (Sheets write) | see git log | DONE |
-| 4 | Piece B implementation + registration | | |
+| 4 | Piece B implementation + registration | see git log | DONE — 928 pass, typecheck clean |
 | 5 | Docs + CHANGELOG 1.10.0 + version | | |
 | 6 | Live-acceptance harness + fixtures | | |
 
@@ -135,6 +135,35 @@ Error: Failed to load url ../sheets/client.js (resolved id: ../sheets/client.js)
 
 No existing assertion was weakened anywhere. The only edit to an existing test file is
 `auth-scopes.test.ts`, which gains two tests and changes none.
+
+### Unit 4 — Piece B implemented and registered; whole suite green
+
+```
+Test Files  27 passed (27)
+     Tests  928 passed (928)
+npm run typecheck → clean
+```
+
+Roster 53 → 55. Judgment calls worth a validator's eye:
+
+- **Where the "created elsewhere" explanation is produced.** It runs INSIDE `googleApiCall`,
+  on the raw Google error, because the reason codes that tell an out-of-reach spreadsheet
+  apart from a missing scope or a disabled API do not survive the shared translation. The
+  replacement error carries no status, so neither `withRetry` nor the translator touches it
+  again, and every other failure (missing scope, accessNotConfigured, rate-limit 403, 401)
+  reaches the shared translator exactly as before. Pinned by four tests per tool.
+- **`insertDataOption: 'INSERT_ROWS'` on append.** Google's default is OVERWRITE, which
+  writes into the cells after the table whether or not something is already there. Not a
+  contract instruction; chosen because everything else this server does to a file creates
+  rather than destroys. Named in the tool description and the README.
+- **`maxRetries: 0` on append, retries left on update.** `values.update` is idempotent;
+  `values.append` is not, and a retried append after a landed write adds every row twice.
+  Same trade `create_google_doc` and `post_chat_message` already make.
+- **Shared params went to `src/tools/shared-params.ts`**, the file that already exists for
+  this, rather than one tool importing a zod schema out of its sibling.
+- `src/tools/index.test.ts` is a NEW test the repo did not have: it pins all 55 tool names
+  split into a read list and a write list, so a write tool can never be added without being
+  named as one.
 
 ---
 
