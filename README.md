@@ -207,7 +207,7 @@ Three read-only tools plus one that writes. The Calendar scopes (`calendar.event
 
 The room is not always ready the instant the event is: Google can accept the request and finish building the room a moment later. So a room reported as still building is re-read from the event a few times over about fifteen seconds, and one of three things comes back. `"success"` means the link in `meetLink` is real and usable. `"pending"` means the room was requested and is still being made — there is **no** `meetLink` in that case, because a link that does not exist yet is never invented; read it a minute later with `list_calendar_events`, which returns the event's `hangoutLink`. `"failure"` means Google could not attach a room at all: the event still exists and is still returned, and a room can be added by hand from the event in Google Calendar. The `notice` says which of the three happened in plain words.
 
-One account type to know about: a personal `@gmail.com` account may not be able to have a Meet room attached through the API even though it can make one in the Calendar web page. When that is the case it comes back as `"failure"` with the event intact, not as a broken call.
+This works on a personal `@gmail.com` account as well, not only on Workspace ones: every account configured here, the consumer one included, was checked against Google on 2026-09-01 and each got a real room back. If Google ever does refuse a room on some account, it comes back as `"failure"` with the event intact, not as a broken call.
 
 All tools accept an optional `account` parameter (alias or email). Defaults to the account set in `accounts.json`.
 

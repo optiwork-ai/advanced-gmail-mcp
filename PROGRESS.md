@@ -111,11 +111,34 @@ Worktree: `/Users/steve/Claude-Projects/2-backbone/advanced-gmail-mcp-wt/meet-li
       stale 2016 window (permanently in the past by design) and prose in comments.
       **Suite now 846 passed / 0 failed; typecheck clean.**
 
+- [x] **U7 — validation follow-up: two documentation fixes** (PASS-WITH-FIXES verdict,
+      Steve-approved). Its SHA is the branch tip.
+      **Fix 1 (this commit).** README and CHANGELOG both hedged that a personal
+      `@gmail.com` account "may not" be able to have a Meet room attached through the API.
+      The chair's live run disproved it — `personal` returned `meetStatus=success` with a
+      real `meet.google.com` link, like the other four
+      (`live-acceptance/RESULTS-2026-09-01.md`). Both sentences now say it was checked
+      against Google and works on a personal account too, and keep the honest "if Google
+      ever does refuse a room, the event is still returned" half, which is still true.
+      **Fix 2 (harness, on disk, not committed).** `live-acceptance/meet-link.ts` H1 now
+      calls `calendarList.get` instead of `calendars.get`: the CalendarListEntry carries
+      the same `conferenceProperties.allowedConferenceSolutionTypes`, and reading it is
+      covered by the `calendar.calendarlist.readonly` scope every account already granted,
+      so H1 can actually pass instead of always answering "Insufficient Permission". The
+      printed plan matches, and `README-RUN.md` now (a) says which scope H1 uses and why,
+      (b) confines the "re-consent with `npm run auth`" advice to H2/H3 so an H1 failure
+      never triggers a needless five-account re-consent, and (c) drops the now-disproven
+      "a consumer account cannot have a room attached" expectation.
+      Dry run re-run from the worktree: **exit 0**, plan line reads `calendarList.get`.
+      Harness typechecks standalone under `--strict`. No live Google call; no credential
+      file created, copied or symlinked.
+
 ## Rulings received from the chair (2026-09-01)
 
 - **Q1 — `events.get` without `conferenceDataVersion`: deviation STANDS.** Verified
   independently against `googleapis` v3.d.ts; the contract's G2(d) was wrong. No change.
 - **Q2 — fix it now, on this branch, as its own unit.** Done as U6 above.
+- **Validation verdict: PASS-WITH-FIXES**, two documentation fixes. Done as U7 above.
 
 ## Live harness result (run by the chair against this worktree, credentials since removed)
 
@@ -124,9 +147,11 @@ Worktree: `/Users/steve/Claude-Projects/2-backbone/advanced-gmail-mcp-wt/meet-li
   (`personal`) account.** That answers the lane's open question: a consumer @gmail.com
   account CAN have a Meet room attached through the API.
 - **H1 (the pre-check) FAILED on all five with "Insufficient Permission"**:
-  `calendars.get` needs a scope this server does not request. That is a HARNESS-ONLY
-  limitation — it does not touch `add_meet`, which passed on every account — and the
-  chair's ruling is to leave the harness as it is.
+  `calendars.get` needs a scope this server does not request. That was a HARNESS-ONLY
+  defect — it does not touch `add_meet`, which passed on every account. **Fixed in U7**:
+  H1 now reads the same `conferenceProperties` from `calendarList.get`, which the
+  already-granted `calendar.calendarlist.readonly` scope covers. No scope was added to
+  the product and no account was re-consented.
 
 ## Open items for the chair / validator
 
