@@ -23,7 +23,7 @@ npm run typecheck → clean (no output)
 | 3 | Piece B tests (Sheets write) | see git log | DONE |
 | 4 | Piece B implementation + registration | see git log | DONE — 928 pass, typecheck clean |
 | 5 | Docs + CHANGELOG 1.10.0 + version | see git log | DONE |
-| 6 | Live-acceptance harness + fixtures | | |
+| 6 | Live-acceptance harness + fixtures | see git log (journal only) | DONE — --dry clean |
 
 ## FAIL-before evidence
 
@@ -183,6 +183,51 @@ Suite unchanged and green (27 files / 928 tests), typecheck clean.
   Sheets tools are added to the table with their limits. Not named in the contract's G5, but
   the file is a tool table this release makes wrong, and leaving it stale is how a caller
   learns about `convert` from nowhere.
+
+### Unit 6 — the live-acceptance harness (chair runs it; this session made NO live call)
+
+Written to `shared/active-work/2026-09-01-drive-convert-sheets-write/live-acceptance/`:
+`convert-sheets.ts`, `README-RUN.md`, an ESM `package.json`, and two generated fixtures
+(`fixture.csv` — four rows with a number, a decimal, a comma-quoted string containing an em
+dash, and a percent sign; `fixture.txt` — two short paragraphs).
+
+`--dry` from the worktree, clean, exit 0:
+
+```
+DRY RUN: every module imported cleanly. No network call was made.
+  uploadFile accepts convert: yes
+  conversion map entries: 13
+  convertible extensions: xlsx, xls, ods, csv, tsv, docx, doc, odt, rtf, txt, pptx, ppt, odp
+  update_sheet_values registered: yes
+  append_sheet_rows registered:   yes
+  read_drive_file registered:     yes
+  convertTargetForFilename(fixture.csv) → application/vnd.google-apps.spreadsheet
+  convertTargetForFilename(fixture.txt) → application/vnd.google-apps.document
+  convertTargetForFilename(deck.pptx) → application/vnd.google-apps.presentation
+  convertTargetForFilename(scan.pdf) → undefined
+```
+
+Design notes for the chair and the validator:
+
+- H-A0 is the AUTHORITY for the conversion map: it reads Google's own
+  `about.get({ fields: 'importFormats' })` and looks every shipped entry up in it. It also
+  prints, as information only, what Google imports that the map does not claim.
+- The two write tools and `read_drive_file` are driven through the handlers the MCP server
+  actually registers, so what is exercised is the call Claude would make, argument names
+  included — not a private function underneath.
+- H-B1 recovers the real first-sheet title from the range Google echoes back and uses it for
+  the append, so a spreadsheet whose first tab is not "Sheet1" does not fail on a guess.
+- A Sheets-API-disabled 403 marks the B-checks SKIP-BLOCKED (never FAIL) and prints an
+  `ACTION FOR STEVE` line with the console URL.
+- H-Z always runs; anything it could not bin is printed as a `DELETE BY HAND` line with a
+  Drive URL, rather than swallowed.
+- ONE account by default (`steve-optiwork`, `--account=` to re-aim): what is under test is
+  per-project and per-grant, not per-account.
+
+**Not committed to git.** These files live in `shared/`, which belongs to the chair's
+workspace repo, and the entire lane folder — the chair's own contract and checklist
+included — is untracked there. Staging part of it from a worker session would be reaching
+into the chair's repo. The files are on disk at the contracted path.
 
 ---
 
