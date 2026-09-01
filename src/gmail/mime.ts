@@ -769,6 +769,16 @@ const EXT_MIME: Record<string, string> = {
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   ppt: 'application/vnd.ms-powerpoint',
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  // The OpenDocument trio, tab-separated values and RTF (2026-09-01). Each of
+  // these typed as application/octet-stream before, which is a type nothing can
+  // act on: Drive will not import it, and a mail client shows the attachment as
+  // an anonymous blob. Drive's convert-on-upload needs the real type on the
+  // media part, so these are the entries that make .ods and .odt convertible.
+  ods: 'application/vnd.oasis.opendocument.spreadsheet',
+  odt: 'application/vnd.oasis.opendocument.text',
+  odp: 'application/vnd.oasis.opendocument.presentation',
+  tsv: 'text/tab-separated-values',
+  rtf: 'application/rtf',
   mp4: 'video/mp4',
   mp3: 'audio/mpeg',
   ics: 'text/calendar',

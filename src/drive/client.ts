@@ -88,6 +88,73 @@ export const DRIVE_READONLY_SCOPE = 'https://www.googleapis.com/auth/drive.reado
  */
 export const GOOGLE_DOC_MIME = 'application/vnd.google-apps.document';
 
+/** The same thing for a Google Sheet. */
+export const GOOGLE_SHEET_MIME = 'application/vnd.google-apps.spreadsheet';
+
+/** And for Google Slides. */
+export const GOOGLE_SLIDES_MIME = 'application/vnd.google-apps.presentation';
+
+/**
+ * Which Google file an upload of each source type can become.
+ *
+ * Keyed by the SOURCE mime type — the type of the bytes on disk — because that
+ * is what `mimeTypeForFilename` produces and what the media part of the upload
+ * carries. The value is the type to name in the files.create METADATA, which is
+ * the whole mechanism: Drive reads the metadata as "make it this" and the media
+ * as "here is what to make it from".
+ *
+ * The list is deliberately closed. Every entry is a format Google's own
+ * `about.get({ fields: 'importFormats' })` reports as importable, and the live
+ * acceptance harness checks this map against that list rather than against
+ * anybody's memory. Adding a guessed entry would move the failure from that
+ * check to a caller's upload, which is exactly the wrong place for it.
+ */
+export const CONVERT_TARGET_BY_SOURCE_MIME: Readonly<Record<string, string>> = {
+  // → Google Sheets
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': GOOGLE_SHEET_MIME, // xlsx
+  'application/vnd.ms-excel': GOOGLE_SHEET_MIME, // xls
+  'application/vnd.oasis.opendocument.spreadsheet': GOOGLE_SHEET_MIME, // ods
+  'text/csv': GOOGLE_SHEET_MIME,
+  'text/tab-separated-values': GOOGLE_SHEET_MIME, // tsv
+  // → Google Docs
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': GOOGLE_DOC_MIME, // docx
+  'application/msword': GOOGLE_DOC_MIME, // doc
+  'application/vnd.oasis.opendocument.text': GOOGLE_DOC_MIME, // odt
+  'application/rtf': GOOGLE_DOC_MIME,
+  'text/plain': GOOGLE_DOC_MIME, // txt
+  // → Google Slides
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': GOOGLE_SLIDES_MIME, // pptx
+  'application/vnd.ms-powerpoint': GOOGLE_SLIDES_MIME, // ppt
+  'application/vnd.oasis.opendocument.presentation': GOOGLE_SLIDES_MIME, // odp
+};
+
+/**
+ * The same set said in the vocabulary a caller actually has: file extensions.
+ *
+ * A refusal that named mime types would be telling someone holding
+ * `budget.numbers` to go and find a `text/tab-separated-values`. The unit tests
+ * check every extension here really does resolve, through
+ * `mimeTypeForFilename`, into a key of the map above — so the advice cannot
+ * drift away from the behaviour.
+ */
+export const CONVERTIBLE_EXTENSIONS: readonly string[] = [
+  'xlsx', 'xls', 'ods', 'csv', 'tsv',
+  'docx', 'doc', 'odt', 'rtf', 'txt',
+  'pptx', 'ppt', 'odp',
+];
+
+/**
+ * The Google type a file of this name would convert into, or undefined if
+ * Google cannot import it.
+ *
+ * Takes the NAME the file will have in Drive rather than the local path: an
+ * upload can be renamed on the way up, and the name it lands under is the one
+ * that has to make sense of its own extension.
+ */
+export function convertTargetForFilename(filename: string): string | undefined {
+  return CONVERT_TARGET_BY_SOURCE_MIME[mimeTypeForFilename(filename)];
+}
+
 /**
  * Per-file upload ceiling, decimal MB to match every other ceiling in this
  * codebase (see the mime module's `mb()`). Drive itself allows far more; the
@@ -105,6 +172,13 @@ export interface UploadFileOptions {
   folderId?: string;
   /** Optional name override; defaults to the local file's basename. */
   name?: string;
+  /**
+   * Convert the upload into its native Google equivalent instead of storing the
+   * bytes. Unset or false is the v1.9.0 path, unchanged down to the request
+   * body. True with a source type Google cannot import is refused before any
+   * network call rather than quietly uploaded unconverted.
+   */
+  convert?: boolean;
   account?: string | AccountConfig;
 }
 
@@ -119,6 +193,8 @@ export interface UploadFileResult {
   webViewLink?: string;
   webContentLink?: string;
   folderId?: string;
+  /** Present, and true, only when the upload was converted to a Google file. */
+  converted?: true;
   account: string;
 }
 
@@ -156,6 +232,12 @@ export function cleanDriveName(raw: string): string {
  * consumed stream. (A 5xx retry can therefore leave two copies in Drive if the
  * first attempt actually landed — the honest trade for retrying at all, and far
  * cheaper to undo than a duplicate outbound email.)
+ *
+ * With `convert` set, the file lands as a real Google Sheet / Doc / Slides
+ * instead of a stored Office or CSV file. A source type Google cannot import is
+ * refused here, before a client is even built, because the alternative — upload
+ * it unconverted and say nothing — is how somebody ends up clicking a file that
+ * will not open the way they were told it would.
  */
 export async function uploadFile(opts: UploadFileOptions): Promise<UploadFileResult> {
   const resolved = resolve(opts.account);
@@ -194,6 +276,19 @@ export async function uploadFile(opts: UploadFileOptions): Promise<UploadFileRes
     : mimeTypeForFilename(name);
   const folderId = opts.folderId?.trim() || undefined;
 
+  // Decided from the resolved source type, so a rename on the way up is
+  // accounted for, and refused HERE — no client, no token, no request. Asking
+  // Google to convert a PDF fails at Google anyway; failing locally costs the
+  // caller nothing and says what would have worked.
+  const convertTo = opts.convert ? CONVERT_TARGET_BY_SOURCE_MIME[mimeType] : undefined;
+  if (opts.convert && !convertTo) {
+    throw new Error(
+      `upload_drive_file: ${mimeType} cannot be converted into a Google file. `
+      + `Google imports these: ${CONVERTIBLE_EXTENSIONS.join(', ')}. `
+      + 'Upload it without convert to store the file in Drive as it is.',
+    );
+  }
+
   const drive = await getDriveClient(resolved);
 
   // The honesty path every other Drive/Docs tool travels. `withScopeHint`
@@ -217,6 +312,9 @@ export async function uploadFile(opts: UploadFileOptions): Promise<UploadFileRes
         requestBody: {
           name,
           ...(folderId ? { parents: [folderId] } : {}),
+          // The TARGET type, and only when a conversion was asked for: with
+          // `convert` unset this object is exactly what v1.9.0 sent.
+          ...(convertTo ? { mimeType: convertTo } : {}),
         },
         media: {
           mimeType,
@@ -228,6 +326,9 @@ export async function uploadFile(opts: UploadFileOptions): Promise<UploadFileRes
   );
 
   const file = response.data;
+  // A converted Google file reports no size at all — Drive does not measure its
+  // own formats in bytes. `size` below is the LOCAL stat and is named as such;
+  // `driveSize` is simply absent rather than being filled in with it.
   const driveSize = file.size !== undefined && file.size !== null ? Number(file.size) : undefined;
 
   // Mutating path: logged like send, trash and create_calendar_event. Ids and
@@ -238,6 +339,7 @@ export async function uploadFile(opts: UploadFileOptions): Promise<UploadFileRes
     folder_id: folderId ?? null,
     bytes: stat.size,
     mime_type: mimeType,
+    convert_to: convertTo ?? null,
   });
 
   return {
@@ -249,6 +351,7 @@ export async function uploadFile(opts: UploadFileOptions): Promise<UploadFileRes
     ...(file.webViewLink ? { webViewLink: file.webViewLink } : {}),
     ...(file.webContentLink ? { webContentLink: file.webContentLink } : {}),
     ...(folderId ? { folderId } : {}),
+    ...(convertTo ? { converted: true as const } : {}),
     account: resolved.alias,
   };
 }

@@ -19,7 +19,7 @@ npm run typecheck → clean (no output)
 | # | Unit | Commit | State |
 | --- | --- | --- | --- |
 | 1 | Piece A tests (convert-on-upload) | see git log | DONE |
-| 2 | Piece A implementation | | |
+| 2 | Piece A implementation | see git log | DONE — 884 pass, typecheck clean |
 | 3 | Piece B tests (Sheets write) | | |
 | 4 | Piece B implementation + registration | | |
 | 5 | Docs + CHANGELOG 1.10.0 + version | | |
@@ -79,6 +79,30 @@ The 29 failures:
 - `src/tools/drive-upload-file.test.ts > upload_drive_file exposes the convert option > describes what convert does in terms of what the user gets, not the mechanism`
 - `src/tools/drive-upload-file.test.ts > upload_drive_file exposes the convert option > says in the tool description that an upload can land as a real Google file`
 - `src/tools/drive-upload-file.test.ts > upload_drive_file exposes the convert option > passes convert:true straight through to the uploader`
+
+### Unit 2 — Piece A implemented; the same suite green
+
+```
+Test Files  25 passed (25)
+     Tests  884 passed (884)
+npm run typecheck → clean
+```
+
+Judgment calls worth a validator's eye:
+
+- The map is keyed by SOURCE mime type, not by extension, so a rename on the way up
+  (`name: 'data.csv'` over a local `blob`) converts correctly and one entry covers every
+  extension that types to it.
+- `CONVERTIBLE_EXTENSIONS` exists only so the refusal can speak in the caller's vocabulary;
+  a test walks it through `mimeTypeForFilename` into the map so the advice cannot drift.
+- Five extensions (`ods`, `odt`, `odp`, `tsv`, `rtf`) were added to `src/gmail/mime.ts`.
+  The contract authorises this ("add any missing mime.ts entries these extensions need").
+  It is the one change that reaches beyond Drive: those five previously typed as
+  `application/octet-stream`, so a `.ods` mail attachment now carries its real type too.
+  That is strictly better typing, but it IS a behaviour change outside `upload_drive_file`
+  and is called out here rather than buried.
+- `size` in the result stays the local stat and is documented as such; `driveSize` is simply
+  absent for a converted file rather than being filled in from the local number.
 
 ---
 
