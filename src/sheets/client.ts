@@ -188,8 +188,9 @@ export function outsideAppScopeError(
     `${ctx.tool}: this server cannot reach spreadsheet "${ctx.spreadsheetId}". It holds the `
     + 'narrow "drive.file" grant, which reaches only files this server created itself — so a '
     + 'spreadsheet made in Google Sheets by hand, or uploaded by another tool, is invisible to '
-    + 'it and Google answers as it would for a file that does not exist. To write into that '
-    + 'data, upload the workbook with upload_drive_file using convert:true and write to the '
+    + 'it: Google answers either "not found" — the same words it uses for an id that never '
+    + 'existed — or "no permission", and neither of those is a broken login. To write into '
+    + 'that data, upload the workbook with upload_drive_file using convert:true and write to the '
     + 'Google Sheet that creates. Re-authenticating will not change this — the grant is '
     + `working as designed.\n\nOriginal error: ${googleErrorMessage(err)}`,
   );
