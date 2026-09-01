@@ -215,8 +215,14 @@ Design notes for the chair and the validator:
 - The two write tools and `read_drive_file` are driven through the handlers the MCP server
   actually registers, so what is exercised is the call Claude would make, argument names
   included — not a private function underneath.
-- H-B1 recovers the real first-sheet title from the range Google echoes back and uses it for
-  the append, so a spreadsheet whose first tab is not "Sheet1" does not fail on a guess.
+- H-B1 sends range `A1:B2` with NO tab name, not the contract's literal `Sheet1!A1:B2`.
+  A converted CSV's first tab is named after the FILE, so `Sheet1!` would have failed on a
+  parse error that read as a defect in the branch when it was only a wrong guess in the
+  harness. Bare A1 notation means "the first visible sheet" whatever Google called it, and
+  the response then reports the real name — which H-B2 anchors on, kept verbatim because
+  Google returns it already correctly quoted. This is the contract's own "or the actual
+  first sheet title read from the update response", taken one step earlier so the first
+  write cannot fail on the guess.
 - A Sheets-API-disabled 403 marks the B-checks SKIP-BLOCKED (never FAIL) and prints an
   `ACTION FOR STEVE` line with the console URL.
 - H-Z always runs; anything it could not bin is printed as a `DELETE BY HAND` line with a
