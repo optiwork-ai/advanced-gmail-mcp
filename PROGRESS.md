@@ -65,7 +65,14 @@ Worktree: `/Users/steve/Claude-Projects/2-backbone/advanced-gmail-mcp-wt/meet-li
       **PASS-after:** `src/calendar/client.test.ts` 66/66 green; full suite
       **845 pass / 1 fail (846)** — the 1 is the pre-existing date bomb above;
       `npm run typecheck` clean.
-- [ ] **U3 — the tool gains `add_meet`** (`src/tools/calendar-create-event.ts`)
+- [x] **U3 — the tool gains `add_meet`** (`src/tools/calendar-create-event.ts`) —
+      U2 is `2ca7278`; this unit's SHA is in U4's entry.
+      `add_meet: z.boolean().optional()`, described plainly (attaches a Meet room and
+      returns its link; emails nobody — `send_updates` alone decides that; what each
+      `meetStatus` means). The tool description says the same in one clause. The
+      handler passes `addMeet: add_meet ?? false`. No tool-level test: this layer is a
+      passthrough and the repo tests the client, which is where the behaviour lives.
+      typecheck clean, suite unchanged at 845 pass / 1 pre-existing fail.
 - [ ] **U4 — README + CHANGELOG 1.9.0 + version bump**
 - [ ] **U5 — live-acceptance harness** (chair runs it; this session makes no live call)
 
