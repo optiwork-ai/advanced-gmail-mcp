@@ -73,7 +73,16 @@ Worktree: `/Users/steve/Claude-Projects/2-backbone/advanced-gmail-mcp-wt/meet-li
       handler passes `addMeet: add_meet ?? false`. No tool-level test: this layer is a
       passthrough and the repo tests the client, which is where the behaviour lives.
       typecheck clean, suite unchanged at 845 pass / 1 pre-existing fail.
-- [ ] **U4 — README + CHANGELOG 1.9.0 + version bump**
+- [x] **U4 — README + CHANGELOG 1.9.0 + version bump** — U3 is `1e8b55e`; this
+      unit's SHA is in U5's entry. README: the `create_calendar_event` table row names
+      `add_meet`, and the invitation-email paragraph is followed by a new
+      "On `create_calendar_event` and the Meet room" paragraph covering the three
+      statuses, the never-invented link, and the consumer-account caveat.
+      CHANGELOG: `## [1.9.0] — 2026-09-01` in the 1.8.0 voice, saying plainly that no
+      fresh sign-in is needed and nothing else changes. `package.json` → 1.9.0;
+      `grep -rn '1\.8\.0' --exclude-dir=node_modules` finds no other maintained copy
+      (the remaining hits are CHANGELOG history and PROGRESS-CHAT.md's record of that
+      round, both of which SHOULD keep saying 1.8.0).
 - [ ] **U5 — live-acceptance harness** (chair runs it; this session makes no live call)
 
 ---

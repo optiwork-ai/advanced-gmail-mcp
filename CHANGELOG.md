@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] — 2026-09-01
+
+A calendar event can now be created with a Google Meet room on it, in the same step.
+
+**No fresh sign-in needed, and nothing else changes.** The permission this uses is the calendar permission every account already granted; no new one is asked for. An event created the way you create them today is byte-for-byte the same request it was yesterday, and comes back with the same answer.
+
+### Added
+- **`create_calendar_event` can attach a Google Meet room: `add_meet: true`.** The event comes back with the room's link on it, so "book the call and send me the link" is one step instead of creating the event and then opening Google Calendar to add a room by hand. It emails nobody by itself — who gets told is still `send_updates`, which still defaults to telling nobody.
+- **A link that does not exist yet is never invented.** Google does not always finish building the room before it answers: it can accept the request and have the room ready a moment later. The event is therefore re-read a few times over about fifteen seconds, and the answer says which of three things happened — the room is ready and here is the link; the room was asked for and is still being built, so there is no link yet and here is how to read it in a minute (`list_calendar_events`); or Google could not attach a room at all. In the middle case the event exists and is returned exactly as it would be otherwise. It simply does not pretend to have a link.
+- **A failed re-read cannot lose an event that was created.** The event exists on Google's side the moment it is created, so a re-read that fails reports the room as still being built rather than reporting the whole creation as failed — which would have invited a second copy of the same meeting.
+- One thing worth knowing about personal `@gmail.com` accounts: attaching a room through the API is not something every account type supports, even when the Calendar web page offers it. Where it is not supported the answer says the room could not be attached, and the event is still there.
+
 ## [1.8.0] — 2026-08-28
 
 Google Chat can now be posted to. Until today this server could only read Chat; the owner reversed that on 2026-08-28 ("lets get chat posting working as well"), and this release is that reversal.

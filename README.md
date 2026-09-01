@@ -197,11 +197,17 @@ Three read-only tools plus one that writes. The Calendar scopes (`calendar.event
 | `list_calendars` | List the calendars the account can see (id, summary, timeZone, accessRole, primary) |
 | `list_calendar_events` | List events on a calendar — recurring events expanded, start-time order, 50 per page (max 250), `page_token` for more |
 | `get_freebusy` | Busy intervals across one or more calendars in a time window (no event titles) |
-| `create_calendar_event` | **Creates an event.** `send_updates` defaults to `"none"` — nobody is emailed. Passing `"all"` makes Google email every attendee an invitation |
+| `create_calendar_event` | **Creates an event.** `send_updates` defaults to `"none"` — nobody is emailed. Passing `"all"` makes Google email every attendee an invitation. `add_meet: true` also attaches a **Google Meet room** and returns its link |
 
 **On Calendar permission errors:** a Calendar 403 says what is actually wrong. A missing calendar scope names that scope and the exact `npm run auth -- <alias>` command; a project with the Google Calendar API switched off says to enable it in the Cloud console and states plainly that re-authenticating will not help; a rate limit reports itself as a rate limit. None of them tell you to redo a login that is working.
 
 **On `create_calendar_event` and invitation email:** adding attendees does not notify them. `send_updates` decides that, and its default is `"none"`, so the default path sends no mail at all. `"all"` is an outward-facing act — Google mails every attendee — and `"externalOnly"` mails only attendees outside your Workspace domain. The tool's result carries a `notice` stating which happened.
+
+**On `create_calendar_event` and the Meet room:** `add_meet: true` asks Google to attach a Google Meet room to the event, and the result carries `meetLink` and `meetStatus`. It emails nobody on its own — `send_updates` still decides that, and still defaults to `"none"`.
+
+The room is not always ready the instant the event is: Google can accept the request and finish building the room a moment later. So a room reported as still building is re-read from the event a few times over about fifteen seconds, and one of three things comes back. `"success"` means the link in `meetLink` is real and usable. `"pending"` means the room was requested and is still being made — there is **no** `meetLink` in that case, because a link that does not exist yet is never invented; read it a minute later with `list_calendar_events`, which returns the event's `hangoutLink`. `"failure"` means Google could not attach a room at all: the event still exists and is still returned, and a room can be added by hand from the event in Google Calendar. The `notice` says which of the three happened in plain words.
+
+One account type to know about: a personal `@gmail.com` account may not be able to have a Meet room attached through the API even though it can make one in the Calendar web page. When that is the case it comes back as `"failure"` with the event intact, not as a broken call.
 
 All tools accept an optional `account` parameter (alias or email). Defaults to the account set in `accounts.json`.
 
