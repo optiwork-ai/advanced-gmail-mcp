@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { google } from 'googleapis';
 import type { calendar_v3 } from 'googleapis';
 import type { Auth } from 'googleapis';
@@ -317,9 +318,144 @@ export interface CreateEventOptions {
   timeZone?: string;
   sendUpdates?: SendUpdates;
   account?: string | AccountConfig;
+  /**
+   * Ask Google to attach a Google Meet room to the event and return its link.
+   * Nobody is emailed by this: `sendUpdates` alone decides that.
+   */
+  addMeet?: boolean;
+  /**
+   * How the pending-room re-check waits between reads. Injected so tests spend
+   * no wall-clock time; production uses the real timer.
+   */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+// ---------------------------------------------------------------------------
+// Google Meet rooms
+//
+// Asking for a room is ASYNCHRONOUS. `events.insert` returns as soon as the
+// event exists, and `conferenceData.createRequest.status` may still be
+// `pending` with no link on the event at all — the link appears on a later read
+// of the same event. Reading the link straight off the insert response would
+// therefore hand back a meeting whose "link" is nothing, with nobody told.
+// ---------------------------------------------------------------------------
+
+/** How this server reports Google's three conference-creation outcomes. */
+export type MeetStatus = 'success' | 'pending' | 'failure';
+
+/**
+ * The re-check schedule for a room Google is still building: five reads at
+ * 1s, 2s, 3s, 4s, 5s — ~15s worst case. Bounded on purpose. An unbounded wait
+ * would hang the tool call for a room that may never arrive, and the event
+ * itself already exists by then either way.
+ */
+export const MEET_POLL_DELAYS_MS = [1000, 2000, 3000, 4000, 5000];
+
+/** The real wait. Replaced by `CreateEventOptions.sleep` in tests. */
+function realSleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * The one place a Meet link is read out of an event: `hangoutLink` first, then
+ * the conference's video entry point. Google populates one, the other, or both
+ * depending on how the room was made, so reading only `hangoutLink` loses real
+ * links.
+ */
+export function extractMeetLink(event: calendar_v3.Schema$Event): string | undefined {
+  if (event.hangoutLink) return event.hangoutLink;
+  const video = (event.conferenceData?.entryPoints ?? []).find(
+    point => point.entryPointType === 'video' && !!point.uri,
+  );
+  return video?.uri ?? undefined;
+}
+
+/**
+ * `conferenceData.createRequest.status.statusCode`, defensively.
+ *
+ * Google documents `status` as an object carrying `statusCode`. A bare string
+ * is accepted too, so a shape change on Google's side degrades to "unknown"
+ * (and therefore to a pending re-check) rather than throwing in the middle of
+ * a write that already happened.
+ */
+function conferenceStatusCode(event: calendar_v3.Schema$Event): string | undefined {
+  const status = event.conferenceData?.createRequest?.status;
+  if (!status) return undefined;
+  const code = typeof status === 'string' ? status : status.statusCode;
+  return code ?? undefined;
+}
+
+/** The clause appended to the event's notice, one per outcome. */
+const MEET_NOTICE: Record<MeetStatus, string> = {
+  success: ' A Google Meet room is attached to the event; its link is in meetLink.',
+  pending:
+    ' A Google Meet room was requested and Google is still creating it, so there is no link yet.'
+    + ' Read it in a minute with list_calendar_events, which returns the event\'s hangoutLink.',
+  failure:
+    ' The event exists, but Google could not attach a Google Meet room to it.'
+    + ' Add one from the event in Google Calendar if the meeting needs one.',
+};
+
+/**
+ * Settle the conference on a just-created event: return the link if it is
+ * already there, otherwise re-read the event until Google finishes building
+ * the room, gives up, or the poll budget runs out.
+ *
+ * The re-read is `events.get({ calendarId, eventId })`. It deliberately does
+ * NOT carry `conferenceDataVersion`: that parameter belongs to the write
+ * methods (insert / update / patch / import) in Google's discovery document
+ * and is not part of `events.get`, while reads return `conferenceData`
+ * regardless. See QUESTIONS-FOR-FABLE.md for the contract deviation this is.
+ */
+async function resolveMeetRoom(
+  calendar: calendar_v3.Calendar,
+  ctx: ScopeErrorContext,
+  calendarId: string,
+  inserted: calendar_v3.Schema$Event,
+  alias: string,
+  sleep: (ms: number) => Promise<void>,
+): Promise<{ event: calendar_v3.Schema$Event; meetLink?: string; meetStatus: MeetStatus }> {
+  let event = inserted;
+  let link = extractMeetLink(event);
+  let code = conferenceStatusCode(event);
+  const eventId = event.id;
+
+  if (!link && eventId && code !== 'failure') {
+    for (const delay of MEET_POLL_DELAYS_MS) {
+      await sleep(delay);
+      let fresh: calendar_v3.Schema$Event;
+      try {
+        const reread = await calendarCall(ctx, () =>
+          calendar.events.get({ calendarId, eventId }),
+        );
+        fresh = reread.data;
+      } catch (err) {
+        // The event EXISTS — the insert already succeeded. Letting a failing
+        // READ-BACK throw would report a creation that happened as one that
+        // did not, and the caller would create the event a second time. The
+        // room is reported as still pending instead, and the failure is
+        // logged so it is not invisible.
+        log('warn', 'create_calendar_event_meet_poll_failed', {
+          account: alias,
+          calendar_id: calendarId,
+          event_id: eventId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        break;
+      }
+      event = fresh;
+      link = extractMeetLink(fresh);
+      code = conferenceStatusCode(fresh) ?? code;
+      if (link || code === 'failure') break;
+    }
+  }
+
+  if (link) return { event, meetLink: link, meetStatus: 'success' };
+  if (code === 'failure') return { event, meetStatus: 'failure' };
+  return { event, meetStatus: 'pending' };
+}
 
 /**
  * Build one EventDateTime. An all-day event uses `date` (YYYY-MM-DD); a timed
@@ -372,6 +508,10 @@ export async function createEvent(opts: CreateEventOptions): Promise<{
   attendees?: { email: string; responseStatus?: string }[];
   calendarId: string;
   sendUpdates: SendUpdates;
+  /** Present only when addMeet was asked for AND a room exists. */
+  meetLink?: string;
+  /** Present only when addMeet was asked for. */
+  meetStatus?: MeetStatus;
   notice: string;
 }> {
   const resolved = resolve(opts.account);
@@ -409,24 +549,57 @@ export async function createEvent(opts: CreateEventOptions): Promise<{
     .map(email => email.trim())
     .filter(email => email.length > 0);
 
-  const response = await calendarCall(
-    { tool: 'create_calendar_event', scope: CALENDAR_EVENTS_SCOPE, alias: resolved.alias },
-    () =>
-      calendar.events.insert({
-        calendarId,
-        sendUpdates,
-        requestBody: {
-          summary: opts.summary,
-          ...(opts.description ? { description: opts.description } : {}),
-          ...(opts.location ? { location: opts.location } : {}),
-          start,
-          end,
-          ...(attendees.length > 0 ? { attendees: attendees.map(email => ({ email })) } : {}),
-        },
-      }),
+  const addMeet = opts.addMeet ?? false;
+  const ctx = { tool: 'create_calendar_event', scope: CALENDAR_EVENTS_SCOPE, alias: resolved.alias };
+
+  const response = await calendarCall(ctx, () =>
+    calendar.events.insert({
+      calendarId,
+      sendUpdates,
+      // Version 1 is what makes Google act on conferenceData at all; without
+      // it the createRequest below is ignored silently. Sent ONLY when a room
+      // was asked for, so an ordinary event's request is unchanged.
+      ...(addMeet ? { conferenceDataVersion: 1 } : {}),
+      requestBody: {
+        summary: opts.summary,
+        ...(opts.description ? { description: opts.description } : {}),
+        ...(opts.location ? { location: opts.location } : {}),
+        start,
+        end,
+        ...(attendees.length > 0 ? { attendees: attendees.map(email => ({ email })) } : {}),
+        ...(addMeet
+          ? {
+              conferenceData: {
+                createRequest: {
+                  // Google's idempotency key for the room. A fresh one per
+                  // request: reusing one asks for the SAME room again.
+                  requestId: randomUUID(),
+                  conferenceSolutionKey: { type: 'hangoutsMeet' },
+                },
+              },
+            }
+          : {}),
+      },
+    }),
   );
 
-  const event = response.data;
+  let event = response.data;
+  let meetLink: string | undefined;
+  let meetStatus: MeetStatus | undefined;
+
+  if (addMeet) {
+    const settled = await resolveMeetRoom(
+      calendar,
+      ctx,
+      calendarId,
+      event,
+      resolved.alias,
+      opts.sleep ?? realSleep,
+    );
+    event = settled.event;
+    meetLink = settled.meetLink;
+    meetStatus = settled.meetStatus;
+  }
 
   // Destructive/outward path: logged like send, trash and delete. Target ids
   // only — never attendee addresses or event bodies.
@@ -436,6 +609,9 @@ export async function createEvent(opts: CreateEventOptions): Promise<{
     event_id: event.id ?? null,
     attendee_count: attendees.length,
     send_updates: sendUpdates,
+    add_meet: addMeet,
+    // The OUTCOME, after any re-check — never the link itself.
+    meet_status: meetStatus ?? null,
   });
 
   return {
@@ -457,9 +633,12 @@ export async function createEvent(opts: CreateEventOptions): Promise<{
       : {}),
     calendarId,
     sendUpdates,
+    ...(meetLink ? { meetLink } : {}),
+    ...(meetStatus ? { meetStatus } : {}),
     notice:
-      sendUpdates === 'none'
+      (sendUpdates === 'none'
         ? 'No invitation emails were sent (send_updates: "none"). Attendees see the event only if they check their calendar.'
-        : `Google emailed invitations (send_updates: "${sendUpdates}").`,
+        : `Google emailed invitations (send_updates: "${sendUpdates}").`)
+      + (meetStatus ? MEET_NOTICE[meetStatus] : ''),
   };
 }

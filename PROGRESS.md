@@ -49,7 +49,22 @@ Worktree: `/Users/steve/Claude-Projects/2-backbone/advanced-gmail-mcp-wt/meet-li
       already sends nothing; they are the guard that the request stays byte-identical.
       `npm run typecheck` FAILS at this commit by design (`extractMeetLink`, `addMeet`
       and `sleep` do not exist yet); it is clean again at U2.
-- [ ] **U2 — `createEvent()` gains `addMeet`, the poll and the link extraction** (`src/calendar/client.ts`)
+- [x] **U2 — `createEvent()` gains `addMeet`, the poll and the link extraction**
+      (`src/calendar/client.ts`) — U1 is `5ea49a9`; this unit's SHA is in U3's entry.
+      `conferenceDataVersion: 1` + a `hangoutsMeet` `createRequest` with a fresh
+      `randomUUID()` requestId, sent ONLY when `addMeet` is true; `extractMeetLink()`
+      (hangoutLink, then the video entry point); `conferenceStatusCode()` reading
+      `status.statusCode` and tolerating a bare string; `resolveMeetRoom()` re-reading
+      the event at 1s/2s/3s/4s/5s through the same `calendarCall` ctx, stopping on a
+      link or on `failure`; the sleep injectable via `CreateEventOptions.sleep`.
+      A re-read that THROWS does not throw away the event: the insert already
+      happened, so the room is reported `pending` and the failure is logged as
+      `create_calendar_event_meet_poll_failed` (an addition to the contract, made
+      because propagating that error would report a created event as not created).
+      The write log now carries `add_meet` and `meet_status` (never the link).
+      **PASS-after:** `src/calendar/client.test.ts` 66/66 green; full suite
+      **845 pass / 1 fail (846)** — the 1 is the pre-existing date bomb above;
+      `npm run typecheck` clean.
 - [ ] **U3 — the tool gains `add_meet`** (`src/tools/calendar-create-event.ts`)
 - [ ] **U4 — README + CHANGELOG 1.9.0 + version bump**
 - [ ] **U5 — live-acceptance harness** (chair runs it; this session makes no live call)
