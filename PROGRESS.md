@@ -83,7 +83,25 @@ Worktree: `/Users/steve/Claude-Projects/2-backbone/advanced-gmail-mcp-wt/meet-li
       `grep -rn '1\.8\.0' --exclude-dir=node_modules` finds no other maintained copy
       (the remaining hits are CHANGELOG history and PROGRESS-CHAT.md's record of that
       round, both of which SHOULD keep saying 1.8.0).
-- [ ] **U5 — live-acceptance harness** (chair runs it; this session makes no live call)
+- [x] **U5 — live-acceptance harness** (chair runs it; this session made NO live call) —
+      U4 is `5a1db90`. Written at
+      `shared/active-work/2026-09-01-gmail-meet-link/live-acceptance/` — `meet-link.ts`,
+      an ESM `package.json`, and `README-RUN.md` with the three exact commands (dry from
+      the worktree, live against the worktree with the credential symlinks, live against
+      the live checkout after merge). Per account, in `getAccounts()` order: H1
+      `calendars.get` → `allowedConferenceSolutionTypes`; H2 `createEvent` with
+      `addMeet: true`, `sendUpdates: 'none'` and NO attendees; H3 `events.delete` of the
+      id H2 created, always attempted. Summary carries a dedicated line for `personal`,
+      and names anything left undeleted. `--dry` output recorded in the builder report.
+      NOT committed to the workspace repo — that tree holds a lot of unrelated in-flight
+      work and the Round 2 harness was left untracked too (see QUESTIONS-FOR-FABLE.md #5).
+
+## Open items for the chair / validator
+
+- `shared/active-work/2026-09-01-gmail-meet-link/QUESTIONS-FOR-FABLE.md` — two rulings
+  wanted: the `events.get` `conferenceDataVersion` deviation (G2 d), and the pre-existing
+  red test that keeps `npm test` from being wholly green (G1).
+- The live harness has not been run. No live Google call was made by this session.
 
 ---
 
