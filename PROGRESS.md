@@ -20,8 +20,8 @@ blocking the next build — the biggest caches sitting there are Telegram (2.2 G
 
 | # | Unit | Commit | State |
 | --- | --- | --- | --- |
-| 1 | Piece A tests (FAIL-before recorded) | (below) | done |
-| 2 | Piece A implementation | | |
+| 1 | Piece A tests (FAIL-before recorded) | `7a739fe` | done |
+| 2 | Piece A implementation | (this commit) | done |
 | 3 | Piece B client + settings-map tests | | |
 | 4 | Piece B client implementation | | |
 | 5 | Tool tests | | |
@@ -63,9 +63,17 @@ src/gmail/auth-admin-scopes.test.ts(71,52): error TS2339: Property 'scopesFor' d
 
 Full output: `evidence/FAIL-before-piece-A-typecheck.txt`.
 
+### Unit 2 — Piece A green
+
+`npm test` **928 → 951** (29 files), `npm run typecheck` clean.
+
 ## Decisions taken inside the contract's frame
 
-*(none yet)*
+- **The `[admin]` marker reads the TOKEN first, the flag second.** The contract gives three
+  states; the fourth — flag removed while the token still carries the grant — is not named in
+  it. Reporting `[admin]` there is the honest reading: un-flagging changes what the NEXT
+  consent asks for, not what the account can do this minute, and a board that went quiet
+  about live directory power would be hiding it. Pinned by a test that says so.
 
 ## Deviations, drops and things deliberately not done
 

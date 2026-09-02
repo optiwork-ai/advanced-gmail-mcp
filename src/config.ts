@@ -8,6 +8,25 @@ const PROJECT_ROOT = path.resolve(__dirname, '..');
 export interface AccountConfig {
   email: string;
   alias: string;
+  /**
+   * Does this account administer a Google Workspace? Set it in accounts.json,
+   * on the accounts that really are Workspace administrators and no others.
+   *
+   * It does two things, and both of them are refusals rather than powers:
+   *
+   *  - the consent flow asks Google for the Admin SDK scopes ONLY for a flagged
+   *    account (`scopesFor` in src/gmail/auth.ts), so a consumer Gmail account
+   *    never sees a consent screen offering to hand over a directory it does
+   *    not have;
+   *  - every admin tool refuses a non-flagged account BEFORE it makes a network
+   *    call (`requireAdminAccount` in src/workspace-admin/client.ts), so an
+   *    admin call cannot land on the wrong account by defaulting.
+   *
+   * Absent means false. Setting it does not by itself grant anything: the
+   * account must then be run through `npm run auth -- <alias>` again, because a
+   * token carries the permissions it was issued with and no others.
+   */
+  workspace_admin?: boolean;
 }
 
 interface Config {

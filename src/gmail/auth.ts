@@ -75,6 +75,71 @@ export const SCOPES = [
   'https://www.googleapis.com/auth/documents',
 ];
 
+/**
+ * The Google Workspace ADMIN scopes — asked for by ONLY the accounts flagged
+ * `"workspace_admin": true` in accounts.json (added 2026-09-02).
+ *
+ * They back the Admin SDK Directory tools (domains, users, groups, members,
+ * aliases) and the Groups Settings tools that decide whether an address accepts
+ * mail from outside the company. That is the job they were added for: a persona
+ * address is a Google Group at the business domain, and "accepts outside mail"
+ * is a Groups Settings property, not a mailbox one.
+ *
+ * Why this is a SEPARATE list rather than more entries in SCOPES: two of the
+ * five accounts configured here are a consumer `@gmail.com` mailbox and a
+ * shared inbox. Neither administers anything, and asking them to grant
+ * directory power would put a frightening consent screen in front of someone
+ * for a permission no tool would ever use on them. `scopesFor` keeps their
+ * request byte-identical to what it was before this existed.
+ *
+ * Two things Google folds in, so they are deliberately NOT listed:
+ * `admin.directory.user` already covers user alias operations, and
+ * `admin.directory.group` already covers group alias operations. There is no
+ * `.alias` scope to ask for.
+ *
+ * Device scopes (`admin.directory.device.*`) are deliberately EXCLUDED. Wiping
+ * or locking a phone is not mail configuration, and it is one re-consent away
+ * if it ever becomes the job.
+ *
+ * Like every scope here, adding it changes NO token already on disk: each
+ * flagged alias must re-consent with `npm run auth -- <alias>` before a single
+ * admin tool works, and until then those tools answer with an error naming the
+ * scope and that exact command.
+ */
+export const ADMIN_SCOPES = [
+  'https://www.googleapis.com/auth/admin.directory.user',
+  'https://www.googleapis.com/auth/admin.directory.user.security',
+  'https://www.googleapis.com/auth/admin.directory.group',
+  'https://www.googleapis.com/auth/admin.directory.group.member',
+  'https://www.googleapis.com/auth/admin.directory.orgunit',
+  'https://www.googleapis.com/auth/admin.directory.domain',
+  'https://www.googleapis.com/auth/admin.directory.customer',
+  'https://www.googleapis.com/auth/admin.directory.rolemanagement',
+  'https://www.googleapis.com/auth/admin.directory.resource.calendar',
+  'https://www.googleapis.com/auth/admin.directory.userschema',
+  'https://www.googleapis.com/auth/apps.groups.settings',
+];
+
+/**
+ * What consent should ask this particular account for.
+ *
+ * A fresh array every time, so nothing a caller does to the result can reach
+ * `SCOPES` — that list is shared by every account, and a push into it would
+ * quietly widen the next consent screen for all of them.
+ */
+export function scopesFor(account: AccountConfig): string[] {
+  return account.workspace_admin === true
+    ? [...SCOPES, ...ADMIN_SCOPES]
+    : [...SCOPES];
+}
+
+/**
+ * The one grant that tells "this token can administer the Workspace" apart from
+ * "this token can read mail". Every admin tool needs it, so its presence in a
+ * stored token is what `auth:check` reports on.
+ */
+const ADMIN_DIRECTORY_USER_SCOPE = 'https://www.googleapis.com/auth/admin.directory.user';
+
 const REDIRECT_URI = 'http://localhost:3000/oauth2callback';
 
 /**
@@ -153,7 +218,9 @@ export async function authenticateAccount(account: AccountConfig): Promise<void>
 
   const authUrl = oauth2Client.generateAuthUrl({
     access_type: 'offline',
-    scope: SCOPES,
+    // Per ACCOUNT since 2026-09-02, not one list for everybody: only an account
+    // flagged workspace_admin is asked to hand over the directory.
+    scope: scopesFor(account),
     login_hint: account.email,
     prompt: 'consent',
   });
@@ -242,6 +309,24 @@ export function checkAuthStatus(): void {
           : hasSendScope
             ? ' [send only]'
             : ' [read/modify only]';
+
+        // Workspace-admin state, appended after the mail state (2026-09-02).
+        //
+        // The TOKEN decides what the account can do right now; the FLAG decides
+        // what the next consent screen will ask for. Reporting the token first
+        // is the honest order: an account whose flag was removed still holds
+        // whatever it was granted until it re-consents or the grant is revoked,
+        // and a board that stopped mentioning that would be hiding live power.
+        //
+        // The middle case is the one that will actually be read: flagged in
+        // accounts.json, token issued before the scopes existed, every admin
+        // tool answering 403. It is invisible from the outside, so the cure is
+        // printed here in full rather than described.
+        if (token.scope?.includes(ADMIN_DIRECTORY_USER_SCOPE)) {
+          scopeInfo += ' [admin]';
+        } else if (account.workspace_admin === true) {
+          scopeInfo += ` [admin: NOT CONSENTED — run npm run auth -- ${account.alias}]`;
+        }
       } catch {
         status = 'TOKEN CORRUPT';
       }
