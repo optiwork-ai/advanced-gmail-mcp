@@ -1,0 +1,30 @@
+ ✓ src/config.test.ts (16 tests) 2ms
+ ❯ src/gmail/auth-admin-scopes.test.ts (12 tests | 8 failed) 10ms
+ ❯ src/gmail/auth-admin-status.test.ts (7 tests | 4 failed) 9ms
+⎯⎯⎯⎯⎯⎯ Failed Tests 12 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  src/gmail/auth-admin-scopes.test.ts > the consent request an account actually gets > asks a flagged account for the base scopes AND the admin scopes, in that order
+ ❯ src/gmail/auth-admin-scopes.test.ts:90:65
+ FAIL  src/gmail/auth-admin-scopes.test.ts > scopesFor > is the base list for an account with no flag
+ ❯ src/gmail/auth-admin-scopes.test.ts:117:12
+ FAIL  src/gmail/auth-admin-scopes.test.ts > scopesFor > appends the admin list for a flagged account and changes the base list not at all
+ ❯ src/gmail/auth-admin-scopes.test.ts:122:12
+ FAIL  src/gmail/auth-admin-scopes.test.ts > scopesFor > hands back a fresh array each time, so a caller cannot mutate SCOPES through it
+ ❯ src/gmail/auth-admin-scopes.test.ts:127:18
+ FAIL  src/gmail/auth-admin-scopes.test.ts > ADMIN_SCOPES > is exactly the eleven scopes the admin tools call, in the order the design fixed
+ ❯ src/gmail/auth-admin-scopes.test.ts:140:26
+ FAIL  src/gmail/auth-admin-scopes.test.ts > ADMIN_SCOPES > asks for no device-management scope
+ ❯ src/gmail/auth-admin-scopes.test.ts:159:25
+ FAIL  src/gmail/auth-admin-scopes.test.ts > ADMIN_SCOPES > asks for no separate alias scope, because there is none to ask for
+ ❯ src/gmail/auth-admin-scopes.test.ts:166:25
+ FAIL  src/gmail/auth-admin-scopes.test.ts > ADMIN_SCOPES > lists no scope twice, and shares none with the base list
+ ❯ src/gmail/auth-admin-scopes.test.ts:170:58
+ FAIL  src/gmail/auth-admin-status.test.ts > checkAuthStatus and the admin marker > says [admin] when the stored token really carries directory power
+ ❯ src/gmail/auth-admin-status.test.ts:102:18
+ FAIL  src/gmail/auth-admin-status.test.ts > checkAuthStatus and the admin marker > says NOT CONSENTED, and the exact command, for a flagged account whose token predates the scopes
+ ❯ src/gmail/auth-admin-status.test.ts:111:18
+ FAIL  src/gmail/auth-admin-status.test.ts > checkAuthStatus and the admin marker > still says [admin] if the flag was removed while the token still holds the grant
+ ❯ src/gmail/auth-admin-status.test.ts:134:50
+ FAIL  src/gmail/auth-admin-status.test.ts > checkAuthStatus and the admin marker > marks each account on its own — one admin among mailboxes does not colour the rest
+ ❯ src/gmail/auth-admin-status.test.ts:169:47
+ Test Files  2 failed | 1 passed (3)
+      Tests  12 failed | 23 passed (35)

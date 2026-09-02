@@ -78,3 +78,36 @@ describe('selectAccount', () => {
     );
   });
 });
+
+/**
+ * PA — `workspace_admin` is the flag that decides which accounts get Google
+ * Admin SDK power, and it lives in accounts.json beside the alias.
+ *
+ * Account selection is the only place it can be lost: everything downstream
+ * receives an AccountConfig and reads the flag off it. A resolution that
+ * dropped the field would leave a genuinely-flagged admin account refused by
+ * every admin tool, with a message telling its owner to add a flag that is
+ * already there.
+ */
+describe('selectAccount and the workspace_admin flag', () => {
+  const mixed: AccountConfig[] = [
+    { alias: 'personal', email: 'me@gmail.com' },
+    { alias: 'steve-optiwork', email: 'steve@optiwork.ai', workspace_admin: true },
+  ];
+
+  it('carries the flag through an alias match', () => {
+    expect(selectAccount(mixed, 'personal', 'steve-optiwork').workspace_admin).toBe(true);
+  });
+
+  it('carries the flag through an email match', () => {
+    expect(selectAccount(mixed, 'personal', 'steve@optiwork.ai').workspace_admin).toBe(true);
+  });
+
+  it('carries the flag through the default-account path', () => {
+    expect(selectAccount(mixed, 'steve-optiwork').workspace_admin).toBe(true);
+  });
+
+  it('leaves an unflagged account with no flag at all — absent means false', () => {
+    expect(selectAccount(mixed, 'personal').workspace_admin).toBeUndefined();
+  });
+});

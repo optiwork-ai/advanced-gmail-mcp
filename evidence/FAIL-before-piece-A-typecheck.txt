@@ -1,0 +1,14 @@
+
+> gmail-mcp@1.10.0 typecheck
+> tsc --noEmit
+
+src/config.test.ts(95,60): error TS2353: Object literal may only specify known properties, and 'workspace_admin' does not exist in type 'AccountConfig'.
+src/config.test.ts(99,63): error TS2339: Property 'workspace_admin' does not exist on type 'AccountConfig'.
+src/config.test.ts(103,66): error TS2339: Property 'workspace_admin' does not exist on type 'AccountConfig'.
+src/config.test.ts(107,51): error TS2339: Property 'workspace_admin' does not exist on type 'AccountConfig'.
+src/config.test.ts(111,45): error TS2339: Property 'workspace_admin' does not exist on type 'AccountConfig'.
+src/gmail/auth-admin-scopes.test.ts(71,9): error TS2339: Property 'ADMIN_SCOPES' does not exist on type 'typeof import("/Users/steve/Claude-Projects/2-backbone/advanced-gmail-mcp-wt/workspace-admin/src/gmail/auth")'.
+src/gmail/auth-admin-scopes.test.ts(71,52): error TS2339: Property 'scopesFor' does not exist on type 'typeof import("/Users/steve/Claude-Projects/2-backbone/advanced-gmail-mcp-wt/workspace-admin/src/gmail/auth")'.
+src/gmail/auth-admin-scopes.test.ts(159,32): error TS7006: Parameter 's' implicitly has an 'any' type.
+src/gmail/auth-admin-scopes.test.ts(166,32): error TS7006: Parameter 's' implicitly has an 'any' type.
+src/gmail/auth-admin-scopes.test.ts(171,32): error TS7006: Parameter 's' implicitly has an 'any' type.
