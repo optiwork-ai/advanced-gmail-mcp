@@ -20,6 +20,33 @@ const chatApi = {
 const driveApi = { files: { list: vi.fn(), get: vi.fn(), export: vi.fn() } };
 const docsApi = { documents: { get: vi.fn() } };
 
+/**
+ * The Workspace-admin reads (2026-09-02) join this file rather than repeating
+ * its four 403 cases somewhere else: they travel through the same shared
+ * translator, and the whole point of that translator is that every read
+ * everywhere answers a 403 the same honest way.
+ *
+ * These are stubbed as googleapis clients rather than by mocking
+ * `../workspace-admin/client.js`, so `requireAdminAccount` and `adminApiError`
+ * are the REAL ones — the refusal and the error wording are exactly what a
+ * caller would get.
+ */
+const directoryApi = {
+  domains: { list: vi.fn() },
+  users: { list: vi.fn(), get: vi.fn() },
+  groups: { list: vi.fn(), get: vi.fn() },
+  members: { list: vi.fn() },
+};
+const groupsSettingsApi = { groups: { get: vi.fn() } };
+
+vi.mock('googleapis', () => ({
+  google: { admin: () => directoryApi, groupssettings: () => groupsSettingsApi },
+}));
+vi.mock('../gmail/auth.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../gmail/auth.js')>();
+  return { ...actual, getAuthClient: async () => ({ authed: true }) };
+});
+
 vi.mock('../chat/client.js', () => ({
   getChatClient: vi.fn(async () => chatApi),
   CHAT_SPACES_SCOPE: 'https://www.googleapis.com/auth/chat.spaces.readonly',
@@ -36,9 +63,13 @@ vi.mock('../docs/client.js', () => ({
   DOCS_SCOPE: 'https://www.googleapis.com/auth/documents',
 }));
 vi.mock('../config.js', () => ({
+  // Flagged, because the Workspace-admin reads below refuse an account that is
+  // not — and that refusal has its own tests in workspace-admin-tools.test.ts.
+  getAccounts: () => [{ alias: 'work', email: 'me@example.com', workspace_admin: true }],
   resolveAccount: (input?: string) => ({
     alias: input ?? 'work',
     email: input?.includes('@') ? input : 'me@example.com',
+    workspace_admin: true,
   }),
 }));
 
@@ -47,6 +78,11 @@ const { registerListChatMessages } = await import('./chat-list-messages.js');
 const { registerSearchDriveFiles } = await import('./drive-search-files.js');
 const { registerGetGoogleDoc } = await import('./docs-get-document.js');
 const { registerReadDriveFile } = await import('./drive-read-file.js');
+const { registerListWorkspaceDomains } = await import('./workspace-list-domains.js');
+const { registerListWorkspaceUsers } = await import('./workspace-list-users.js');
+const { registerGetWorkspaceUser } = await import('./workspace-get-user.js');
+const { registerListGroups } = await import('./workspace-list-groups.js');
+const { registerGetGroup } = await import('./workspace-get-group.js');
 
 // --- a fake McpServer that just captures the handler ----------------------
 
@@ -136,6 +172,49 @@ const cases = [
     args: { document_id: 'doc1' },
     api: 'Google Docs',
     scope: 'auth/documents',
+  },
+  {
+    label: 'list_workspace_domains',
+    register: registerListWorkspaceDomains,
+    mock: directoryApi.domains.list,
+    args: {},
+    api: 'Google Admin SDK',
+    scope: 'admin.directory.domain',
+  },
+  {
+    label: 'list_workspace_users',
+    register: registerListWorkspaceUsers,
+    mock: directoryApi.users.list,
+    args: {},
+    api: 'Google Admin SDK',
+    scope: 'admin.directory.user',
+  },
+  {
+    label: 'get_workspace_user',
+    register: registerGetWorkspaceUser,
+    mock: directoryApi.users.get,
+    args: { user_key: 'someone@example.com' },
+    api: 'Google Admin SDK',
+    scope: 'admin.directory.user',
+  },
+  {
+    label: 'list_groups',
+    register: registerListGroups,
+    mock: directoryApi.groups.list,
+    args: {},
+    api: 'Google Admin SDK',
+    scope: 'admin.directory.group',
+  },
+  {
+    // get_group makes three calls; this is the first one, and a failure there
+    // fails the whole read — the other two are extras whose failures are
+    // reported alongside a group that was read successfully.
+    label: 'get_group',
+    register: registerGetGroup,
+    mock: directoryApi.groups.get,
+    args: { group_key: 'sales@example.com' },
+    api: 'Google Admin SDK',
+    scope: 'admin.directory.group',
   },
 ] as const;
 

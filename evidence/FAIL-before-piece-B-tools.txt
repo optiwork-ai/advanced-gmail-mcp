@@ -1,0 +1,44 @@
+ ❯ src/tools/workspace-admin-tools.test.ts (0 test)
+ ❯ src/tools/read-only-tools.test.ts (0 test)
+ ✓ src/tools/drive-upload-file.test.ts (7 tests) 6ms
+ ✓ src/tools/docs-update-document.test.ts (14 tests) 18ms
+ ✓ src/tools/docs-get-document.test.ts (7 tests) 9ms
+ ✓ src/tools/get-attachment.test.ts (10 tests) 18ms
+ ✓ src/tools/drive-read-file.test.ts (13 tests) 22ms
+ ✓ src/tools/sheets-write.test.ts (37 tests) 1097ms
+ ✓ src/tools/docs-create-document.test.ts (11 tests) 10ms
+ ✓ src/tools/chat-post-message.test.ts (41 tests) 12ms
+ ❯ src/tools/index.test.ts (7 tests | 3 failed) 8ms
+ FAIL  src/tools/read-only-tools.test.ts [ src/tools/read-only-tools.test.ts ]
+ FAIL  src/tools/workspace-admin-tools.test.ts [ src/tools/workspace-admin-tools.test.ts ]
+Error: Failed to load url ./workspace-list-domains.js (resolved id: ./workspace-list-domains.js) in /Users/steve/Claude-Projects/2-backbone/advanced-gmail-mcp-wt/workspace-admin/src/tools/read-only-tools.test.ts. Does the file exist?
+ ❯ loadAndTransform node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:51969:17
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  src/tools/index.test.ts > registerAllTools > registers 69 tools
+ ❯ src/tools/index.test.ts:66:22
+ FAIL  src/tools/index.test.ts > registerAllTools > is exactly the read side plus the write side — nothing unaccounted for
+ ❯ src/tools/index.test.ts:75:29
+ FAIL  src/tools/index.test.ts > registerAllTools > registers all fourteen Workspace-admin tools
+ ❯ src/tools/index.test.ts:100:21
+ Test Files  3 failed | 8 passed (11)
+      Tests  3 failed | 144 passed (147)
+--- typecheck ---
+src/tools/read-only-tools.test.ts(81,55): error TS2307: Cannot find module './workspace-list-domains.js' or its corresponding type declarations.
+src/tools/read-only-tools.test.ts(82,53): error TS2307: Cannot find module './workspace-list-users.js' or its corresponding type declarations.
+src/tools/read-only-tools.test.ts(83,51): error TS2307: Cannot find module './workspace-get-user.js' or its corresponding type declarations.
+src/tools/read-only-tools.test.ts(84,45): error TS2307: Cannot find module './workspace-list-groups.js' or its corresponding type declarations.
+src/tools/read-only-tools.test.ts(85,43): error TS2307: Cannot find module './workspace-get-group.js' or its corresponding type declarations.
+src/tools/workspace-admin-tools.test.ts(92,16): error TS2307: Cannot find module './workspace-list-domains.js' or its corresponding type declarations.
+src/tools/workspace-admin-tools.test.ts(94,16): error TS2307: Cannot find module './workspace-list-users.js' or its corresponding type declarations.
+src/tools/workspace-admin-tools.test.ts(96,16): error TS2307: Cannot find module './workspace-get-user.js' or its corresponding type declarations.
+src/tools/workspace-admin-tools.test.ts(98,16): error TS2307: Cannot find module './workspace-create-user.js' or its corresponding type declarations.
+src/tools/workspace-admin-tools.test.ts(100,16): error TS2307: Cannot find module './workspace-update-user.js' or its corresponding type declarations.
+src/tools/workspace-admin-tools.test.ts(101,67): error TS2307: Cannot find module './workspace-add-user-alias.js' or its corresponding type declarations.
+src/tools/workspace-admin-tools.test.ts(102,63): error TS2307: Cannot find module './workspace-list-groups.js' or its corresponding type declarations.
+src/tools/workspace-admin-tools.test.ts(103,59): error TS2307: Cannot find module './workspace-get-group.js' or its corresponding type declarations.
+src/tools/workspace-admin-tools.test.ts(105,16): error TS2307: Cannot find module './workspace-create-group.js' or its corresponding type declarations.
+src/tools/workspace-admin-tools.test.ts(107,16): error TS2307: Cannot find module './workspace-update-group-settings.js' or its corresponding type declarations.
+src/tools/workspace-admin-tools.test.ts(108,65): error TS2307: Cannot find module './workspace-delete-group.js' or its corresponding type declarations.
+src/tools/workspace-admin-tools.test.ts(109,69): error TS2307: Cannot find module './workspace-add-group-alias.js' or its corresponding type declarations.
+src/tools/workspace-admin-tools.test.ts(111,16): error TS2307: Cannot find module './workspace-group-members.js' or its corresponding type declarations.
+src/tools/workspace-admin-tools.test.ts(561,40): error TS2493: Tuple type '[]' of length '0' has no element at index '0'.

@@ -24,7 +24,7 @@ blocking the next build — the biggest caches sitting there are Telegram (2.2 G
 | 2 | Piece A implementation | (this commit) | done |
 | 3 | Piece B client + settings-map tests | (this commit) | done |
 | 4 | Piece B client implementation | (this commit) | done |
-| 5 | Tool tests | | |
+| 5 | Tool tests | (this commit) | done |
 | 6 | Tools + registration | | |
 | 7 | Docs + version | | |
 | 8 | Live harness | | |
@@ -94,6 +94,26 @@ round, and were corrected here rather than the code being bent to them: three ca
 shared warmed accounts with each other (fixed by giving each its own alias — the client
 cache is process-wide on purpose and has no reset hatch), and one regex expected wording
 the message does not use. Nothing that was being proven got weaker.
+
+### Unit 5 — the fourteen tools (tests first)
+
+`npx vitest run src/tools/` and `npm run typecheck` against a tree with none of the tool
+modules in it:
+
+```
+ ❯ src/tools/workspace-admin-tools.test.ts (0 test)
+ ❯ src/tools/read-only-tools.test.ts (0 test)
+ ❯ src/tools/index.test.ts (7 tests | 3 failed)
+ FAIL  registerAllTools > registers 69 tools
+ FAIL  registerAllTools > is exactly the read side plus the write side
+ FAIL  registerAllTools > registers all fourteen Workspace-admin tools
+ Test Files  3 failed | 8 passed (11)
+      Tests  3 failed | 144 passed (147)
+src/tools/workspace-admin-tools.test.ts(92,16): error TS2307: Cannot find module
+  './workspace-list-domains.js' ... (and twelve more)
+```
+
+Full output: `evidence/FAIL-before-piece-B-tools.txt`.
 
 ## Decisions taken inside the contract's frame
 

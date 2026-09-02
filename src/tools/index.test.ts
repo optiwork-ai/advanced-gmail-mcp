@@ -42,6 +42,12 @@ const WRITE_TOOLS = [
   'create_calendar_event',
   // Sheets (2026-09-01)
   'update_sheet_values', 'append_sheet_rows',
+  // Google Workspace administration (2026-09-02). Every one of these changes
+  // the company's directory rather than a mailbox, and two of them cost real
+  // money or lock a person out — which is why they are named here one by one.
+  'create_group', 'update_group_settings', 'delete_group', 'add_group_alias',
+  'add_group_member', 'remove_group_member',
+  'create_workspace_user', 'update_workspace_user', 'add_user_alias',
 ];
 
 const READ_TOOLS = [
@@ -51,11 +57,13 @@ const READ_TOOLS = [
   'list_chat_spaces', 'list_chat_messages', 'get_chat_message',
   'search_drive_files', 'read_drive_file', 'get_google_doc',
   'list_calendars', 'list_calendar_events', 'get_freebusy',
+  'list_workspace_domains', 'list_workspace_users', 'get_workspace_user',
+  'list_groups', 'get_group',
 ];
 
 describe('registerAllTools', () => {
-  it('registers 55 tools', () => {
-    expect(roster()).toHaveLength(55);
+  it('registers 69 tools', () => {
+    expect(roster()).toHaveLength(69);
   });
 
   it('registers each name exactly once', () => {
@@ -78,5 +86,34 @@ describe('registerAllTools', () => {
     const names = roster();
     expect(names).toContain('update_sheet_values');
     expect(names).toContain('append_sheet_rows');
+  });
+
+  it('registers all fourteen Workspace-admin tools', () => {
+    const names = roster();
+    for (const name of [
+      'list_workspace_domains', 'list_workspace_users', 'get_workspace_user',
+      'list_groups', 'get_group',
+      'create_group', 'update_group_settings', 'delete_group', 'add_group_alias',
+      'add_group_member', 'remove_group_member',
+      'create_workspace_user', 'update_workspace_user', 'add_user_alias',
+    ]) {
+      expect(names).toContain(name);
+    }
+  });
+
+  it('puts the nine Workspace WRITES on the write side, where they belong', () => {
+    // The five reads answer questions. The nine writes change a company's
+    // directory: they create addresses that receive mail, delete addresses so
+    // that mail bounces, add a paid user seat, and lock a person out of their
+    // account. Landing one of those on the read side would be the worst
+    // mislabelling in this file.
+    for (const name of [
+      'create_group', 'update_group_settings', 'delete_group', 'add_group_alias',
+      'add_group_member', 'remove_group_member',
+      'create_workspace_user', 'update_workspace_user', 'add_user_alias',
+    ]) {
+      expect(WRITE_TOOLS).toContain(name);
+      expect(READ_TOOLS).not.toContain(name);
+    }
   });
 });
