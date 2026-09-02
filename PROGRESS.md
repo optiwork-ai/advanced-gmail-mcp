@@ -26,7 +26,7 @@ blocking the next build — the biggest caches sitting there are Telegram (2.2 G
 | 4 | Piece B client implementation | (this commit) | done |
 | 5 | Tool tests | (this commit) | done |
 | 6 | Tools + registration | (this commit) | done |
-| 7 | Docs + version | | |
+| 7 | Docs + version | (this commit) | done |
 | 8 | Live harness | | |
 
 ## FAIL-before evidence
@@ -131,6 +131,17 @@ The fix is the split `src/calendar/client.ts` already uses for the Meet-room pol
 is an option on an exported `createGroup()` function, never a tool parameter, and the tool
 is a thin wrapper. `src/tools/index.test.ts` now lists the whole roster through the real
 SDK on every run, so no future tool can take the server's listing down this way.
+
+### Unit 7 — docs and version
+
+`package.json` 1.10.0 → **1.11.0**. CHANGELOG gains `## [1.11.0] — 2026-09-02` in the
+Keep-a-Changelog voice, saying which accounts need a fresh sign-in (only the flagged ones,
+and no others) and naming both Cloud-project switches. `accounts.example.json` shows a third
+account carrying `"workspace_admin": true`. README gains a **Google Workspace admin** section
+with all fourteen tools, the settings allow-list, the four-setting recipe for accepting
+outside mail, and the permission-error guide; step 2 gains the eleven scopes and the two API
+enables; step 3 explains the flag; step 4 says re-consent the flagged accounts and no others;
+the tool count and the "every tool takes an optional account" line are both corrected.
 
 ## Decisions taken inside the contract's frame
 

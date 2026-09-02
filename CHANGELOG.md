@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.0] — 2026-09-02
+
+This release lets the server administer a Google Workspace: create the addresses a business sends and receives on, decide whether an address accepts mail from outside the company, and manage the people in the directory.
+
+**Some accounts need a fresh sign-in, and only those.** Sign in again for every account you mark as a Workspace administrator — and for no others. Adding a permission does nothing to an account that has already signed in, so until you do, the new tools answer with an error naming the exact command to run. Run `npm run auth:check` and the list now says, per account, whether it holds administrator permissions, whether it is waiting for that sign-in, or neither.
+
+**Nothing changes for the accounts you do not mark.** An account without the flag is asked for exactly the permissions it was asked for yesterday — the same list, in the same order. This was deliberate and it is checked on every build: an ordinary mailbox should never be shown a consent screen offering to hand over a company directory.
+
+**Two switches to flip on the Cloud project, once each, and neither is a sign-in.** The **Admin SDK API** and the **Groups Settings API** both have to be enabled. If either is off, the first call that needs it says so and names the console page to open — and says plainly that signing in again will not help, because the permission is fine and the API is simply switched off.
+
+### Added
+- **Fourteen tools for administering a Google Workspace.** Five that read — the domains in the Workspace, the people, one person, the groups, one group in full — and nine that write: create a group, change a group's settings, delete a group, add an address to a group, add or remove a member, create a person, change a person, add another address for a person.
+- **`get_group` shows an address's whole posture in one call.** Not just that the address exists, but who is allowed to post to it, whether mail from outside the company is accepted or refused, whether messages are held for a moderator nobody is watching, and who actually receives what is sent there. Reading the first half without the second is how an address gets reported as working while it quietly rejects every message a stranger sends it.
+- **`create_group` does three things in one call and tells you which of them worked.** It creates the address, applies its settings, then adds its members — in that order, because an address from outside the company cannot be added to a group until the group is set to allow outside members. If a later step fails, the group is left where it is rather than quietly deleted, and the answer names exactly what landed and what to run to finish the job.
+- **A brand-new group is invisible to Google's own settings API for a few seconds.** Rather than reporting a group created with none of the settings it was created for, the settings are retried for about fifteen seconds, and then reported honestly if they still will not apply.
+- **`create_workspace_user` says the price out loud and refuses without a confirmation.** A new person is a paid Workspace seat, billed every month for as long as the account exists, and deleting it later does not refund what has been paid. The tool says so in its own description, refuses to run unless it is explicitly confirmed, and points at `create_group` — which is free — for a shared or persona address. If no password is given it makes a strong one, shows it once, and never writes it to the log.
+- **`delete_group` refuses without a confirmation too.** Deleting an address means every message anyone sends to it bounces back to them from that moment on, including from customers who have no way of knowing it changed. There is no undo.
+- **Suspending a person needs a confirmation; letting them back in does not.** Locking someone out takes effect immediately and stops their mail. Unsuspending undoes that, so putting a confirmation in front of it would be friction at the worst possible moment.
+- **A per-account `workspace_admin` flag in `accounts.json`.** It decides two things: which accounts are asked for administrator permissions when they sign in, and which accounts are allowed to make an administrative call at all.
+- **These tools have no default account, which is the point.** Every other tool here falls back to the account named in `accounts.json` when you do not say which one to use. These refuse: an account has to be named, and it has to be one you marked as an administrator. That default is an ordinary mailbox, and an administrative call landing on the wrong company is not a mistake worth risking for convenience. The refusal happens before anything is sent, and it names the account you gave, the setting to add, and which accounts are marked today.
+- **The failures say what is actually wrong.** An address that already exists says so instead of "duplicate". An address that does not exist says it does not exist *in the Workspace this account administers*, which is Google's answer for a wrong address and for the right address in the wrong company. A refusal that is really a missing administrator role says that, and never tells you to sign in again — signing in cannot grant a role. And a create or delete that fails after Google may already have done it says so, names what to check with, and is never retried, because retrying makes a second group, or a second person on a second paid seat.
+- **Google's own oddity, handled once so nobody has to know about it.** The Groups Settings API carries every true/false setting as the *words* "true" and "false". These tools take real true and false and do the translating in one place.
+
+### Changed
+- The tool count goes from 55 to **69**.
+- `npm run auth:check` now reports administrator status per account alongside the mail permissions it already showed.
+
+### Fixed
+- A tool whose parameters included something that cannot be written down as a schema would have made the server report **no tools at all** — not just that one — the first time any client asked what it offers. That was caught before release, and the build now lists every tool through the real client machinery on every run so it cannot happen again.
+
 ## [1.10.0] — 2026-09-01
 
 Two things that go together: an uploaded spreadsheet can now land as a *real* Google Sheet, and a real Google Sheet can now be written to.

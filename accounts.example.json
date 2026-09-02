@@ -7,6 +7,11 @@
     {
       "email": "you@company.com",
       "alias": "work"
+    },
+    {
+      "email": "admin@company.com",
+      "alias": "work-admin",
+      "workspace_admin": true
     }
   ],
   "default": "personal"
