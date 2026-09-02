@@ -25,7 +25,7 @@ This release lets the server administer a Google Workspace: create the addresses
 - **Suspending a person needs a confirmation; letting them back in does not.** Locking someone out takes effect immediately and stops their mail. Unsuspending undoes that, so putting a confirmation in front of it would be friction at the worst possible moment.
 - **A per-account `workspace_admin` flag in `accounts.json`.** It decides two things: which accounts are asked for administrator permissions when they sign in, and which accounts are allowed to make an administrative call at all.
 - **These tools have no default account, which is the point.** Every other tool here falls back to the account named in `accounts.json` when you do not say which one to use. These refuse: an account has to be named, and it has to be one you marked as an administrator. That default is an ordinary mailbox, and an administrative call landing on the wrong company is not a mistake worth risking for convenience. The refusal happens before anything is sent, and it names the account you gave, the setting to add, and which accounts are marked today.
-- **The failures say what is actually wrong.** An address that already exists says so instead of "duplicate". An address that does not exist says it does not exist *in the Workspace this account administers*, which is Google's answer for a wrong address and for the right address in the wrong company. A refusal that is really a missing administrator role says that, and never tells you to sign in again — signing in cannot grant a role. And a create or delete that fails after Google may already have done it says so, names what to check with, and is never retried, because retrying makes a second group, or a second person on a second paid seat.
+- **The failures say what is actually wrong.** An address that already exists says so instead of "duplicate". An address that does not exist says it does not exist *in the Workspace this account administers*, which is Google's answer for a wrong address and for the right address in the wrong company. A refusal that is neither names the two things it usually is — an administrator role the account does not hold, or a Workspace policy that forbids the action whatever the role — and never tells you to sign in again, because signing in changes neither. And a create or delete that fails after Google may already have done it says so, names what to check with, and is never retried, because retrying makes a second group, or a second person on a second paid seat.
 - **Google's own oddity, handled once so nobody has to know about it.** The Groups Settings API carries every true/false setting as the *words* "true" and "false". These tools take real true and false and do the translating in one place.
 
 ### Changed
@@ -34,6 +34,15 @@ This release lets the server administer a Google Workspace: create the addresses
 
 ### Fixed
 - A tool whose parameters included something that cannot be written down as a schema would have made the server report **no tools at all** — not just that one — the first time any client asked what it offers. That was caught before release, and the build now lists every tool through the real client machinery on every run so it cannot happen again.
+
+### Learned from the first live runs
+
+These four came out of running the whole set against three real Workspaces before release. Each one had already made a correct piece of work look broken.
+
+- **Each Workspace has to trust this app before its administrator can even be asked to consent.** Until it does, that admin never sees a consent screen — Google says "Access blocked: your institution's admin needs to review" and gives an error that reads like a fault in the Cloud project, which it is not. It is one setting in that Workspace's own admin console, done once, and the README now gives the exact path to it. The Workspace that owns the Cloud project may not need it; the others did.
+- **Google's settings API answers a read with nothing at all unless it is asked for JSON out loud.** No error, no warning, just an empty answer — so settings that had genuinely been applied read back as if they had not, and three acceptance runs reported a failure over a change that had already landed. Every call this server makes now asks properly.
+- **A group created moments ago refuses a new address for it, and says "not authorized" when it means "not yet".** Even for an account that owns the whole Workspace. So `add_group_alias` now waits it out — about a minute, saying so as it waits — rather than passing on an accusation about permissions that were never the problem.
+- **A change to who is in a group takes a couple of seconds to show up.** Reading back immediately and finding the old answer is Google still publishing the change, not the change failing. The tools say so in their own descriptions now, so nothing reads a lagging answer as a broken write.
 
 ## [1.10.0] — 2026-09-01
 

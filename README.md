@@ -105,6 +105,10 @@ The auth flow opens a browser window for each account. Tokens are saved to `./to
 
 > **Adding a scope means re-consenting.** A token carries exactly the permissions that were granted when it was issued — editing the scope list does nothing to a token already on disk. That cuts both ways, and it is why **`documents` replacing `documents.readonly` on 2026-08-28 does NOT break reading**: an older token still carries `documents.readonly` (and `drive.readonly`), either of which Google accepts for `documents.get`, so `get_google_doc` keeps working untouched. Only `update_google_doc` — the write — answers 403 until that alias runs `npm run auth -- <alias>` again, and it says so in its own error message. **`drive.file` and `gmail.settings.basic` were added on 2026-08-27**, so on any account authenticated before then, `upload_drive_file`, `list_filters`, `create_filter`, `delete_filter`, `get_vacation` and `set_vacation` answer **403 until that alias runs `npm run auth -- <alias>` again**. Those tools say so in their own error messages. Everything else keeps working untouched in the meantime — nothing about sending, reading or the Gmail signature depends on the new grants.
 >
+> **Each Workspace must TRUST this app before its admin can consent — learned the hard way on 2026-09-02.** An administrator signing in from a Workspace that has not marked the app trusted is not shown a consent screen at all. Google shows *"Access blocked: Your institution's admin needs to review …"* with **Error 400: access_not_configured**, which reads like a Cloud-project problem and is not one. The fix is in the ADMIN CONSOLE OF THAT WORKSPACE, once per Workspace: **Security → Access and data control → API controls → App access control (Manage App Access) → the "Claude Gmail Workforce" row → Change access → "Trusted: Can access all Google services"**. The Workspace that OWNS the Cloud project may not need it — on 2026-09-02 `optiwork.ai` consented without the step and the other two Workspaces both required it — so do it for each Workspace that hits the error, not speculatively for all of them.
+>
+> **The consent script waits five minutes and then gives up.** `npm run auth -- <alias>` prints a link, opens a browser, and aborts with "Authentication timed out after 5 minutes" if nothing comes back. Open the printed link straight away. If it times out — a browser signed in as the wrong account, a trusted-app step done mid-wait — nothing is broken and nothing was written: run the same command again.
+>
 > **The admin permissions added on 2026-09-02 are asked for PER ACCOUNT.** An account flagged `"workspace_admin": true` is sent through consent with the eleven Admin SDK scopes appended; an account without the flag is sent through with exactly the list it had before, unchanged. So re-run `npm run auth -- <alias>` for each flagged account and **for no others** — nothing about an unflagged account has changed, and re-consenting it would gain nothing. `npm run auth:check` reports the state per account: `[admin]` when the token really carries directory permissions, `[admin: NOT CONSENTED — run npm run auth -- <alias>]` when the account is flagged but its token predates them, and nothing at all when the account is not flagged.
 
 ### 5. Add to Claude Code
@@ -301,14 +305,47 @@ then held for a moderator nobody is watching, which looks exactly like mail that
 arrived. None of the four is applied unless you ask for it — the tools send what they are
 given and nothing else.
 
+#### Before an admin of a Workspace can consent at all
+
+Each Workspace whose admin account will sign in must first mark this app **trusted in its own
+admin console**. Until it does, that admin is never shown a consent screen: Google answers
+*"Access blocked: Your institution's admin needs to review …"* with **Error 400:
+access_not_configured**, which looks like a Cloud-project fault and is not one.
+
+**Security → Access and data control → API controls → App access control (Manage App Access) →
+the "Claude Gmail Workforce" row → Change access → "Trusted: Can access all Google services"**
+
+Once per Workspace, by an administrator of that Workspace. The Workspace that owns the Cloud
+project may not need it — of the three tried on 2026-09-02, `optiwork.ai` (which owns the
+project) consented without it and the other two required it.
+
 #### On Workspace admin permission errors
 
 A 403 here says what is actually wrong, and never sends you round a loop. A missing permission
 names the scope and the exact `npm run auth -- <alias>`. An API that was never switched on
 names the console page and says plainly that signing in again will not help. A refusal that is
-really a missing **administrator role** says that — the sign-in is fine and the permission was
-granted; what is missing is a role a Workspace super administrator grants in the Admin console.
-A rate limit reports itself as a rate limit and is retried.
+neither says so as a LIKELIHOOD rather than a diagnosis — usually an administrator **role** the
+account does not hold, which a Workspace super administrator grants in the Admin console, or a
+Workspace **policy** that forbids the action whatever the role. It no longer asserts the role,
+because on 2026-09-02 that exact message came back to a super administrator on an alias insert
+that was only propagating. A rate limit reports itself as a rate limit and is retried.
+
+**A brand-new group refuses an alias for about half a minute.** `groups.aliases.insert` on a
+group created seconds earlier answers 403 "Not Authorized to access this resource/api" even for
+a super admin, and the same call succeeds shortly after. `add_group_alias` recognises exactly
+that refusal and waits it out — six tries at ten seconds — before giving up with a message that
+names both readings.
+
+**A directory write takes a beat to be readable.** A membership or alias change was measured
+taking about two seconds to appear in a read on 2026-09-02. An immediate re-read that disagrees
+with a write that reported success is lag, not a failure; read again after a moment.
+
+**Engineering note — Groups Settings needs `alt=json`.** Every call this server makes to the
+Groups Settings API passes `alt: 'json'`, and must. Without it, `groups.get` returns **200 with
+an empty object** — no error and no clue — while the identical call with it returns the full
+record; a `patch` applies either way, so only reads are affected, and settings that HAD landed
+read back as `undefined`. Three live acceptance runs reported the group settings as not applied
+before this was found.
 
 ### Calendar
 

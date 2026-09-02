@@ -225,7 +225,8 @@ Baseline at the start of this round: **1,133 tests** (31 files), typecheck clean
 | 3 | F2 tests — the alias 403 that is propagation, and the softened wording | `f30fb99` | done |
 | 4 | F2 implementation — the bounded wait, and a 403 stated as a likelihood | `0533888` | done |
 | 5 | F3 — the harness re-reads a write before calling it a failure | `547e9c9` | done |
-| 6 | F4 — the descriptions say the true thing about timing | (this commit) | done |
+| 6 | F4 — the descriptions say the true thing about timing | `658c52d` | done |
+| 7 | F5 — the docs record what the first live round taught | (this commit) | done |
 
 ## FAIL-before evidence
 
@@ -368,3 +369,30 @@ own too-early read is fixed in F3; this is the same fact told to the only other 
 acts on it.
 
 `npm test` 1,143 (unchanged — descriptions), `npm run typecheck` clean.
+
+### Unit 7 — F5, the docs
+
+README, step 4: two new notes. The first is the one that cost the live round the most time —
+**each Workspace must mark this app TRUSTED in its own admin console** before its
+administrator is shown a consent screen at all; until it does, Google answers "Access
+blocked: Your institution's admin needs to review …", Error 400 `access_not_configured`,
+which reads like a Cloud-project fault and is not one. The exact console path is given, and
+so is the observed asymmetry: `optiwork.ai`, which owns the Cloud project, consented without
+the step; the other two Workspaces required it. The second note says the consent script
+waits **five minutes** and then aborts (`src/gmail/auth.ts:276-279` — read, not assumed), so
+open the printed link straight away and simply run the command again if it times out.
+
+README, Workspace admin section: a new "Before an admin of a Workspace can consent at all"
+subsection with the same path, and the permission-errors subsection now (a) states the 403
+as a likelihood rather than a diagnosis, matching the softened code, (b) describes the
+brand-new-group alias refusal and the bounded wait, (c) describes the read-back lag, and
+(d) carries the `alt=json` quirk as one engineering line.
+
+CHANGELOG: a **"Learned from the first live runs"** note folded into the existing
+`## [1.11.0] — 2026-09-02` entry, in the same plain voice — four bullets, one per fix, each
+saying what had looked broken and was not. The version was NOT bumped: 1.11.0 is unreleased.
+One existing 1.11.0 bullet said a 403 "that is really a missing administrator role says
+that"; the change makes that claim false, so it was corrected in place rather than left
+teaching the opposite.
+
+`npm test` 1,143 (unchanged — docs), `npm run typecheck` clean.
