@@ -23,7 +23,7 @@ blocking the next build — the biggest caches sitting there are Telegram (2.2 G
 | 1 | Piece A tests (FAIL-before recorded) | `7a739fe` | done |
 | 2 | Piece A implementation | (this commit) | done |
 | 3 | Piece B client + settings-map tests | (this commit) | done |
-| 4 | Piece B client implementation | | |
+| 4 | Piece B client implementation | (this commit) | done |
 | 5 | Tool tests | | |
 | 6 | Tools + registration | | |
 | 7 | Docs + version | | |
@@ -85,6 +85,16 @@ Full output: `evidence/FAIL-before-piece-B-client.txt`. The five remaining `TS70
 that file are the same missing module seen from the other end — with no types for
 `GROUP_SETTING_FIELDS`, its callbacks have nothing to infer from.
 
+### Unit 4 — Piece B client green
+
+`npm test` **951 → 996** (30 files), `npm run typecheck` clean.
+
+Four assertions in the unit-3 test file were wrong about the module, not the other way
+round, and were corrected here rather than the code being bent to them: three cache tests
+shared warmed accounts with each other (fixed by giving each its own alias — the client
+cache is process-wide on purpose and has no reset hatch), and one regex expected wording
+the message does not use. Nothing that was being proven got weaker.
+
 ## Decisions taken inside the contract's frame
 
 - **The `[admin]` marker reads the TOKEN first, the flag second.** The contract gives three
@@ -95,4 +105,8 @@ that file are the same missing module seen from the other end — with no types 
 
 ## Deviations, drops and things deliberately not done
 
-*(none yet)*
+- **`users.patch`, not `users.update`.** The contract asked which the installed types expose:
+  `node_modules/googleapis/build/src/apis/admin/directory_v1.d.ts:5808` declares
+  `patch(params?: Params$Resource$Users$Patch, …): GaxiosPromise<Schema$User>` alongside
+  `update`, so `update_workspace_user` uses `patch` and sends only the fields it was given.
+  `update` replaces a user record wholesale, which would blank everything not restated.

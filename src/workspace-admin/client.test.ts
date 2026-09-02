@@ -29,7 +29,17 @@ vi.mock('googleapis', () => ({
 }));
 
 const getAuthClient = vi.fn(async (_account: unknown) => ({ authed: true }));
-vi.mock('../gmail/auth.js', () => ({ getAuthClient: (account: unknown) => getAuthClient(account) }));
+
+/**
+ * Only `getAuthClient` is replaced. `ADMIN_SCOPES` has to be the REAL list —
+ * the last test in this file exists to catch the scope constants here drifting
+ * away from the ones consent actually asks for, and a stubbed list would agree
+ * with anything.
+ */
+vi.mock('../gmail/auth.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../gmail/auth.js')>();
+  return { ...actual, getAuthClient: (account: unknown) => getAuthClient(account) };
+});
 
 interface TestAccount { alias: string; email: string; workspace_admin?: boolean }
 
@@ -38,6 +48,14 @@ const ACCOUNTS: TestAccount[] = [
   { alias: 'info-ah', email: 'info@appraisalhost.com' },
   { alias: 'steve-ah', email: 'steve@appraisalhost.com', workspace_admin: true },
   { alias: 'steve-optiwork', email: 'steve@optiwork.ai', workspace_admin: true },
+  // Four more flagged aliases so each cache test gets an account no earlier
+  // test has already warmed. The client cache is process-wide and deliberately
+  // has no reset hatch — production has no reason to clear it, and adding one
+  // only for tests would be a seam nothing else uses.
+  { alias: 'cache-a', email: 'a@cache.test', workspace_admin: true },
+  { alias: 'cache-b', email: 'b@cache.test', workspace_admin: true },
+  { alias: 'cache-c', email: 'c@cache.test', workspace_admin: true },
+  { alias: 'cache-d', email: 'd@cache.test', workspace_admin: true },
 ];
 
 let accounts: TestAccount[] = ACCOUNTS;
@@ -160,12 +178,12 @@ describe('the API clients', () => {
   });
 
   it('builds a Groups Settings client too', async () => {
-    await getGroupsSettingsClient(requireAdminAccount('steve-optiwork'));
+    await getGroupsSettingsClient(requireAdminAccount('cache-a'));
     expect(groupsSettingsFactory).toHaveBeenCalledWith(expect.objectContaining({ version: 'v1' }));
   });
 
   it('caches per account, so a second call in the same window builds nothing new', async () => {
-    const account = requireAdminAccount('steve-ah');
+    const account = requireAdminAccount('cache-b');
     const first = await getDirectoryClient(account);
     adminFactory.mockClear();
     const second = await getDirectoryClient(account);
@@ -177,8 +195,8 @@ describe('the API clients', () => {
     // Two aliases, two Workspaces, one process. Sharing a cache entry between
     // them would run a directory call against the wrong company.
     adminFactory.mockClear();
-    await getDirectoryClient(requireAdminAccount('steve-optiwork'));
-    await getDirectoryClient(requireAdminAccount('steve-ah'));
+    await getDirectoryClient(requireAdminAccount('cache-c'));
+    await getDirectoryClient(requireAdminAccount('cache-d'));
     expect(adminFactory).toHaveBeenCalledTimes(2);
   });
 });
@@ -477,7 +495,7 @@ describe('mayHaveLandedError', () => {
   it('warns that a 5xx may have landed anyway, and names what to check with', () => {
     const wrapped = mayHaveLandedError(new Error('Service Unavailable'), 500, landCtx);
     const message = wrapped instanceof Error ? wrapped.message : String(wrapped);
-    expect(message).toMatch(/may (already )?have (landed|been created)/i);
+    expect(message).toMatch(/may already exist/i);
     expect(message).toContain('get_group');
     expect(message).toContain('sales@optiwork.ai');
   });
