@@ -226,7 +226,7 @@ Baseline at the start of this round: **1,133 tests** (31 files), typecheck clean
 | 4 | F2 implementation — the bounded wait, and a 403 stated as a likelihood | `0533888` | done |
 | 5 | F3 — the harness re-reads a write before calling it a failure | `547e9c9` | done |
 | 6 | F4 — the descriptions say the true thing about timing | `658c52d` | done |
-| 7 | F5 — the docs record what the first live round taught | (this commit) | done |
+| 7 | F5 — the docs record what the first live round taught | `ca480a2` | done |
 
 ## FAIL-before evidence
 
@@ -396,3 +396,21 @@ that"; the change makes that claim false, so it was corrected in place rather th
 teaching the opposite.
 
 `npm test` 1,143 (unchanged — docs), `npm run typecheck` clean.
+
+## Round 2 acceptance gate
+
+| Gate | State |
+| --- | --- |
+| G1 `npm test` green, `npm run typecheck` clean | **1,143 passed** (31 files), typecheck clean |
+| G2 FAIL-before evidence for F1 and F2 | `evidence/FAIL-before-F1-alt-json.txt`, `evidence/FAIL-before-F2-alias-retry.txt`, `evidence/FAIL-before-F2-typecheck.txt`, and quoted above |
+| G3 F1–F5 shipped | all five, nothing dropped |
+| G4 commit-as-you-go, no push | seven commits `9b08487`..`ca480a2`, nothing pushed |
+| G5 `## REPORT TO PRIMARY` | in the session's final message |
+
+Test count across the round: **1,133 → 1,143** (+10; four existing assertions were tightened
+rather than added to). No test was weakened, no `any`/`as any`/`@ts-ignore`/eslint-disable was
+introduced, the version stayed at 1.11.0, and no live Google call was made. The three symlinks
+(`accounts.json`, `credentials.json`, `tokens/`) were never opened, copied, moved or used —
+`tokens` is still the only entry `git status` shows, exactly as it was at `e6c2b7c`.
+
+Nothing went to `QUESTIONS-FOR-FABLE.md`: the contract settled every fork it raised.
