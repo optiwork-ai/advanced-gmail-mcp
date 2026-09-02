@@ -3,7 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   ADMIN_DIRECTORY_GROUP_SCOPE,
   ADMIN_SDK_API,
-  adminCreateCall,
+  adminCall,
   getDirectoryClient,
   requireAdminAccount,
 } from '../workspace-admin/client.js';
@@ -41,7 +41,7 @@ export function registerAddGroupAlias(server: McpServer): void {
         const directory = await getDirectoryClient(resolved);
         log('info', 'add_group_alias', { account: resolved.alias, group: groupKey, alias: newAlias, phase: 'start' });
 
-        const added = await adminCreateCall(
+        const added = await adminCall(
           {
             tool: 'add_group_alias',
             api: ADMIN_SDK_API,
@@ -50,7 +50,11 @@ export function registerAddGroupAlias(server: McpServer): void {
             target: 'group alias',
             key: newAlias,
           },
-          { what: `the alias ${newAlias}`, check: 'get_group' },
+          // Retried on a server error, unlike the creates and deletes here: an
+          // alias insert that quietly landed and is sent again is answered
+          // "already exists" rather than making a second one, so a retry after
+          // a timeout costs nothing and saves a call that would otherwise be
+          // reported as failed when it worked.
           () => directory.groups.aliases.insert({ groupKey, requestBody: { alias: newAlias } }),
         );
 

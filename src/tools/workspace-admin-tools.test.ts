@@ -963,3 +963,64 @@ describe('what a write writes down', () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Which writes may be retried, and which must never be
+// ---------------------------------------------------------------------------
+
+describe('the retry policy', () => {
+  /** googleapis' shape for a gateway failure, which withRetry retries. */
+  function serverError(): Error {
+    return Object.assign(new Error('Service Unavailable'), {
+      code: 503,
+      errors: [{ reason: 'backendError' }],
+      response: { status: 503, data: { error: { errors: [{ reason: 'backendError' }] } } },
+    });
+  }
+
+  it('never retries a CREATE or a DELETE — a retry makes a second one', async () => {
+    // The whole argument in one place: a gateway timeout can arrive after
+    // Google has done the thing. A second group is untidy; a second USER is a
+    // second paid seat every month.
+    const cases: Array<[string, Register, string, Record<string, unknown>, { mockClear(): void; mock: { calls: unknown[] }; mockRejectedValue(v: unknown): void }]> = [
+      ['create_group', registerCreateGroup, 'create_group', { email: 'g@optiwork.ai', name: 'G' }, directoryApi.groups.insert],
+      ['delete_group', registerDeleteGroup, 'delete_group', { group_key: 'g@optiwork.ai', confirm: true }, directoryApi.groups.delete],
+      ['add_group_member', registerGroupMemberTools, 'add_group_member', { group_key: 'g@optiwork.ai', email: 'a@optiwork.ai' }, directoryApi.members.insert],
+      ['remove_group_member', registerGroupMemberTools, 'remove_group_member', { group_key: 'g@optiwork.ai', email: 'a@optiwork.ai' }, directoryApi.members.delete],
+      ['create_workspace_user', registerCreateWorkspaceUser, 'create_workspace_user', { primary_email: 'a@optiwork.ai', given_name: 'A', family_name: 'B', confirm: true }, directoryApi.users.insert],
+    ];
+
+    for (const [label, register, name, args, mock] of cases) {
+      mock.mockClear();
+      mock.mockRejectedValue(serverError());
+      await fails(byName(register, name).handler, { ...args, account: ADMIN });
+      expect(mock.mock.calls.length, `${label} was attempted more than once`).toBe(1);
+    }
+  });
+
+  it('DOES retry the writes that are safe to repeat, and succeeds on the second go', async () => {
+    // An alias insert, a settings patch and a user patch all leave Google in
+    // the same state whether they run once or twice, so a gateway timeout is
+    // worth another go rather than being reported as a failure that worked.
+    //
+    // One rejection then a success, rather than exhausting the whole retry
+    // budget: it proves the same thing and spends one backoff instead of
+    // twenty seconds of real sleeping.
+    const cases: Array<[string, Register, string, Record<string, unknown>, {
+      mockClear(): void;
+      mock: { calls: unknown[] };
+      mockRejectedValueOnce(v: unknown): { mockResolvedValue(v: unknown): void };
+    }]> = [
+      ['add_group_alias', registerAddGroupAlias, 'add_group_alias', { group_key: 'g@optiwork.ai', alias: 'x@optiwork.ai' }, directoryApi.groups.aliases.insert],
+      ['add_user_alias', registerAddUserAlias, 'add_user_alias', { user_key: 'a@optiwork.ai', alias: 'x@optiwork.ai' }, directoryApi.users.aliases.insert],
+      ['update_workspace_user', registerUpdateWorkspaceUser, 'update_workspace_user', { user_key: 'a@optiwork.ai', given_name: 'A' }, directoryApi.users.patch],
+    ];
+
+    for (const [label, register, name, args, mock] of cases) {
+      mock.mockClear();
+      mock.mockRejectedValueOnce(serverError()).mockResolvedValue({ data: { alias: 'x@optiwork.ai', ...RAW_USER } });
+      await ok(byName(register, name).handler, { ...args, account: ADMIN });
+      expect(mock.mock.calls.length, `${label} gave up after one attempt`).toBe(2);
+    }
+  }, 20_000);
+});

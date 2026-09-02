@@ -27,7 +27,8 @@ blocking the next build — the biggest caches sitting there are Telegram (2.2 G
 | 5 | Tool tests | (this commit) | done |
 | 6 | Tools + registration | (this commit) | done |
 | 7 | Docs + version | (this commit) | done |
-| 8 | Live harness | (this commit) | done |
+| 8 | Live harness | `cff1a18` | done |
+| 8b | Retry policy corrected to the contract | (this commit) | done |
 
 ## FAIL-before evidence
 
@@ -143,6 +144,14 @@ outside mail, and the permission-error guide; step 2 gains the eleven scopes and
 enables; step 3 explains the flag; step 4 says re-consent the flagged accounts and no others;
 the tool count and the "every tool takes an optional account" line are both corrected.
 
+### Unit 8b — the alias inserts get their retries back
+
+Caught on the final pass against §3.1: the contract puts **aliases** with the idempotent
+writes that keep the ordinary retries, and both alias tools had been built with retrying
+switched off like the creates. Corrected, with two tests that now pin the whole policy — the
+five creates and deletes are attempted exactly once, and the three repeatable writes retry and
+succeed on the second go. `npm test` 1,131 → **1,133**.
+
 ### Unit 8 — the live harness
 
 At `shared/active-work/2026-09-02-google-workspace-admin-access/live-acceptance/`:
@@ -180,6 +189,11 @@ worth one.
   silently absent `settings` block reads as "no restrictions" — the opposite of the truth.
   So the group comes back with `settings: null`, a `settings_error`, and a note saying in
   plain words not to read the absence as permission.
+- **`accounts.example.json` carries no `_workspace_admin_note` key.** The contract allowed
+  either a sibling note string or README-only documentation; the example now simply shows a
+  third account with `"workspace_admin": true` on it, and README step 3 explains what the flag
+  restricts. A fake key in an example file that people copy verbatim would end up in real
+  configs.
 - **`users.patch`, not `users.update`.** The contract asked which the installed types expose:
   `node_modules/googleapis/build/src/apis/admin/directory_v1.d.ts:5808` declares
   `patch(params?: Params$Resource$Users$Patch, …): GaxiosPromise<Schema$User>` alongside

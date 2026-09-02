@@ -3,7 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   ADMIN_DIRECTORY_USER_SCOPE,
   ADMIN_SDK_API,
-  adminCreateCall,
+  adminCall,
   getDirectoryClient,
   requireAdminAccount,
 } from '../workspace-admin/client.js';
@@ -43,7 +43,7 @@ export function registerAddUserAlias(server: McpServer): void {
         const directory = await getDirectoryClient(resolved);
         log('info', 'add_user_alias', { account: resolved.alias, user: userKey, alias: newAlias, phase: 'start' });
 
-        const added = await adminCreateCall(
+        const added = await adminCall(
           {
             tool: 'add_user_alias',
             api: ADMIN_SDK_API,
@@ -52,7 +52,11 @@ export function registerAddUserAlias(server: McpServer): void {
             target: 'user alias',
             key: newAlias,
           },
-          { what: `the alias ${newAlias}`, check: 'get_workspace_user' },
+          // Retried on a server error, unlike the creates and deletes here: an
+          // alias insert that quietly landed and is sent again is answered
+          // "already exists" rather than making a second one, so a retry after
+          // a timeout costs nothing and saves a call that would otherwise be
+          // reported as failed when it worked.
           () => directory.users.aliases.insert({ userKey, requestBody: { alias: newAlias } }),
         );
 
