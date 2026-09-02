@@ -224,7 +224,8 @@ Baseline at the start of this round: **1,133 tests** (31 files), typecheck clean
 | 2 | F1 implementation — the four calls, and the quirk written down | `940d96b` | done |
 | 3 | F2 tests — the alias 403 that is propagation, and the softened wording | `f30fb99` | done |
 | 4 | F2 implementation — the bounded wait, and a 403 stated as a likelihood | `0533888` | done |
-| 5 | F3 — the harness re-reads a write before calling it a failure | (this commit) | done |
+| 5 | F3 — the harness re-reads a write before calling it a failure | `547e9c9` | done |
+| 6 | F4 — the descriptions say the true thing about timing | (this commit) | done |
 
 ## FAIL-before evidence
 
@@ -353,3 +354,17 @@ standalone with `tsc --noEmit --strict` as well.
 session did not `git add` the lane folder: committing it would sweep in the live RESULTS and
 probe files too, and that is the chair's call, not a builder's. Only this note is committed
 here, which is the same disposition the first round used for the harness (`cff1a18`).
+
+### Unit 6 — F4, honest timing in the descriptions
+
+One sentence each in `get_group`, `add_group_member` and `remove_group_member`: Google can
+take a few seconds to publish a membership or alias change, so an immediate re-read may lag
+and is not evidence the write failed. `add_group_alias` got its two sentences in unit 4 —
+the read-back lag and, additionally, that a group created within the last minute may refuse
+the alias at first and that the tool waits (bounded) before giving up.
+
+These are the words the MODEL reads before deciding whether a write worked. The harness's
+own too-early read is fixed in F3; this is the same fact told to the only other reader that
+acts on it.
+
+`npm test` 1,143 (unchanged — descriptions), `npm run typecheck` clean.

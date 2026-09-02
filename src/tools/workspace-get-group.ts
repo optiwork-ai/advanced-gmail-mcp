@@ -49,7 +49,9 @@ export function registerGetGroup(server: McpServer): void {
     + 'sent there. Reading the group without its settings is how an address gets reported as '
     + 'working while it quietly rejects every message a stranger sends it. Up to '
     + `${MEMBERS_PER_CALL} members are listed, and the answer says so when there are more. `
-    + 'Read-only.',
+    + 'Google can take a few seconds to publish a membership or alias change, so a read taken '
+    + 'immediately after a write may still show the state before it; read again after a moment '
+    + 'rather than concluding the write failed. Read-only.',
     getGroupParams,
     async ({ account, group_key }) => {
       try {

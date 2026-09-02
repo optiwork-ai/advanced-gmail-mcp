@@ -60,7 +60,9 @@ export function registerGroupMemberTools(server: McpServer): void {
     + 'WRITES: from then on that address receives the mail sent to the group. The member can be '
     + 'a person, another group, or an address OUTSIDE this Workspace — which is how a persona '
     + 'address forwards into a CRM — but an outside address is refused by Google unless the '
-    + 'group has allow_external_members set true, which update_group_settings does.',
+    + 'group has allow_external_members set true, which update_group_settings does. '
+    + 'Google can take a few seconds to publish the new membership, so a get_group taken '
+    + 'immediately afterwards may not list it yet; read again after a moment.',
     addGroupMemberParams,
     async ({ account, group_key, email, role, delivery_settings }) => {
       try {
@@ -139,7 +141,9 @@ export function registerGroupMemberTools(server: McpServer): void {
     'Remove an address from a Google Group in the Workspace that the given account administers. '
     + 'WRITES: from then on that address stops receiving the mail sent to the group. The '
     + 'address itself is untouched — this ends a membership, it does not delete anything. '
-    + 'Read the group with get_group first if you are not certain who is in it.',
+    + 'Read the group with get_group first if you are not certain who is in it. '
+    + 'Google can take a few seconds to publish the removal, so a get_group taken immediately '
+    + 'afterwards may still list the address; read again after a moment.',
     removeGroupMemberParams,
     async ({ account, group_key, email }) => {
       try {
