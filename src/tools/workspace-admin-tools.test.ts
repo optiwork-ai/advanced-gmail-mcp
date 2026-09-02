@@ -106,7 +106,8 @@ const { registerCreateGroup, createGroup, createGroupParams, GROUP_SETTINGS_RETR
 const { registerUpdateGroupSettings, updateGroupSettingsParams } =
   await import('./workspace-update-group-settings.js');
 const { registerDeleteGroup, deleteGroupParams } = await import('./workspace-delete-group.js');
-const { registerAddGroupAlias, addGroupAliasParams } = await import('./workspace-add-group-alias.js');
+const { registerAddGroupAlias, addGroupAlias, addGroupAliasParams, ALIAS_PROPAGATION_RETRY_DELAYS_MS } =
+  await import('./workspace-add-group-alias.js');
 const { registerGroupMemberTools, addGroupMemberParams, removeGroupMemberParams } =
   await import('./workspace-group-members.js');
 
@@ -1110,5 +1111,101 @@ describe('every Groups Settings call asks for JSON out loud', () => {
 
     expect(out.settings_applied).toBe(true);
     expectAllJson(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The alias 403 that is not a permission problem at all
+// ---------------------------------------------------------------------------
+
+describe('add_group_alias waits out a brand-new group', () => {
+  /**
+   * Live fact, 2026-09-02: `groups.aliases.insert` on a group created seconds
+   * earlier is refused with 403, reason `forbidden`, "Not Authorized to access
+   * this resource/api" — from a SUPER ADMIN, on all three Workspaces. The same
+   * call 30 seconds later returns 200. It is propagation wearing a permission
+   * error's clothes, and the generic message sent the reader to the Admin
+   * console to grant a role they already had.
+   */
+  const waited = vi.fn(async (_ms: number) => undefined);
+
+  /** The raw shape Google sends for exactly that refusal. */
+  function propagation403(): Error {
+    return googleError(403, 'forbidden', 'Not Authorized to access this resource/api');
+  }
+
+  const args = { account: ADMIN, group_key: 'sales@optiwork.ai', alias: 'orders@optiwork.ai' };
+
+  beforeEach(() => {
+    waited.mockClear();
+  });
+
+  it('retries the refusal and succeeds, having waited between the attempts', async () => {
+    directoryApi.groups.aliases.insert
+      .mockRejectedValueOnce(propagation403())
+      .mockRejectedValueOnce(propagation403())
+      .mockResolvedValue({ data: { alias: 'orders@optiwork.ai' } });
+
+    const out = await addGroupAlias({ ...args, sleep: waited });
+
+    expect(out.alias).toBe('orders@optiwork.ai');
+    expect(directoryApi.groups.aliases.insert.mock.calls.length).toBe(3);
+    expect(waited.mock.calls.map(c => c[0])).toEqual(ALIAS_PROPAGATION_RETRY_DELAYS_MS.slice(0, 2));
+  });
+
+  it('says every wait out loud in the log, so a slow call is not a silent one', async () => {
+    directoryApi.groups.aliases.insert
+      .mockRejectedValueOnce(propagation403())
+      .mockResolvedValue({ data: { alias: 'orders@optiwork.ai' } });
+
+    await addGroupAlias({ ...args, sleep: waited });
+
+    const waits = logCalls.filter(l => l.message === 'add_group_alias' && l.fields.phase === 'waiting');
+    expect(waits.length).toBe(1);
+    expect(waits[0].fields).toMatchObject({ attempt: 1, wait_ms: ALIAS_PROPAGATION_RETRY_DELAYS_MS[0] });
+  });
+
+  it('gives up after the last wait and says what is and is not likely, without asserting a role', async () => {
+    directoryApi.groups.aliases.insert.mockRejectedValue(propagation403());
+
+    await expect(addGroupAlias({ ...args, sleep: waited }))
+      .rejects.toThrow(/Google refused the alias/i);
+    expect(waited.mock.calls.length).toBe(ALIAS_PROPAGATION_RETRY_DELAYS_MS.length);
+
+    let message = '';
+    try {
+      await addGroupAlias({ ...args, sleep: waited });
+    } catch (err) {
+      message = err instanceof Error ? err.message : String(err);
+    }
+    expect(message).toMatch(/last minute/i);
+    expect(message).toMatch(/propagation/i);
+    expect(message).toMatch(/policy/i);
+    expect(message).toMatch(/signing in again will not change/i);
+    // The false claim this replaces: it was never the admin role.
+    expect(message).not.toMatch(/what is missing is the ADMIN ROLE/);
+  });
+
+  it('does NOT wait out a 403 that says something else — that one is real', async () => {
+    directoryApi.groups.aliases.insert.mockRejectedValue(
+      googleError(403, 'forbidden', 'Domain not found in this Workspace.'),
+    );
+
+    await expect(addGroupAlias({ ...args, sleep: waited })).rejects.toThrow();
+    expect(directoryApi.groups.aliases.insert.mock.calls.length).toBe(1);
+    expect(waited).not.toHaveBeenCalled();
+  });
+
+  it('still refuses an account that does not administer a Workspace, before any call', async () => {
+    directoryApi.groups.aliases.insert.mockClear();
+    await expect(addGroupAlias({ ...args, account: 'personal', sleep: waited })).rejects.toThrow();
+    expect(directoryApi.groups.aliases.insert).not.toHaveBeenCalled();
+  });
+
+  it('takes its timer as an OPTION, never as a tool parameter that would break tools/list', () => {
+    // The same trap create_group fell into: a z.function() in a registered
+    // tool's shape throws when the SDK converts the whole roster to JSON
+    // Schema, taking every tool's listing down with it.
+    expect(Object.keys(addGroupAliasParams)).not.toContain('sleep');
   });
 });

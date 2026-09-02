@@ -1,0 +1,30 @@
+
+ FAIL  src/tools/workspace-admin-tools.test.ts > add_group_alias waits out a brand-new group > does NOT wait out a 403 that says something else — that one is real
+TypeError: addGroupAlias is not a function
+ ❯ src/tools/workspace-admin-tools.test.ts:1194:18
+    1192|     );
+    1193| 
+    1194|     await expect(addGroupAlias({ ...args, sleep: waited })).rejects.to…
+       |                  ^
+    1195|     expect(directoryApi.groups.aliases.insert.mock.calls.length).toBe(…
+    1196|     expect(waited).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/6]⎯
+
+ FAIL  src/tools/workspace-admin-tools.test.ts > add_group_alias waits out a brand-new group > still refuses an account that does not administer a Workspace, before any call
+TypeError: addGroupAlias is not a function
+ ❯ src/tools/workspace-admin-tools.test.ts:1201:18
+    1199|   it('still refuses an account that does not administer a Workspace, b…
+    1200|     directoryApi.groups.aliases.insert.mockClear();
+    1201|     await expect(addGroupAlias({ ...args, account: 'personal', sleep: …
+       |                  ^
+    1202|     expect(directoryApi.groups.aliases.insert).not.toHaveBeenCalled();
+    1203|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/6]⎯
+
+ Test Files  2 failed (2)
+      Tests  6 failed | 163 passed (169)
+   Start at  14:59:47
+   Duration  3.60s (transform 272ms, setup 0ms, collect 440ms, tests 3.07s, environment 0ms, prepare 90ms)
+

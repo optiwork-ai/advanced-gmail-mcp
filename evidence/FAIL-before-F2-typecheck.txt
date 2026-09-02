@@ -1,0 +1,4 @@
+> tsc --noEmit
+
+src/tools/workspace-admin-tools.test.ts(109,32): error TS2339: Property 'addGroupAlias' does not exist on type 'typeof import("/Users/steve/Claude-Projects/2-backbone/advanced-gmail-mcp-wt/workspace-admin/src/tools/workspace-add-group-alias")'.
+src/tools/workspace-admin-tools.test.ts(109,68): error TS2339: Property 'ALIAS_PROPAGATION_RETRY_DELAYS_MS' does not exist on type 'typeof import("/Users/steve/Claude-Projects/2-backbone/advanced-gmail-mcp-wt/workspace-admin/src/tools/workspace-add-group-alias")'.

@@ -450,10 +450,17 @@ describe('adminApiError', () => {
     expect(err?.message).toContain('sales@optiwork.ai');
   });
 
-  it('says a plain 403 is probably a missing ADMIN ROLE, and never says re-authenticate', () => {
+  it('offers a plain 403 as a LIKELIHOOD, never asserting the admin role as fact', () => {
     const err = adminApiError(googleError(403, 'forbidden', 'Not Authorized to access this resource/api'), CTX);
     expect(err?.message).toMatch(/admin role|not allowed to/i);
     expect(err?.message).toContain('steve-optiwork');
+    // Live, 2026-09-02: this exact error came back on all three Workspaces from
+    // a SUPER ADMIN, on an alias insert that was only propagating. Stating the
+    // role as the cause sent the reader to grant a role they already held, so
+    // the wording now says what it usually is and names the other cause too.
+    expect(err?.message).toMatch(/usually/i);
+    expect(err?.message).toMatch(/policy/i);
+    expect(err?.message).not.toMatch(/what is missing is/i);
     // The standing rule: re-auth advice on a 403 that is not a missing scope
     // sends the reader round a loop that cannot fix anything.
     expect(err?.message).not.toMatch(/re-authenticat/i);

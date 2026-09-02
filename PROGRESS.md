@@ -221,7 +221,8 @@ Baseline at the start of this round: **1,133 tests** (31 files), typecheck clean
 | # | Unit | Commit | State |
 | --- | --- | --- | --- |
 | 1 | F1 tests — `alt: 'json'` pinned on every Groups Settings call | `9b08487` | done |
-| 2 | F1 implementation — the four calls, and the quirk written down | (this commit) | done |
+| 2 | F1 implementation — the four calls, and the quirk written down | `940d96b` | done |
+| 3 | F2 tests — the alias 403 that is propagation, and the softened wording | (this commit) | done |
 
 ## FAIL-before evidence
 
@@ -264,3 +265,38 @@ A comment at the client factory (`src/workspace-admin/client.ts`) records the qu
 why it is worse than an error: a change that HAS landed reads back as `undefined`.
 
 `npm test` **1,133 → 1,137** (31 files), `npm run typecheck` clean.
+
+### Unit 3 — F2, the alias 403 (tests first)
+
+`npx vitest run src/tools/workspace-admin-tools.test.ts src/workspace-admin/client.test.ts`
+against unchanged code:
+
+```
+ Test Files  2 failed (2)
+      Tests  6 failed | 163 passed (169)
+ FAIL  client.test.ts > adminApiError > offers a plain 403 as a LIKELIHOOD, never asserting
+       the admin role as fact
+ FAIL  workspace-admin-tools.test.ts > add_group_alias waits out a brand-new group
+       > retries the refusal and succeeds, having waited between the attempts
+       > says every wait out loud in the log, so a slow call is not a silent one
+       > gives up after the last wait and says what is and is not likely, without asserting a role
+       > does NOT wait out a 403 that says something else — that one is real
+       > still refuses an account that does not administer a Workspace, before any call
+```
+
+and `npm run typecheck`:
+
+```
+src/tools/workspace-admin-tools.test.ts(109,32): error TS2339: Property 'addGroupAlias' does
+  not exist on type 'typeof import(".../workspace-add-group-alias")'.
+src/tools/workspace-admin-tools.test.ts(109,68): error TS2339: Property
+  'ALIAS_PROPAGATION_RETRY_DELAYS_MS' does not exist on ...
+```
+
+Full output: `evidence/FAIL-before-F2-alias-retry.txt` and
+`evidence/FAIL-before-F2-typecheck.txt`.
+
+The seventh new case — that the injected timer is an OPTION and never a tool parameter —
+passes before the change as well as after, because there is no `sleep` in the shape yet.
+It is a regression guard against re-introducing the `z.function()` that took down the whole
+`tools/list` roster during the first build, not a fail-before.
