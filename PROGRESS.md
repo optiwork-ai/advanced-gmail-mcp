@@ -27,7 +27,7 @@ blocking the next build — the biggest caches sitting there are Telegram (2.2 G
 | 5 | Tool tests | (this commit) | done |
 | 6 | Tools + registration | (this commit) | done |
 | 7 | Docs + version | (this commit) | done |
-| 8 | Live harness | | |
+| 8 | Live harness | (this commit) | done |
 
 ## FAIL-before evidence
 
@@ -142,6 +142,22 @@ with all fourteen tools, the settings allow-list, the four-setting recipe for ac
 outside mail, and the permission-error guide; step 2 gains the eleven scopes and the two API
 enables; step 3 explains the flag; step 4 says re-consent the flagged accounts and no others;
 the tool count and the "every tool takes an optional account" line are both corrected.
+
+### Unit 8 — the live harness
+
+At `shared/active-work/2026-09-02-google-workspace-admin-access/live-acceptance/`:
+`workspace-admin.ts`, an ESM `package.json`, and `README-RUN.md`. Same shape as the
+2026-09-01 convert-sheets harness — REPO_ROOT dynamic import, one PASS/FAIL/SKIP line per
+check with evidence, every check in its own try/catch.
+
+`--dry` runs clean from the worktree (all ten tool modules registered, 19 settings, the pure
+settings translation exercised), and aimed at `main` it prints `NOT FOUND — aim REPO_ROOT at
+the branch under test` on every line, so a run against the wrong tree is unmistakable. **This
+session made no live Google call.**
+
+The harness never creates, changes, suspends or aliases a USER — `create_workspace_user` is
+not even imported by it. A user is a paid monthly seat and nothing in an acceptance run is
+worth one.
 
 ## Decisions taken inside the contract's frame
 
