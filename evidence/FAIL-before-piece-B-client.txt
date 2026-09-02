@@ -1,0 +1,10 @@
+ FAIL  src/workspace-admin/client.test.ts [ src/workspace-admin/client.test.ts ]
+Error: Failed to load url ./client.js (resolved id: ./client.js) in /Users/steve/Claude-Projects/2-backbone/advanced-gmail-mcp-wt/workspace-admin/src/workspace-admin/client.test.ts. Does the file exist?
+ Test Files  1 failed (1)
+      Tests  no tests
+src/workspace-admin/client.test.ts(75,18): error TS2307: Cannot find module './client.js' or its corresponding type declarations.
+src/workspace-admin/client.test.ts(214,37): error TS7006: Parameter 'f' implicitly has an 'any' type.
+src/workspace-admin/client.test.ts(238,65): error TS7006: Parameter 'f' implicitly has an 'any' type.
+src/workspace-admin/client.test.ts(275,33): error TS7006: Parameter 'f' implicitly has an 'any' type.
+src/workspace-admin/client.test.ts(291,45): error TS7006: Parameter 'f' implicitly has an 'any' type.
+src/workspace-admin/client.test.ts(292,45): error TS7006: Parameter 'f' implicitly has an 'any' type.

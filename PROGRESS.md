@@ -22,7 +22,7 @@ blocking the next build — the biggest caches sitting there are Telegram (2.2 G
 | --- | --- | --- | --- |
 | 1 | Piece A tests (FAIL-before recorded) | `7a739fe` | done |
 | 2 | Piece A implementation | (this commit) | done |
-| 3 | Piece B client + settings-map tests | | |
+| 3 | Piece B client + settings-map tests | (this commit) | done |
 | 4 | Piece B client implementation | | |
 | 5 | Tool tests | | |
 | 6 | Tools + registration | | |
@@ -66,6 +66,24 @@ Full output: `evidence/FAIL-before-piece-A-typecheck.txt`.
 ### Unit 2 — Piece A green
 
 `npm test` **928 → 951** (29 files), `npm run typecheck` clean.
+
+### Unit 3 — Piece B client (tests first)
+
+`npx vitest run src/workspace-admin/` and `npm run typecheck` against a tree with no
+`src/workspace-admin/client.ts` in it:
+
+```
+ FAIL  src/workspace-admin/client.test.ts [ src/workspace-admin/client.test.ts ]
+Error: Failed to load url ./client.js ... Does the file exist?
+ Test Files  1 failed (1)
+      Tests  no tests
+src/workspace-admin/client.test.ts(75,18): error TS2307: Cannot find module './client.js'
+  or its corresponding type declarations.
+```
+
+Full output: `evidence/FAIL-before-piece-B-client.txt`. The five remaining `TS7006` lines in
+that file are the same missing module seen from the other end — with no types for
+`GROUP_SETTING_FIELDS`, its callbacks have nothing to infer from.
 
 ## Decisions taken inside the contract's frame
 
