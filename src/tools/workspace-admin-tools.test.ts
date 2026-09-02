@@ -446,7 +446,7 @@ describe('get_group', () => {
     // Groups Settings is keyed on the email address and nothing else; an id
     // that works perfectly well for the Directory call is a 404 there.
     await ok(capture(registerGetGroup).handler, { account: ADMIN, group_key: '01abc' });
-    expect(settingsApi.groups.get).toHaveBeenCalledWith({ groupUniqueId: 'sales@optiwork.ai' });
+    expect(settingsApi.groups.get).toHaveBeenCalledWith({ groupUniqueId: 'sales@optiwork.ai', alt: 'json' });
   });
 
   it('says when there are more members than it fetched, instead of implying that is all of them', async () => {
@@ -540,6 +540,7 @@ describe('create_group', () => {
     });
     expect(settingsApi.groups.patch).toHaveBeenCalledWith({
       groupUniqueId: 'sales@optiwork.ai',
+      alt: 'json',
       requestBody: { whoCanPostMessage: 'ANYONE_CAN_POST', allowExternalMembers: 'true' },
     });
   });
@@ -643,9 +644,10 @@ describe('update_group_settings', () => {
 
     expect(settingsApi.groups.patch).toHaveBeenCalledWith({
       groupUniqueId: 'sales@optiwork.ai',
+      alt: 'json',
       requestBody: { includeInGlobalAddressList: 'false' },
     });
-    expect(settingsApi.groups.get).toHaveBeenCalledWith({ groupUniqueId: 'sales@optiwork.ai' });
+    expect(settingsApi.groups.get).toHaveBeenCalledWith({ groupUniqueId: 'sales@optiwork.ai', alt: 'json' });
     expect(out.settings).toMatchObject({ include_in_global_address_list: false });
   });
 
@@ -1023,4 +1025,90 @@ describe('the retry policy', () => {
       expect(mock.mock.calls.length, `${label} gave up after one attempt`).toBe(2);
     }
   }, 20_000);
+});
+
+// ---------------------------------------------------------------------------
+// The Groups Settings quirk that made three live acceptance runs fail
+// ---------------------------------------------------------------------------
+
+describe('every Groups Settings call asks for JSON out loud', () => {
+  /**
+   * Live fact, 2026-09-02, on three separate Workspaces: `groups.get` WITHOUT
+   * `alt: 'json'` answers 200 with an EMPTY object — no error, no clue, just
+   * nothing — while the same call WITH it answers 61 fields. The patch applied
+   * either way, so the settings had in fact landed and only the read was blind;
+   * the harness reported "Google did not accept the posture" three times over
+   * a change that had already been made.
+   *
+   * Every call this server makes to that API therefore carries the parameter,
+   * and these tests fail the moment one stops.
+   */
+  const noWait = vi.fn(async (_ms: number) => undefined);
+
+  function everySettingsCall(): Array<Record<string, unknown>> {
+    return [
+      ...settingsApi.groups.get.mock.calls,
+      ...settingsApi.groups.patch.mock.calls,
+    ].map(call => (call as unknown[])[0] as Record<string, unknown>);
+  }
+
+  function expectAllJson(expectedCalls: number): void {
+    const calls = everySettingsCall();
+    expect(calls.length).toBe(expectedCalls);
+    for (const params of calls) {
+      expect(params.alt, `a Groups Settings call went out without alt=json: ${JSON.stringify(params)}`)
+        .toBe('json');
+    }
+  }
+
+  beforeEach(() => {
+    directoryApi.groups.get.mockResolvedValue({ data: RAW_GROUP });
+    directoryApi.groups.insert.mockResolvedValue({ data: RAW_GROUP });
+    directoryApi.members.list.mockResolvedValue({ data: { members: [] } });
+    settingsApi.groups.get.mockResolvedValue({ data: RAW_SETTINGS });
+    settingsApi.groups.patch.mockResolvedValue({ data: RAW_SETTINGS });
+  });
+
+  it('get_group reads the settings with alt=json', async () => {
+    await ok(capture(registerGetGroup).handler, { account: ADMIN, group_key: 'sales@optiwork.ai' });
+    expectAllJson(1);
+  });
+
+  it('update_group_settings patches AND re-reads with alt=json', async () => {
+    await ok(capture(registerUpdateGroupSettings).handler, {
+      account: ADMIN,
+      group_key: 'sales@optiwork.ai',
+      settings: { allow_external_members: true },
+    });
+    // Both halves: a patch that says json and a re-read that does not would
+    // still report "undefined" back at the caller, which is the live failure.
+    expectAllJson(2);
+  });
+
+  it('create_group patches the new group\'s settings with alt=json', async () => {
+    await ok(capture(registerCreateGroup).handler, {
+      account: ADMIN,
+      email: 'sales@optiwork.ai',
+      name: 'Sales',
+      settings: { who_can_post_message: 'ANYONE_CAN_POST', allow_external_members: true },
+    });
+    expectAllJson(1);
+  });
+
+  it('create_group keeps asking for JSON on every retry of a not-yet-visible group', async () => {
+    settingsApi.groups.patch
+      .mockRejectedValueOnce(googleError(404, 'notFound', 'Resource Not Found'))
+      .mockResolvedValue({ data: RAW_SETTINGS });
+
+    const out = await createGroup({
+      account: ADMIN,
+      email: 'sales@optiwork.ai',
+      name: 'Sales',
+      settings: { allow_external_members: true },
+      sleep: noWait,
+    });
+
+    expect(out.settings_applied).toBe(true);
+    expectAllJson(2);
+  });
 });

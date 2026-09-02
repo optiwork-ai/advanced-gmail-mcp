@@ -205,3 +205,44 @@ worth one.
   `patch(params?: Params$Resource$Users$Patch, …): GaxiosPromise<Schema$User>` alongside
   `update`, so `update_workspace_user` uses `patch` and sends only the fields it was given.
   `update` replaces a user record wholesale, which would blank everything not restated.
+
+---
+
+# Round 2 — the fixes the first live runs asked for
+
+Contract: `shared/active-work/2026-09-02-google-workspace-admin-access/FIX-CONTRACT.md`,
+frozen 2026-09-02 after the chair ran the harness live on three Workspaces
+(`live-acceptance/RESULTS-*.txt`) and probed the three failures
+(`live-acceptance/chair-probes/`). This session made **no live Google call** and did not
+open, copy, move or use the three symlinks the chair left in the worktree.
+
+Baseline at the start of this round: **1,133 tests** (31 files), typecheck clean, `e6c2b7c`.
+
+| # | Unit | Commit | State |
+| --- | --- | --- | --- |
+| 1 | F1 tests — `alt: 'json'` pinned on every Groups Settings call | (this commit) | done |
+
+## FAIL-before evidence
+
+### Unit 1 — F1, the Groups Settings `alt=json` quirk
+
+Committed the test additions, then ran them against **unchanged** tool modules:
+
+`npx vitest run src/tools/workspace-admin-tools.test.ts`
+
+```
+ Test Files  1 failed (1)
+      Tests  7 failed | 108 passed (115)
+```
+
+The seven are the four existing exact-argument assertions (get_group's settings read,
+create_group's settings patch, update_group_settings' patch and its re-read) plus the
+three new sweep tests, each saying the same thing:
+
+```
+AssertionError: a Groups Settings call went out without alt=json:
+  {"groupUniqueId":"sales@optiwork.ai","requestBody":{"allowExternalMembers":"true"}}:
+  expected undefined to be 'json'
+```
+
+Full output: `evidence/FAIL-before-F1-alt-json.txt`.

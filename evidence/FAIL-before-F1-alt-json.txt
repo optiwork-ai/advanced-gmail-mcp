@@ -1,0 +1,60 @@
+
++ Received: 
+undefined
+
+ ❯ expectAllJson src/tools/workspace-admin-tools.test.ts:1060:10
+    1058|     for (const params of calls) {
+    1059|       expect(params.alt, `a Groups Settings call went out without alt=…
+    1060|         .toBe('json');
+       |          ^
+    1061|     }
+    1062|   }
+ ❯ src/tools/workspace-admin-tools.test.ts:1085:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/7]⎯
+
+ FAIL  src/tools/workspace-admin-tools.test.ts > every Groups Settings call asks for JSON out loud > create_group patches the new group's settings with alt=json
+AssertionError: a Groups Settings call went out without alt=json: {"groupUniqueId":"sales@optiwork.ai","requestBody":{"whoCanPostMessage":"ANYONE_CAN_POST","allowExternalMembers":"true"}}: expected undefined to be 'json' // Object.is equality
+
+- Expected: 
+"json"
+
++ Received: 
+undefined
+
+ ❯ expectAllJson src/tools/workspace-admin-tools.test.ts:1060:10
+    1058|     for (const params of calls) {
+    1059|       expect(params.alt, `a Groups Settings call went out without alt=…
+    1060|         .toBe('json');
+       |          ^
+    1061|     }
+    1062|   }
+ ❯ src/tools/workspace-admin-tools.test.ts:1095:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/7]⎯
+
+ FAIL  src/tools/workspace-admin-tools.test.ts > every Groups Settings call asks for JSON out loud > create_group keeps asking for JSON on every retry of a not-yet-visible group
+AssertionError: a Groups Settings call went out without alt=json: {"groupUniqueId":"sales@optiwork.ai","requestBody":{"allowExternalMembers":"true"}}: expected undefined to be 'json' // Object.is equality
+
+- Expected: 
+"json"
+
++ Received: 
+undefined
+
+ ❯ expectAllJson src/tools/workspace-admin-tools.test.ts:1060:10
+    1058|     for (const params of calls) {
+    1059|       expect(params.alt, `a Groups Settings call went out without alt=…
+    1060|         .toBe('json');
+       |          ^
+    1061|     }
+    1062|   }
+ ❯ src/tools/workspace-admin-tools.test.ts:1112:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/7]⎯
+
+ Test Files  1 failed (1)
+      Tests  7 failed | 108 passed (115)
+   Start at  14:58:03
+   Duration  3.49s (transform 159ms, setup 0ms, collect 211ms, tests 3.03s, environment 0ms, prepare 60ms)
+
