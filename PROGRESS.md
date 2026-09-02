@@ -222,7 +222,8 @@ Baseline at the start of this round: **1,133 tests** (31 files), typecheck clean
 | --- | --- | --- | --- |
 | 1 | F1 tests — `alt: 'json'` pinned on every Groups Settings call | `9b08487` | done |
 | 2 | F1 implementation — the four calls, and the quirk written down | `940d96b` | done |
-| 3 | F2 tests — the alias 403 that is propagation, and the softened wording | (this commit) | done |
+| 3 | F2 tests — the alias 403 that is propagation, and the softened wording | `f30fb99` | done |
+| 4 | F2 implementation — the bounded wait, and a 403 stated as a likelihood | (this commit) | done |
 
 ## FAIL-before evidence
 
@@ -300,3 +301,25 @@ The seventh new case — that the injected timer is an OPTION and never a tool p
 passes before the change as well as after, because there is no `sleep` in the shape yet.
 It is a regression guard against re-introducing the `z.function()` that took down the whole
 `tools/list` roster during the first build, not a fail-before.
+
+### Unit 4 — F2 green
+
+`add_group_alias` now follows `create_group`'s split: an exported `addGroupAlias()` taking
+`sleep` as an OPTION, and a thin tool wrapper. Six retries at ten seconds — about a minute —
+on exactly the one refusal the probe caught (403 **and** reason `forbidden` **and** "Not
+Authorized to access this resource/api"), each wait logged with its attempt number. Any
+other 403 is thrown on the first attempt, unchanged: waiting a minute to repeat a correct
+answer would only make it slower.
+
+The give-up message names both readings and asserts neither — propagation on a group made
+in the last minute, policy or role on an older one — and says signing in again fixes
+neither.
+
+The generic 403 at `src/workspace-admin/client.ts` was softened the same way: it used to
+say "what is missing is the ADMIN ROLE", which was FALSE on all three Workspaces (the
+caller was a super admin). It now says the two usual causes and mentions the just-created
+case. The existing test's ban on re-auth advice is unchanged and still holds — the first
+draft of the new wording tripped it with "re-authenticating will not change this" and was
+reworded to "signing in again", not the test relaxed.
+
+`npm test` **1,137 → 1,143** (31 files), `npm run typecheck` clean.

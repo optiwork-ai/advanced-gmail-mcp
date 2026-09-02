@@ -483,9 +483,12 @@ export function adminApiError(err: unknown, ctx: AdminErrorContext): Error | und
 
     return new Error(
       `${ctx.tool}: Google refused this for "${ctx.alias}" (403). The sign-in is fine and the `
-      + 'permission was granted — what is missing is the ADMIN ROLE that allows this particular '
-      + `action on "${ctx.key}". A Workspace super administrator can grant it in the Admin `
-      + 'console under Account > Admin roles. Signing in again will not change this.'
+      + `permission was granted, so signing in again will not change this. What stops the `
+      + `action on "${ctx.key}" is USUALLY one of two things: an admin ROLE this account does `
+      + 'not hold, which a Workspace super administrator can grant in the Admin console under '
+      + 'Account > Admin roles, or a Workspace POLICY that forbids it whatever the role. '
+      + 'Occasionally it is neither: Google also answers 403 for a few seconds about something '
+      + 'it has only just created, in which case the same call works shortly afterwards.'
       + `\n\nOriginal error: ${original}`,
     );
   }
