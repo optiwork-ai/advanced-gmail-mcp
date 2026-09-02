@@ -48,6 +48,23 @@ import { registerUpdateGoogleDoc } from './docs-update-document.js';
 // already hold, so they reach only spreadsheets this server created.
 import { registerUpdateSheetValues } from './sheets-update-values.js';
 import { registerAppendSheetRows } from './sheets-append-rows.js';
+// Google Workspace administration (2026-09-02). Five reads and nine writes,
+// and they act on a company's DIRECTORY rather than on a mailbox — every one
+// of them requires an account explicitly flagged workspace_admin, with no
+// default-account fallback anywhere in the set.
+import { registerListWorkspaceDomains } from './workspace-list-domains.js';
+import { registerListWorkspaceUsers } from './workspace-list-users.js';
+import { registerGetWorkspaceUser } from './workspace-get-user.js';
+import { registerCreateWorkspaceUser } from './workspace-create-user.js';
+import { registerUpdateWorkspaceUser } from './workspace-update-user.js';
+import { registerAddUserAlias } from './workspace-add-user-alias.js';
+import { registerListGroups } from './workspace-list-groups.js';
+import { registerGetGroup } from './workspace-get-group.js';
+import { registerCreateGroup } from './workspace-create-group.js';
+import { registerUpdateGroupSettings } from './workspace-update-group-settings.js';
+import { registerDeleteGroup } from './workspace-delete-group.js';
+import { registerAddGroupAlias } from './workspace-add-group-alias.js';
+import { registerGroupMemberTools } from './workspace-group-members.js';
 // Calendar tools (three read-only + create_calendar_event)
 import { registerListCalendars } from './calendar-list-calendars.js';
 import { registerListCalendarEvents } from './calendar-list-events.js';
@@ -142,4 +159,32 @@ export function registerAllTools(server: McpServer): void {
   registerListCalendarEvents(server);
   registerGetFreebusy(server);
   registerCreateCalendarEvent(server);
+
+  // Google Workspace administration. These change a company's directory, not a
+  // mailbox: they create addresses that receive mail, delete addresses so that
+  // mail bounces, add a PAID user seat, and lock a person out of their account.
+  //
+  // The safety is in the account, not in the tool list: every one of these
+  // requires `account` explicitly — there is no default-account fallback, the
+  // way there is everywhere else here — and refuses any account not flagged
+  // "workspace_admin": true in accounts.json, before it makes a network call.
+  // The default account on this server is a consumer Gmail mailbox, and an
+  // admin call landing there is the mistake the whole design makes impossible.
+  //
+  // Two carry a confirm gate: delete_group (mail to the address bounces
+  // afterwards, with no undo) and create_workspace_user (a paid seat, billed
+  // monthly). update_workspace_user carries one too, but only for suspending.
+  registerListWorkspaceDomains(server);
+  registerListWorkspaceUsers(server);
+  registerGetWorkspaceUser(server);
+  registerListGroups(server);
+  registerGetGroup(server);
+  registerCreateGroup(server);
+  registerUpdateGroupSettings(server);
+  registerDeleteGroup(server);
+  registerAddGroupAlias(server);
+  registerGroupMemberTools(server);
+  registerCreateWorkspaceUser(server);
+  registerUpdateWorkspaceUser(server);
+  registerAddUserAlias(server);
 }

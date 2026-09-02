@@ -3,6 +3,7 @@ import type { Auth, admin_directory_v1, groupssettings_v1 } from 'googleapis';
 import { type AccountConfig, getAccounts, resolveAccount } from '../config.js';
 import { getAuthClient } from '../gmail/auth.js';
 import { isRateLimit403 } from '../gmail/client.js';
+import { googleApiCall } from '../google-api-error.js';
 import { errorStatus, googleErrorMessage, googleErrorReasons, isMissingScopeError } from '../scope-error.js';
 
 /**
@@ -510,4 +511,175 @@ export function mayHaveLandedError(
   const code = (err as { code?: unknown }).code;
   if (code !== undefined) (wrapped as Error & { code?: unknown }).code = code;
   return wrapped;
+}
+
+// ---------------------------------------------------------------------------
+// Making one call
+// ---------------------------------------------------------------------------
+
+export interface AdminCallContext extends AdminErrorContext {
+  /** The API's human name, as `ADMIN_SDK_API` or `GROUPS_SETTINGS_API`. */
+  api: string;
+  /** The scope THIS call needs, so a missing-grant error names the right one. */
+  scope: string;
+}
+
+/**
+ * Run one Admin SDK or Groups Settings call with the shared retry policy, the
+ * shared honest-error translation, and the three extra translations above.
+ *
+ * The layering matters and is the same as the Sheets client's: `adminApiError`
+ * runs INSIDE the retry loop on the RAW Google error, because the reason codes
+ * that tell a duplicate from a missing scope do not survive the rewrite; what
+ * it returns carries no status, so neither the retry loop nor the shared
+ * translator touches it again; and everything it declines to handle travels on
+ * to the shared translator exactly as before.
+ */
+export async function adminCall<T>(
+  ctx: AdminCallContext,
+  fn: () => Promise<T>,
+  opts: { maxRetries?: number } = {},
+): Promise<T> {
+  return googleApiCall(
+    { tool: ctx.tool, api: ctx.api, scope: ctx.scope, alias: ctx.alias },
+    async () => {
+      try {
+        return await fn();
+      } catch (err: unknown) {
+        throw adminApiError(err, ctx) ?? err;
+      }
+    },
+    opts,
+  );
+}
+
+/**
+ * Run one call that CREATES or DELETES something, with retrying switched off
+ * and an honest answer when the outcome is unknown.
+ *
+ * `withRetry` retries 500, 502, 503 and 504, and a gateway timeout can arrive
+ * after Google has already done the thing. Retrying a group insert then makes
+ * two groups and reports one; retrying a user insert makes two people and two
+ * paid seats. So there is exactly one attempt, and a failure that MIGHT have
+ * landed says so and names the read that settles it.
+ */
+export async function adminCreateCall<T>(
+  ctx: AdminCallContext,
+  landing: { what: string; check: string },
+  fn: () => Promise<T>,
+): Promise<T> {
+  // The status of the RAW error, kept before the honest-error translation
+  // discards it — it is what says whether the write could already have landed.
+  let rawStatus: number | undefined;
+  try {
+    return await adminCall(
+      ctx,
+      async () => {
+        try {
+          return await fn();
+        } catch (raw: unknown) {
+          rawStatus = errorStatus(raw);
+          throw raw;
+        }
+      },
+      { maxRetries: 0 },
+    );
+  } catch (err: unknown) {
+    throw mayHaveLandedError(err, rawStatus, { tool: ctx.tool, ...landing });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Projections — what a caller is handed, and what stays behind
+// ---------------------------------------------------------------------------
+
+/** Drop a key rather than emit a null for it. Booleans keep their `false`. */
+function present<T extends Record<string, unknown>>(fields: T): Partial<T> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    if (value !== undefined && value !== null) out[key] = value;
+  }
+  return out as Partial<T>;
+}
+
+/** A group as the tools report it: no etags, no kinds, no nonEditableAliases. */
+export function projectGroup(group: admin_directory_v1.Schema$Group): Record<string, unknown> {
+  return present({
+    email: group.email,
+    name: group.name,
+    description: group.description,
+    directMembersCount: group.directMembersCount,
+    aliases: group.aliases,
+    adminCreated: group.adminCreated,
+  });
+}
+
+/**
+ * A user as a LISTING reports it.
+ *
+ * The Directory API does not return passwords or hashes on a read, but the
+ * projection is written as an allow-list anyway: `Schema$User` carries
+ * `password` and `hashFunction` fields, and an object built by omission rather
+ * than by selection is one Google schema change away from handing them on.
+ */
+export function projectUser(user: admin_directory_v1.Schema$User): Record<string, unknown> {
+  return present({
+    primaryEmail: user.primaryEmail,
+    fullName: user.name?.fullName,
+    suspended: user.suspended,
+    isAdmin: user.isAdmin,
+    orgUnitPath: user.orgUnitPath,
+    aliases: user.aliases,
+    lastLoginTime: user.lastLoginTime,
+  });
+}
+
+/** A user as a SINGLE read reports it: the listing fields plus the details. */
+export function projectUserDetail(user: admin_directory_v1.Schema$User): Record<string, unknown> {
+  return {
+    ...projectUser(user),
+    ...present({
+      recoveryEmail: user.recoveryEmail,
+      creationTime: user.creationTime,
+      agreedToTerms: user.agreedToTerms,
+      isEnrolledIn2Sv: user.isEnrolledIn2Sv,
+      changePasswordAtNextLogin: user.changePasswordAtNextLogin,
+    }),
+  };
+}
+
+/** A membership as the tools report it. */
+export function projectMember(member: admin_directory_v1.Schema$Member): Record<string, unknown> {
+  return present({
+    email: member.email,
+    role: member.role,
+    type: member.type,
+    status: member.status,
+    deliverySettings: member.delivery_settings,
+  });
+}
+
+/**
+ * The group's email address, which is the ONLY key Groups Settings accepts.
+ *
+ * An id or an alias works perfectly well for every Directory call and is a 404
+ * at Groups Settings, so anything that is not already an address is resolved
+ * through the Directory first rather than sent and left to fail confusingly.
+ */
+export async function resolveGroupEmail(
+  directory: admin_directory_v1.Admin,
+  groupKey: string,
+  ctx: AdminCallContext,
+): Promise<{ email: string; group?: admin_directory_v1.Schema$Group }> {
+  if (groupKey.includes('@')) return { email: groupKey };
+
+  const found = await adminCall(ctx, () => directory.groups.get({ groupKey }));
+  const email = found.data.email;
+  if (!email) {
+    throw new Error(
+      `${ctx.tool}: Google returned no email address for group "${groupKey}", and the group's `
+      + 'address is the only key its settings can be read or written by.',
+    );
+  }
+  return { email, group: found.data };
 }

@@ -536,3 +536,47 @@ describe('the scope constants', () => {
     expect(GROUPS_SETTINGS_API).toBe('Google Groups Settings');
   });
 });
+
+// ---------------------------------------------------------------------------
+// The zod shape callers type against, and the table that translates it
+// ---------------------------------------------------------------------------
+
+describe('groupSettingsSchema agrees with GROUP_SETTING_FIELDS', () => {
+  it('offers exactly the settings the table can translate', async () => {
+    // Two lists in two files, and they have to say the same thing: a key the
+    // schema accepts but the table cannot translate is a setting a caller can
+    // pass and the server will refuse after the fact.
+    const { groupSettingsSchema } = await import('../tools/shared-params.js');
+    expect(Object.keys(groupSettingsSchema.shape).sort())
+      .toEqual(GROUP_SETTING_FIELDS.map(f => f.param).sort());
+  });
+
+  it('accepts every enum value the table lists, and refuses one it does not', async () => {
+    const { groupSettingsSchema } = await import('../tools/shared-params.js');
+    for (const field of GROUP_SETTING_FIELDS) {
+      if (field.kind !== 'enum') continue;
+      for (const value of field.values ?? []) {
+        expect(
+          groupSettingsSchema.safeParse({ [field.param]: value }).success,
+          `${field.param} should accept ${value}`,
+        ).toBe(true);
+      }
+      expect(
+        groupSettingsSchema.safeParse({ [field.param]: 'NOT_A_REAL_VALUE' }).success,
+        `${field.param} should refuse NOT_A_REAL_VALUE`,
+      ).toBe(false);
+    }
+  });
+
+  it('takes a real boolean for every boolean setting, and refuses the string "true"', async () => {
+    // Google carries these as strings; the conversion is the server's job, and
+    // a caller who passes "true" has almost certainly misread the API rather
+    // than meant text.
+    const { groupSettingsSchema } = await import('../tools/shared-params.js');
+    for (const field of GROUP_SETTING_FIELDS) {
+      if (field.kind !== 'boolean') continue;
+      expect(groupSettingsSchema.safeParse({ [field.param]: true }).success).toBe(true);
+      expect(groupSettingsSchema.safeParse({ [field.param]: 'true' }).success).toBe(false);
+    }
+  });
+});

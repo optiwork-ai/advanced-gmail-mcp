@@ -12,6 +12,7 @@
  * what it was handed.
  */
 import { describe, expect, it } from 'vitest';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registerAllTools } from './index.js';
 
 function roster(): string[] {
@@ -19,6 +20,33 @@ function roster(): string[] {
   const server = { tool: (name: string) => { names.push(name); } };
   registerAllTools(server as never);
   return names;
+}
+
+/**
+ * The tool list exactly as a client receives it — every parameter shape put
+ * through the MCP SDK's real zod-to-JSON-Schema conversion.
+ *
+ * This exists because of a defect caught on 2026-09-02 that no amount of
+ * handler testing could have found. A `z.function()` had been added to one
+ * tool's parameters (an injectable timer for a retry loop, which is a perfectly
+ * ordinary thing to want). Functions have no JSON Schema, so the conversion
+ * THROWS — and the conversion runs over the whole roster at once, so a single
+ * such parameter anywhere takes down `tools/list` for all 69 tools. Every unit
+ * test passed; the server would have listed nothing.
+ */
+async function listedTools(): Promise<Array<{ name: string; description?: string; inputSchema: unknown }>> {
+  const server = new McpServer({ name: 'roster-test', version: '0.0.0' });
+  registerAllTools(server);
+
+  const inner = server.server as unknown as {
+    _requestHandlers: Map<string, (req: unknown, extra: unknown) => Promise<{
+      tools: Array<{ name: string; description?: string; inputSchema: unknown }>;
+    }>>;
+  };
+  const handler = inner._requestHandlers.get('tools/list');
+  if (!handler) throw new Error('the MCP server registered no tools/list handler');
+  const response = await handler({ method: 'tools/list', params: {} }, {});
+  return response.tools;
 }
 
 /**
@@ -64,6 +92,20 @@ const READ_TOOLS = [
 describe('registerAllTools', () => {
   it('registers 69 tools', () => {
     expect(roster()).toHaveLength(69);
+  });
+
+  it('can actually be LISTED — every parameter shape survives JSON Schema', async () => {
+    // The listing is the first thing any client asks for. If one tool's schema
+    // cannot be converted, the whole call throws and the server appears to
+    // offer nothing at all.
+    const tools = await listedTools();
+    expect(tools).toHaveLength(69);
+    expect(tools.map(t => t.name).sort()).toEqual(roster().sort());
+    for (const tool of tools) {
+      expect(tool.inputSchema, `${tool.name} produced no input schema`).toBeTruthy();
+      expect(String(tool.description ?? '').length, `${tool.name} has no description`)
+        .toBeGreaterThan(0);
+    }
   });
 
   it('registers each name exactly once', () => {

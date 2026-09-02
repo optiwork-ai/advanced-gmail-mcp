@@ -25,7 +25,7 @@ blocking the next build — the biggest caches sitting there are Telegram (2.2 G
 | 3 | Piece B client + settings-map tests | (this commit) | done |
 | 4 | Piece B client implementation | (this commit) | done |
 | 5 | Tool tests | (this commit) | done |
-| 6 | Tools + registration | | |
+| 6 | Tools + registration | (this commit) | done |
 | 7 | Docs + version | | |
 | 8 | Live harness | | |
 
@@ -115,6 +115,23 @@ src/tools/workspace-admin-tools.test.ts(92,16): error TS2307: Cannot find module
 
 Full output: `evidence/FAIL-before-piece-B-tools.txt`.
 
+### Unit 6 — the fourteen tools green
+
+`npm test` **996 → 1,131** (31 files), `npm run typecheck` clean, roster 55 → **69**.
+
+**A real defect was caught here, and only by leaving the unit tests behind.** The first
+version of `create_group` took its injectable retry timer as a tool parameter,
+`sleep: z.function()`. Every unit test passed. But the MCP SDK converts every registered
+tool's parameter shape to JSON Schema in one pass when a client asks `tools/list`, and a
+function has no JSON Schema — so the conversion THROWS and the server lists **nothing at
+all**, for all 69 tools, not just that one. It was found by driving a real `McpServer`
+through a real `tools/list` rather than by testing handlers.
+
+The fix is the split `src/calendar/client.ts` already uses for the Meet-room poll: `sleep`
+is an option on an exported `createGroup()` function, never a tool parameter, and the tool
+is a thin wrapper. `src/tools/index.test.ts` now lists the whole roster through the real
+SDK on every run, so no future tool can take the server's listing down this way.
+
 ## Decisions taken inside the contract's frame
 
 - **The `[admin]` marker reads the TOKEN first, the flag second.** The contract gives three
@@ -125,6 +142,17 @@ Full output: `evidence/FAIL-before-piece-B-tools.txt`.
 
 ## Deviations, drops and things deliberately not done
 
+- **The `settings` zod shape lives in `src/tools/shared-params.ts`, the conversion table in
+  `src/workspace-admin/client.ts`.** shared-params.ts is where this repo already keeps zod
+  shapes more than one tool uses, and a table generated from zod (or zod generated from the
+  table) loses the static typing that makes the tools readable. The two are held together by
+  a test that compares them key by key and value by value, so they cannot drift.
+- **`get_group` reports a settings or members failure BESIDE the group, not instead of it.**
+  The contract does not say what happens when the Groups Settings API is off. Failing the
+  whole read would make `get_group` useless on a project with one API switched off, but a
+  silently absent `settings` block reads as "no restrictions" — the opposite of the truth.
+  So the group comes back with `settings: null`, a `settings_error`, and a note saying in
+  plain words not to read the absence as permission.
 - **`users.patch`, not `users.update`.** The contract asked which the installed types expose:
   `node_modules/googleapis/build/src/apis/admin/directory_v1.d.ts:5808` declares
   `patch(params?: Params$Resource$Users$Patch, …): GaxiosPromise<Schema$User>` alongside

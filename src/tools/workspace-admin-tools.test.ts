@@ -101,7 +101,7 @@ const { registerUpdateWorkspaceUser, updateWorkspaceUserParams } =
 const { registerAddUserAlias, addUserAliasParams } = await import('./workspace-add-user-alias.js');
 const { registerListGroups, listGroupsParams } = await import('./workspace-list-groups.js');
 const { registerGetGroup, getGroupParams } = await import('./workspace-get-group.js');
-const { registerCreateGroup, createGroupParams, GROUP_SETTINGS_RETRY_DELAYS_MS } =
+const { registerCreateGroup, createGroup, createGroupParams, GROUP_SETTINGS_RETRY_DELAYS_MS } =
   await import('./workspace-create-group.js');
 const { registerUpdateGroupSettings, updateGroupSettingsParams } =
   await import('./workspace-update-group-settings.js');
@@ -489,7 +489,7 @@ describe('get_group', () => {
 // ---------------------------------------------------------------------------
 
 describe('create_group', () => {
-  const sleep = vi.fn(async () => undefined);
+  const sleep = vi.fn(async (_ms: number) => undefined);
 
   beforeEach(() => {
     sleep.mockClear();
@@ -500,13 +500,19 @@ describe('create_group', () => {
     });
   });
 
+  /**
+   * What a caller sends. `sleep` is NOT among them: it is an option on
+   * createGroup, never a tool parameter, because a function in a tool's schema
+   * cannot be turned into JSON Schema and would break the whole roster's
+   * listing. The two retry tests below therefore call createGroup directly, the
+   * way src/calendar/client.test.ts calls createEvent.
+   */
   const args = {
     account: ADMIN,
     email: 'sales@optiwork.ai',
     name: 'Sales',
     settings: { who_can_post_message: 'ANYONE_CAN_POST', allow_external_members: true },
     members: [{ email: 'crm@appraisalhostmail.com' }],
-    sleep,
   };
 
   it('creates, then applies settings, then adds members — in that order', async () => {
@@ -540,7 +546,7 @@ describe('create_group', () => {
 
   it('says "not requested" rather than "false" when no settings were passed', async () => {
     const out = await ok(capture(registerCreateGroup).handler, {
-      account: ADMIN, email: 'sales@optiwork.ai', name: 'Sales', sleep,
+      account: ADMIN, email: 'sales@optiwork.ai', name: 'Sales',
     });
     expect(out.settings_applied).toBe('not requested');
     expect(settingsApi.groups.patch).not.toHaveBeenCalled();
@@ -555,7 +561,7 @@ describe('create_group', () => {
       .mockRejectedValueOnce(googleError(404, 'notFound', 'Resource Not Found'))
       .mockResolvedValue({ data: RAW_SETTINGS });
 
-    const out = await ok(capture(registerCreateGroup).handler, args);
+    const out = await createGroup({ ...args, sleep });
 
     expect(out.settings_applied).toBe(true);
     expect(sleep.mock.calls.map(c => c[0])).toEqual(GROUP_SETTINGS_RETRY_DELAYS_MS.slice(0, 2));
@@ -564,7 +570,7 @@ describe('create_group', () => {
   it('gives up honestly after the last retry, and still reports the group it made', async () => {
     settingsApi.groups.patch.mockRejectedValue(googleError(404, 'notFound', 'Resource Not Found'));
 
-    const out = await ok(capture(registerCreateGroup).handler, args);
+    const out = await createGroup({ ...args, sleep });
 
     expect(out.group).toMatchObject({ email: 'sales@optiwork.ai' });
     expect(out.settings_applied).toBe(false);
