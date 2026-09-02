@@ -220,7 +220,8 @@ Baseline at the start of this round: **1,133 tests** (31 files), typecheck clean
 
 | # | Unit | Commit | State |
 | --- | --- | --- | --- |
-| 1 | F1 tests — `alt: 'json'` pinned on every Groups Settings call | (this commit) | done |
+| 1 | F1 tests — `alt: 'json'` pinned on every Groups Settings call | `9b08487` | done |
+| 2 | F1 implementation — the four calls, and the quirk written down | (this commit) | done |
 
 ## FAIL-before evidence
 
@@ -246,3 +247,20 @@ AssertionError: a Groups Settings call went out without alt=json:
 ```
 
 Full output: `evidence/FAIL-before-F1-alt-json.txt`.
+
+### Unit 2 — F1 green
+
+The four calls now carry `alt: 'json'`: `get_group`'s settings read, `create_group`'s
+settings patch (inside its retry loop, so every attempt asks for it), and
+`update_group_settings`' patch and re-read. Nothing else in `src/` touches the settings
+client — `grep -rn "getGroupsSettingsClient\|settings.groups\." src` finds those three
+tool modules and the factory, and no other call site exists.
+
+No cast was needed. `groupssettings_v1.StandardParameters` declares `alt?: string`
+(`node_modules/googleapis/build/src/apis/groupssettings/v1.d.ts:16`), and both
+`Params$Resource$Groups$Get` (:559) and `Params$Resource$Groups$Patch` (:565) extend it.
+
+A comment at the client factory (`src/workspace-admin/client.ts`) records the quirk and
+why it is worse than an error: a change that HAS landed reads back as `undefined`.
+
+`npm test` **1,133 → 1,137** (31 files), `npm run typecheck` clean.

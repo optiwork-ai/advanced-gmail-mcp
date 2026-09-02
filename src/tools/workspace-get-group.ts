@@ -90,7 +90,7 @@ export function registerGetGroup(server: McpServer): void {
               target: 'group settings record',
               key: email,
             },
-            () => settingsClient.groups.get({ groupUniqueId: email }),
+            () => settingsClient.groups.get({ groupUniqueId: email, alt: 'json' }),
           );
           answer.settings = fromGoogleSettings(settings.data);
         } catch (err) {

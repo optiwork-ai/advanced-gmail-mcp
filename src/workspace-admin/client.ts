@@ -151,7 +151,22 @@ export async function getDirectoryClient(account: AccountConfig): Promise<admin_
   return (await clientsFor(account)).directory;
 }
 
-/** The Groups Settings client for an account that has already been vetted. */
+/**
+ * The Groups Settings client for an account that has already been vetted.
+ *
+ * ⚠ EVERY call made on this client must pass `alt: 'json'`, and the tools here
+ * do. Proven live on three separate Workspaces on 2026-09-02: `groups.get`
+ * without it answers **200 with an empty object** — no error, no warning, no
+ * clue — while the identical call with it answers 61 fields. A `patch` applies
+ * either way, so the damage is entirely on the read side, and it is the worst
+ * kind: a settings change that HAS landed reads back as `undefined` and gets
+ * reported as a failure. Three live acceptance runs failed exactly that way
+ * before the parameter was added.
+ *
+ * `alt` is a legitimate typed parameter — `groupssettings_v1.StandardParameters`
+ * declares `alt?: string`, which `Params$Resource$Groups$Get` and
+ * `…$Patch` both extend — so passing it needs no cast.
+ */
 export async function getGroupsSettingsClient(
   account: AccountConfig,
 ): Promise<groupssettings_v1.Groupssettings> {

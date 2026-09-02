@@ -90,6 +90,7 @@ export function registerUpdateGroupSettings(server: McpServer): void {
           // group exactly as it does once — so the normal retries stay on.
           await adminCall(ctx, () => settingsClient.groups.patch({
             groupUniqueId: email,
+            alt: 'json',
             requestBody: body,
           }));
         } catch (err) {
@@ -101,7 +102,7 @@ export function registerUpdateGroupSettings(server: McpServer): void {
           throw err;
         }
 
-        const after = await adminCall(ctx, () => settingsClient.groups.get({ groupUniqueId: email }));
+        const after = await adminCall(ctx, () => settingsClient.groups.get({ groupUniqueId: email, alt: 'json' }));
         log('info', 'update_group_settings', { ...fields, phase: 'done' });
 
         return {

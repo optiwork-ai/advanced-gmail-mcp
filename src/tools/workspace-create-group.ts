@@ -177,6 +177,7 @@ export async function createGroup(opts: CreateGroupOptions): Promise<Record<stri
       try {
         const patched = await adminCall(settingsCtx, () => settingsClient.groups.patch({
           groupUniqueId: groupEmail,
+          alt: 'json',
           requestBody: settingsBody,
         }));
         answer.settings = fromGoogleSettings(patched.data);
