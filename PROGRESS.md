@@ -223,7 +223,8 @@ Baseline at the start of this round: **1,133 tests** (31 files), typecheck clean
 | 1 | F1 tests — `alt: 'json'` pinned on every Groups Settings call | `9b08487` | done |
 | 2 | F1 implementation — the four calls, and the quirk written down | `940d96b` | done |
 | 3 | F2 tests — the alias 403 that is propagation, and the softened wording | `f30fb99` | done |
-| 4 | F2 implementation — the bounded wait, and a 403 stated as a likelihood | (this commit) | done |
+| 4 | F2 implementation — the bounded wait, and a 403 stated as a likelihood | `0533888` | done |
+| 5 | F3 — the harness re-reads a write before calling it a failure | (this commit) | done |
 
 ## FAIL-before evidence
 
@@ -323,3 +324,32 @@ draft of the new wording tripped it with "re-authenticating will not change this
 reworded to "signing in again", not the test relaxed.
 
 `npm test` **1,137 → 1,143** (31 files), `npm run typecheck` clean.
+
+### Unit 5 — F3, the harness read-back retries
+
+In `live-acceptance/workspace-admin.ts`: one shared `settle()` helper — up to **six reads,
+two seconds apart** — now stands behind H-2, H-3, H-4, H-5 and H-7. A PASS says which read
+it landed on (`on read 3, about 4s after the write`); a FAIL is recorded only after the last
+attempt and says how many reads it took to give up. H-5 retries only the READ-BACK; the
+insert's own minute of patience is the tool's job (F2). H-3 keeps the tool's own re-read as
+its first answer and only falls through to the schedule if that read caught the change
+mid-publication.
+
+The live measurement behind the number: the chair's probe watched a membership appear in
+about **two seconds** and disappear again in about the same, so six at two seconds is
+roughly five times the observed lag and still bounded at about ten seconds. This is not a
+retry-until-green harness — a change that never lands still fails, ten seconds later than
+before.
+
+`README-RUN.md` gains a section saying all of that, its H-2..H-7 rows now name the schedule,
+and the H-2 FAIL guidance names the `alt=json` cause that F1 fixed. The plan the run prints
+says it too.
+
+The harness stays **networkless under `--dry`** — it never reaches `settle()` there — and
+the dry run is clean against this branch (tail in the report). It was typechecked
+standalone with `tsc --noEmit --strict` as well.
+
+⚠ These three files live in the LANE folder, which is untracked in the workspace repo. This
+session did not `git add` the lane folder: committing it would sweep in the live RESULTS and
+probe files too, and that is the chair's call, not a builder's. Only this note is committed
+here, which is the same disposition the first round used for the harness (`cff1a18`).
