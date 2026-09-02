@@ -64,7 +64,12 @@ export function registerListWorkspaceUsers(server: McpServer): void {
             ...(query?.trim() ? { query: query.trim() } : {}),
             ...(page_token?.trim() ? { pageToken: page_token.trim() } : {}),
             maxResults,
-            orderBy: 'email',
+            // No `orderBy`. The installed vendor types declare it only as
+            // `orderBy?: string` and document none of its accepted values, and
+            // this session could make no live call to find out which spelling
+            // Google wants — a wrong one would 400 the whole listing rather
+            // than degrade. Google's default order is fine, and adding a sort
+            // is a one-line change once somebody has seen the API answer.
           }),
         );
 

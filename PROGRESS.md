@@ -189,6 +189,12 @@ worth one.
   silently absent `settings` block reads as "no restrictions" — the opposite of the truth.
   So the group comes back with `settings: null`, a `settings_error`, and a note saying in
   plain words not to read the absence as permission.
+- **`list_workspace_users` sends no `orderBy`.** A first draft sorted by email. The installed
+  vendor types declare it only as `orderBy?: string` and document none of its accepted values,
+  and this session could make no live call to learn which spelling Google wants — a wrong one
+  400s the whole listing rather than degrading. Google's default order is used instead. Adding
+  a sort is a one-line change once somebody has seen the API answer, and the contract asked
+  for no ordering.
 - **`accounts.example.json` carries no `_workspace_admin_note` key.** The contract allowed
   either a sibling note string or README-only documentation; the example now simply shows a
   third account with `"workspace_admin": true` on it, and README step 3 explains what the flag
