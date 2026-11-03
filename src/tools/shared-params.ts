@@ -25,6 +25,12 @@ export const GMAIL_NATIVE_CLAUSE =
   'Sends Gmail-native mail (multipart HTML + plain text, signature, quoted history) '
   + 'indistinguishable from mail composed in Gmail.';
 
+/** Said by every send that answers an inbox message (Contract C, 11/03/2026). */
+export const FILES_HANDLED_CLAUSE =
+  'After a successful send, the conversation answered is filed: marked read, taken out of the inbox '
+  + 'and labeled "Handled by Claude". The result\'s `cleanup` is "ok" or "cleanup failed: <reason>"; '
+  + 'the mail was sent either way, so never resend because of a cleanup failure.';
+
 export const includeSignatureParam = z
   .boolean()
   .optional()

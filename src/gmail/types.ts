@@ -307,6 +307,12 @@ export interface SendResult {
   id: string;
   threadId: string;
   labelIds: string[];
+  /**
+   * Set when the send answered an inbox message: 'ok' once that message's
+   * thread was filed as handled (read, out of the inbox, "Handled by Claude"),
+   * or 'cleanup failed: <reason>' — the mail WAS sent either way.
+   */
+  cleanup?: string;
 }
 
 /** Result from draft creation. */

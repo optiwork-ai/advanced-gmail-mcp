@@ -1719,6 +1719,81 @@ export async function modifyThread(opts: {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Handled by Claude (Contract C, 11/03/2026)
+// ---------------------------------------------------------------------------
+
+/** The label an email a session has handled is filed under, in every account. */
+export const HANDLED_LABEL_NAME = 'Handled by Claude';
+
+/**
+ * File a thread as handled: mark it read, take it out of the inbox and add
+ * "Handled by Claude". The label is found by name (case-insensitively, as Gmail
+ * itself treats label names) and created the first time an account needs it,
+ * so no account needs any setup. Throws on failure; callers decide whether a
+ * failure is fatal.
+ */
+async function fileThreadHandled(threadId: string, account: string): Promise<ModifyResult> {
+  const wanted = HANDLED_LABEL_NAME.toLowerCase();
+  const existing = (await listLabels({ account })).find(l => l.name.toLowerCase() === wanted);
+  const labelId = existing?.id ?? (await createLabel({ name: HANDLED_LABEL_NAME, account })).id;
+  return modifyThread({
+    threadId,
+    account,
+    addLabelIds: [labelId],
+    removeLabelIds: ['INBOX', 'UNREAD'],
+  });
+}
+
+/**
+ * After a send has SUCCEEDED, file the thread it answered. `findThread` returns
+ * that thread's id, or null when the send answered nothing (a brand-new
+ * message), in which case nothing is touched and no cleanup is reported.
+ *
+ * A failure here never turns a delivered send into an error — the mail is gone
+ * and a retry would send it twice — but it is never silent either: it is
+ * logged and returned as 'cleanup failed: <reason>'.
+ */
+async function fileAfterSend(
+  account: AccountConfig,
+  findThread: () => Promise<string | null | undefined>,
+): Promise<string | undefined> {
+  let threadId: string | null | undefined;
+  try {
+    threadId = await findThread();
+    if (threadId === null) return undefined;
+    if (!threadId) throw new Error('Gmail returned no thread id for the message this send answered');
+    await fileThreadHandled(threadId, account.alias);
+    return 'ok';
+  } catch (err: unknown) {
+    const reason = err instanceof Error ? err.message : String(err);
+    log('error', 'handled_cleanup', { account: account.alias, thread_id: threadId ?? '', error: reason });
+    return `cleanup failed: ${reason}`;
+  }
+}
+
+/**
+ * mark_handled: file an email a session finished without replying. Takes a
+ * message (its thread is filed) or a thread. Unlike the post-send cleanup, a
+ * failure here is an error: nothing was sent, so there is nothing to protect.
+ */
+export async function markHandled(opts: {
+  messageId?: string;
+  threadId?: string;
+  account?: string;
+}): Promise<{ success: true; thread_id: string; label: string }> {
+  if (!!opts.messageId === !!opts.threadId) {
+    throw new Error('mark_handled needs exactly one of message_id or thread_id.');
+  }
+  const resolved = resolveAccount(opts.account);
+  const threadId = opts.threadId
+    ?? (await getMessage({ messageId: opts.messageId!, account: resolved.alias, format: 'minimal' })).threadId;
+  if (!threadId) throw new Error(`Gmail returned no thread id for message ${opts.messageId}.`);
+
+  await fileThreadHandled(threadId, resolved.alias);
+  return { success: true, thread_id: threadId, label: HANDLED_LABEL_NAME };
+}
+
 /**
  * Move an entire thread to Trash.
  */
@@ -1991,10 +2066,13 @@ export async function replyToMessage(opts: ReplyOpts): Promise<SendResult> {
     thread_id: sent.threadId || '',
   });
 
+  const cleanup = await fileAfterSend(resolved, async () => threadId);
+
   return {
     id: sent.id || '',
     threadId: sent.threadId || '',
     labelIds: sent.labelIds || [],
+    cleanup,
   };
 }
 
@@ -2321,10 +2399,15 @@ export async function forwardMessage(opts: {
     inline_images: inlineImages.length,
   });
 
+  // The forward itself starts a new thread; what gets filed is the thread of
+  // the message that was forwarded.
+  const cleanup = await fileAfterSend(resolved, async () => original.threadId);
+
   return {
     id: sent.id || '',
     threadId: sent.threadId || '',
     labelIds: sent.labelIds || [],
+    cleanup,
   };
 }
 
@@ -2810,9 +2893,20 @@ export async function sendDraft(opts: {
     ),
   );
 
+  // A draft that replies in an existing thread shares it with the messages it
+  // answers; a brand-new message is alone in its thread and answered nothing.
+  const threadId = response.data.threadId || '';
+  const cleanup = await fileAfterSend(resolved, async () => {
+    const thread = await withRetry(() =>
+      gmail.users.threads.get({ userId: 'me', id: threadId, format: 'minimal' })
+    );
+    return (thread.data.messages?.length ?? 0) > 1 ? threadId : null;
+  });
+
   return {
     id: response.data.id || '',
-    threadId: response.data.threadId || '',
+    threadId,
     labelIds: response.data.labelIds || [],
+    cleanup,
   };
 }

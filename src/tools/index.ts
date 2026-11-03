@@ -20,6 +20,7 @@ import { registerBatchModify } from './batch.js';
 import { registerUnsubscribe } from './unsubscribe.js';
 import { registerMarkRead } from './mark-read.js';
 import { registerMarkUnread } from './mark-unread.js';
+import { registerMarkHandled } from './mark-handled.js';
 import { registerGetAttachment } from './get-attachment.js';
 import { registerListDrafts } from './list-drafts.js';
 import { registerReadDraft } from './read-draft.js';
@@ -106,6 +107,7 @@ export function registerAllTools(server: McpServer): void {
   registerUnsubscribe(server);
   registerMarkRead(server);
   registerMarkUnread(server);
+  registerMarkHandled(server);
   registerGetAttachment(server);
   registerListDrafts(server);
   registerReadDraft(server);

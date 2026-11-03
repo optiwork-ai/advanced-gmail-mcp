@@ -60,7 +60,7 @@ const WRITE_TOOLS = [
   'update_draft', 'delete_draft',
   'archive_email', 'label_email', 'trash_email', 'modify_thread', 'trash_thread',
   'batch_modify', 'unsubscribe_email', 'mark_read', 'mark_unread', 'star_email',
-  'unstar_email', 'mark_important', 'mark_not_important',
+  'unstar_email', 'mark_important', 'mark_not_important', 'mark_handled',
   'create_label', 'update_label', 'delete_label',
   'create_filter', 'delete_filter', 'set_vacation',
   // Chat, Drive, Docs, Calendar
@@ -90,8 +90,8 @@ const READ_TOOLS = [
 ];
 
 describe('registerAllTools', () => {
-  it('registers 69 tools', () => {
-    expect(roster()).toHaveLength(69);
+  it('registers 70 tools', () => {
+    expect(roster()).toHaveLength(70);
   });
 
   it('can actually be LISTED — every parameter shape survives JSON Schema', async () => {
@@ -99,7 +99,7 @@ describe('registerAllTools', () => {
     // cannot be converted, the whole call throws and the server appears to
     // offer nothing at all.
     const tools = await listedTools();
-    expect(tools).toHaveLength(69);
+    expect(tools).toHaveLength(70);
     expect(tools.map(t => t.name).sort()).toEqual(roster().sort());
     for (const tool of tools) {
       expect(tool.inputSchema, `${tool.name} produced no input schema`).toBeTruthy();

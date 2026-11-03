@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { replyToMessage } from '../gmail/client.js';
 import {
   BODY_DESCRIPTION,
+  FILES_HANDLED_CLAUSE,
   GMAIL_NATIVE_CLAUSE,
   IS_HTML_DESCRIPTION,
   attachmentsParam,
@@ -30,7 +31,7 @@ export function registerReplyEmail(server: McpServer): void {
     'reply_email',
     'Reply to an existing email. Fetches original message for proper threading (In-Reply-To, '
     + "References, threadId) and honours the original's Reply-To. Supports reply-all. "
-    + GMAIL_NATIVE_CLAUSE,
+    + GMAIL_NATIVE_CLAUSE + ' ' + FILES_HANDLED_CLAUSE,
     replyEmailParams,
     async ({ message_id, body, account, is_html, reply_all, cc, bcc, include_signature, include_quote, attachments, inline_images }) => {
       try {

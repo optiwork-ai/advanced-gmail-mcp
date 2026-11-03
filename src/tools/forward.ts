@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { forwardMessage } from '../gmail/client.js';
 import {
   BODY_DESCRIPTION,
+  FILES_HANDLED_CLAUSE,
   GMAIL_NATIVE_CLAUSE,
   IS_HTML_DESCRIPTION,
   includeAttachmentsParam,
@@ -25,7 +26,7 @@ export function registerForwardEmail(server: McpServer): void {
   server.tool(
     'forward_email',
     "Forward an existing email to new recipients, re-attaching the original's attachments. "
-    + GMAIL_NATIVE_CLAUSE,
+    + GMAIL_NATIVE_CLAUSE + ' ' + FILES_HANDLED_CLAUSE,
     forwardEmailParams,
     async ({ message_id, to, account, body, cc, bcc, is_html, include_signature, include_attachments }) => {
       try {
