@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Email a session handles is filed automatically.** After `reply_email`, `forward_email`, or `send_draft` of a draft that replies in an existing conversation succeeds, the conversation it answered is marked read, taken out of the inbox and labeled **Handled by Claude**. The label is created the first time an account needs it and found by name after that, so every account behaves the same with no setup. Drafts that are only created (`draft_email`, `draft_reply`) change nothing.
+- **`mark_handled`** does the same for an email a session finished without replying. It is not for an email that was only read or looked up.
+
+### Changed
+- **The send result says whether the filing worked.** `cleanup` is `"ok"` or `"cleanup failed: <reason>"`, and a failure is logged. A cleanup failure never makes a delivered send report an error, because a retry would send the mail twice.
+
 ## [1.11.0] — 2026-09-02
 
 This release lets the server administer a Google Workspace: create the addresses a business sends and receives on, decide whether an address accepts mail from outside the company, and manage the people in the directory.

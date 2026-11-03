@@ -6,7 +6,7 @@ A Gmail [MCP server](https://modelcontextprotocol.io) for [Claude Code](https://
 
 ## Features
 
-- **69 tools** spanning Gmail (read, compose, draft management, modify, attachments, mailbox-change watching, thread and label management, mail rules and the vacation responder), Google Calendar, Google Drive (read plus upload, which can convert as it uploads), Google Docs (read, create, and append/find-replace), Google Sheets (write a range, append rows), Google Chat (read plus posting) and **Google Workspace administration** (domains, users, groups and group settings — see [Google Workspace admin](#google-workspace-admin)) — see the [Tools](#tools) table
+- **70 tools** spanning Gmail (read, compose, draft management, modify, attachments, mailbox-change watching, thread and label management, mail rules and the vacation responder), Google Calendar, Google Drive (read plus upload, which can convert as it uploads), Google Docs (read, create, and append/find-replace), Google Sheets (write a range, append rows), Google Chat (read plus posting) and **Google Workspace administration** (domains, users, groups and group settings — see [Google Workspace admin](#google-workspace-admin)) — see the [Tools](#tools) table
 - **Gmail-native outbound mail** — everything you send goes out as `multipart/alternative` (HTML plus a plain-text alternative), with your account's Gmail signature, quoted history on replies, and a proper `Name <address>` sender. Attachments supported on send, draft and reply; images can be embedded in the body with `inline_images` and referenced as `cid:filename`; forwards re-attach the original's files and keep its embedded images embedded
 - **Watch for new mail without polling the whole inbox** — `get_history_baseline` hands you a cursor, `get_mail_changes` tells you what arrived, was deleted or was relabelled since it. Call it with no cursor for since-last-time: the server remembers the last complete position per account and per filter (in gitignored `cursors/`, beside `tokens/`), so an INBOX-only watcher and an unfiltered one do not consume each other's window. Passing your own cursor still works, and always wins
 - **Multi-account** support with simple aliases
@@ -156,14 +156,14 @@ Then use `/email` or `/checkemail` in Claude Code.
 | `get_attachment` | Fetch an attachment — including an image embedded in the body: writes it to `save_dir`, or returns it inline for files up to 1MB. PNG/JPEG/GIF/WebP come back as a **viewable image**, so Claude can read what is in the picture; everything else as base64 |
 | `send_email` | Send a new email (Gmail-native HTML + text, signature, attachments, `inline_images` embedded via `cid:`) |
 | `draft_email` | Create a draft (same composition as `send_email`) |
-| `reply_email` | Reply with proper threading, `Reply-To` handling and quoted history |
+| `reply_email` | Reply with proper threading, `Reply-To` handling and quoted history; then files the conversation as handled (see `mark_handled`) |
 | `draft_reply` | Draft a reply (review in Gmail before sending) |
-| `send_draft` | Send an existing draft by ID |
+| `send_draft` | Send an existing draft by ID; a draft that replies in an existing conversation files that conversation as handled |
 | `list_drafts` | List drafts with id + headers (paginated) |
 | `read_draft` | Read a draft's full content by ID |
 | `update_draft` | Replace a draft's contents (same composition as `draft_email`) |
 | `delete_draft` | Permanently delete a draft |
-| `forward_email` | Forward an email to new recipients, re-attaching the original's attachments and keeping its embedded images embedded |
+| `forward_email` | Forward an email to new recipients, re-attaching the original's attachments and keeping its embedded images embedded; then files the forwarded email's conversation as handled |
 | `archive_email` | Archive (remove INBOX label) |
 | `label_email` | Add/remove labels |
 | `trash_email` | Move one message to trash |
@@ -173,6 +173,7 @@ Then use `/email` or `/checkemail` in Claude Code.
 | `unsubscribe_email` | Process `List-Unsubscribe` header (one-click HTTPS, or a mailto send that needs `confirm: true`) |
 | `mark_read` | Remove UNREAD label from a message |
 | `mark_unread` | Add UNREAD label to a message |
+| `mark_handled` | File a conversation finished without a reply: mark read, remove `INBOX`, add the "Handled by Claude" label (created on first use per account). The three send paths above do this by themselves; their result's `cleanup` says `ok` or `cleanup failed: <reason>`, and the mail was sent either way |
 | `star_email` | Add STARRED label |
 | `unstar_email` | Remove STARRED label |
 | `mark_important` | Add IMPORTANT label |
