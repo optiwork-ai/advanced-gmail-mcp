@@ -8,15 +8,18 @@ import { getAuthClient } from '../gmail/auth.js';
 import { mimeTypeForFilename } from '../gmail/mime.js';
 import { googleApiCall } from '../google-api-error.js';
 import { log } from '../log.js';
+import { errorStatus, googleErrorMessage, isMissingScopeError } from '../scope-error.js';
 
 // ---------------------------------------------------------------------------
 // Client cache: Google Drive API client per account with 50-min TTL.
 // Mirrors the caching idiom in src/gmail/client.ts.
 //
 // Everything in this module is READ-ONLY except `uploadFile`, which creates a
-// new file. Drive writes run under `drive.file` — the scope that grants access
-// to files THIS APP creates and to nothing else in the user's Drive — so no
-// code path here can update or delete a document the user already had.
+// new file, and `shareFile`, which gives named people access to one. Drive
+// writes run under `drive.file` — the scope that grants access to files THIS
+// APP creates and to nothing else in the user's Drive — so no code path here
+// can update or delete a document the user already had, or change who can
+// reach one.
 //
 // One other tool writes through this client rather than through this module:
 // `create_google_doc` (src/tools/docs-create-document.ts) issues its own
@@ -353,5 +356,314 @@ export async function uploadFile(opts: UploadFileOptions): Promise<UploadFileRes
     ...(folderId ? { folderId } : {}),
     ...(convertTo ? { converted: true as const } : {}),
     account: resolved.alias,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Sharing with named people — share_drive_file
+//
+// Every piece below is shared by both permission tools (the address rule, the
+// list read with paging, the "file not reachable" words and the result shape),
+// so a rule tightened for one cannot drift away from the other.
+// ---------------------------------------------------------------------------
+
+/** The only roles a person can be given, or have removed, through this server. */
+export const SHARE_ROLES = ['reader', 'commenter', 'writer'] as const;
+export type ShareRole = (typeof SHARE_ROLES)[number];
+
+/**
+ * One plain mailbox address: one `@`, a dotted domain, and none of the
+ * characters that would make it a list (`,` `;`), a display name (`<` `>` `"`
+ * `(` `)`), a wildcard (`*`) or anything with a space in it.
+ */
+const ADDRESS_RE = /^[^\s@,;<>"()*]+@[^\s@,;<>"()*]+\.[^\s@,;<>"()*]+$/;
+
+/** Validate one address; returns it trimmed, or throws naming the item and the rule. */
+export function checkAddress(tool: string, raw: unknown, where: string): string {
+  if (typeof raw !== 'string') {
+    throw new Error(`${tool}: ${where} must be an email address written as text.`);
+  }
+  const email = raw.trim();
+  if (!ADDRESS_RE.test(email)) {
+    throw new Error(
+      `${tool}: ${where} "${email}" is not one plain email address. Give exactly one address `
+      + '(name@example.com): one @, a dotted domain, and no spaces, commas, angle brackets, '
+      + 'display name or wildcard.',
+    );
+  }
+  return email;
+}
+
+/** Refuse the same address twice, case-insensitively. */
+function checkDistinct(tool: string, emails: string[]): void {
+  const seen = new Map<string, number>();
+  emails.forEach((email, i) => {
+    const key = email.toLowerCase();
+    const first = seen.get(key);
+    if (first !== undefined) {
+      throw new Error(
+        `${tool}: recipients[${i}] "${email}" repeats recipients[${first}]; name each person once.`,
+      );
+    }
+    seen.set(key, i);
+  });
+}
+
+/** Validate a file id: trimmed, non-empty, an id rather than a link. */
+export function checkFileId(tool: string, raw: unknown): string {
+  const fileId = typeof raw === 'string' ? raw.trim() : '';
+  if (!fileId) throw new Error(`${tool}: file_id is required.`);
+  if (fileId.includes('/')) {
+    throw new Error(
+      `${tool}: file_id must be the Drive file id, not a link (the part after /d/ in the address).`,
+    );
+  }
+  return fileId;
+}
+
+/** The fields every permissions read asks for. */
+const PERMISSION_LIST_FIELDS = 'nextPageToken,permissions(id,type,role,emailAddress,displayName,domain,deleted)';
+
+/** One Drive permission as Google lists it. */
+export type DrivePermission = drive_v3.Schema$Permission;
+
+/** A failed Drive call, classified on Google's raw error before the shared translator rewrote it. */
+interface DriveFailure {
+  /** The words to report: the shared translator's, or the "not reachable" explanation. */
+  reason: string;
+  /** True when no later call on this file can succeed either: a missing scope, a 401, or a file that is out of reach. */
+  fileLevel: boolean;
+  /** The raw HTTP status, when Google sent one. */
+  status?: number;
+}
+
+/**
+ * The words for a file this server's `drive.file` grant cannot reach. Google
+ * answers 404 for such a file exactly as for an id that never existed, and
+ * neither is a broken login.
+ */
+function notReachableReason(tool: string, fileId: string, alias: string, raw: unknown): string {
+  return (
+    `${tool}: this server cannot reach file "${fileId}" on "${alias}". It holds the narrow `
+    + '"drive.file" grant, which reaches only files this server created itself (with '
+    + 'upload_drive_file or create_google_doc), and only on the account that created them. A file '
+    + 'made by hand in Drive, or created on another account, is invisible to it, and Google says '
+    + '"not found" exactly as it would for an id that never existed. Re-authenticating will not '
+    + `change this; the grant is working as designed.\n\nOriginal error: ${googleErrorMessage(raw)}`
+  );
+}
+
+/**
+ * Run one permissions call through `googleApiCall` (retries plus the honest
+ * error path), keeping the raw Google error so the caller can tell a file-level
+ * stop from one person's failure. `notFound` says what a 404 means for THIS
+ * call: the file is out of reach, or only this one permission is gone.
+ */
+async function permissionCall<T>(
+  ctx: { tool: string; alias: string; fileId: string; notFound: 'file' | 'person' },
+  fn: () => Promise<T>,
+): Promise<{ ok: true; value: T } | ({ ok: false } & DriveFailure)> {
+  let raw: unknown;
+  try {
+    const value = await googleApiCall(
+      { tool: ctx.tool, api: 'Google Drive', scope: DRIVE_FILE_SCOPE, alias: ctx.alias },
+      async () => {
+        try {
+          return await fn();
+        } catch (err) {
+          raw = err;
+          throw err;
+        }
+      },
+    );
+    return { ok: true, value };
+  } catch (err) {
+    const status = errorStatus(raw);
+    const translated = err instanceof Error ? err.message : String(err);
+    if (isMissingScopeError(raw) || status === 401) {
+      return { ok: false, reason: translated, fileLevel: true, status };
+    }
+    if (status === 404 && ctx.notFound === 'file') {
+      return { ok: false, reason: notReachableReason(ctx.tool, ctx.fileId, ctx.alias, raw), fileLevel: true, status };
+    }
+    return { ok: false, reason: translated, fileLevel: false, status };
+  }
+}
+
+/** Read a file's whole permission list, following `nextPageToken`. */
+async function listPermissions(
+  drive: drive_v3.Drive,
+  ctx: { tool: string; alias: string; fileId: string },
+): Promise<{ ok: true; value: DrivePermission[] } | ({ ok: false } & DriveFailure)> {
+  const all: DrivePermission[] = [];
+  let pageToken: string | undefined;
+  do {
+    const token = pageToken;
+    const page = await permissionCall({ ...ctx, notFound: 'file' }, () =>
+      drive.permissions.list({
+        fileId: ctx.fileId,
+        fields: PERMISSION_LIST_FIELDS,
+        pageSize: 100,
+        supportsAllDrives: true,
+        ...(token ? { pageToken: token } : {}),
+      }),
+    );
+    if (!page.ok) return page;
+    all.push(...(page.value.data.permissions ?? []));
+    pageToken = page.value.data.nextPageToken ?? undefined;
+  } while (pageToken);
+  return { ok: true, value: all };
+}
+
+/** One person's outcome, in the order they were named. */
+export interface PermissionResult {
+  email: string;
+  role?: string;
+  status: 'granted' | 'removed' | 'unconfirmed' | 'failed' | 'not_found';
+  permissionId?: string;
+  reason?: string;
+}
+
+/** What both permission tools return. */
+export interface PermissionChangeResult {
+  success: boolean;
+  fileId: string;
+  account: string;
+  results: PermissionResult[];
+  /** Google's own list after the change; null when it could not be read and there is no earlier list to show. */
+  permissions: DrivePermission[] | null;
+  /** Present when the read-back after the change failed. */
+  readBackError?: string;
+  /** Present, and true, when `permissions` is the list taken BEFORE the change because the read-back failed. */
+  permissionsTakenBeforeRemovals?: true;
+}
+
+export interface ShareFileOptions {
+  fileId: unknown;
+  recipients: unknown;
+  account?: string | AccountConfig;
+}
+
+const SHARE_TOOL = 'share_drive_file';
+
+/** Validate the share request in full before anything is sent. */
+function checkShareRecipients(raw: unknown): Array<{ email: string; role: ShareRole }> {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error(`${SHARE_TOOL}: recipients must name at least one person.`);
+  }
+  const recipients = raw.map((item: unknown, i) => {
+    const where = `recipients[${i}]`;
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+      throw new Error(`${SHARE_TOOL}: ${where} must be { email, role }.`);
+    }
+    const extra = Object.keys(item).filter(key => key !== 'email' && key !== 'role');
+    if (extra.length > 0) {
+      throw new Error(
+        `${SHARE_TOOL}: ${where} carries ${extra.map(k => `"${k}"`).join(', ')}; each recipient is exactly `
+        + '{ email, role }. This tool shares only with named people: never link, domain or group sharing.',
+      );
+    }
+    const { email, role } = item as { email?: unknown; role?: unknown };
+    const checkedEmail = checkAddress(SHARE_TOOL, email, `${where}.email`);
+    if (typeof role !== 'string' || !(SHARE_ROLES as readonly string[]).includes(role)) {
+      throw new Error(
+        `${SHARE_TOOL}: ${where}.role "${String(role ?? '')}" is not allowed; the role must be reader, commenter or writer.`,
+      );
+    }
+    return { email: checkedEmail, role: role as ShareRole };
+  });
+  checkDistinct(SHARE_TOOL, recipients.map(r => r.email));
+  return recipients;
+}
+
+/**
+ * Give named people access to a file this server created.
+ *
+ * Every refusal happens before a client is built. Then one `permissions.create`
+ * per person, in order, always `type: "user"` with Google's notification email
+ * switched OFF, then one read-back of the file's list. A person is `granted`
+ * only when the read-back shows the id the create returned, at the role asked
+ * for. A file-level failure (missing scope, 401, file out of reach) stops the
+ * loop and fails that person and everyone after them; when it leaves nothing
+ * granted it is thrown, so the tool answers with an error.
+ */
+export async function shareFile(opts: ShareFileOptions): Promise<PermissionChangeResult> {
+  const resolved = resolve(opts.account);
+  const fileId = checkFileId(SHARE_TOOL, opts.fileId);
+  const recipients = checkShareRecipients(opts.recipients);
+
+  const drive = await getDriveClient(resolved);
+  const ctx = { tool: SHARE_TOOL, alias: resolved.alias, fileId };
+
+  const results: PermissionResult[] = [];
+  let stop: string | undefined;
+  for (const { email, role } of recipients) {
+    if (stop) {
+      results.push({ email, role, status: 'failed', reason: stop });
+      continue;
+    }
+    const outcome = await permissionCall({ ...ctx, notFound: 'file' }, () =>
+      drive.permissions.create({
+        fileId,
+        sendNotificationEmail: false,
+        supportsAllDrives: true,
+        fields: 'id,type,role,emailAddress',
+        requestBody: { type: 'user', role, emailAddress: email },
+      }),
+    );
+    if (outcome.ok) {
+      results.push({ email, role, status: 'granted', ...(outcome.value.data.id ? { permissionId: outcome.value.data.id } : {}) });
+    } else {
+      if (outcome.fileLevel) stop = outcome.reason;
+      results.push({ email, role, status: 'failed', reason: outcome.reason });
+    }
+  }
+
+  if (stop && !results.some(r => r.status === 'granted')) {
+    throw new Error(stop);
+  }
+
+  const readBack = await listPermissions(drive, ctx);
+  for (const result of results) {
+    if (result.status !== 'granted') continue;
+    if (!readBack.ok) {
+      result.status = 'unconfirmed';
+      result.reason = `The share was accepted, but the read-back of the file's permissions failed: ${readBack.reason}`;
+    } else if (!result.permissionId) {
+      result.status = 'unconfirmed';
+      result.reason = 'Google accepted the share but returned no permission id to check the read-back against.';
+    } else {
+      const entry = readBack.value.find(p => p.id === result.permissionId);
+      if (!entry) {
+        result.status = 'unconfirmed';
+        result.reason = `The read-back does not show permission ${result.permissionId}; read the file's permissions again after a moment.`;
+      } else if (entry.role !== result.role) {
+        result.status = 'unconfirmed';
+        result.reason = `The read-back shows permission ${result.permissionId} as "${entry.role}", not the requested "${result.role}".`;
+      }
+    }
+  }
+
+  // Mutating path, logged like upload_drive_file: alias, file id, counts,
+  // roles and permission ids. Never an address (send_email logs none either).
+  log('info', SHARE_TOOL, {
+    account: resolved.alias,
+    file_id: fileId,
+    recipients: results.length,
+    granted: results.filter(r => r.status === 'granted').length,
+    unconfirmed: results.filter(r => r.status === 'unconfirmed').length,
+    failed: results.filter(r => r.status === 'failed').length,
+    roles: results.map(r => r.role),
+    permission_ids: results.map(r => r.permissionId ?? null),
+    read_back: readBack.ok,
+  });
+
+  return {
+    success: readBack.ok && results.every(r => r.status === 'granted'),
+    fileId,
+    account: resolved.alias,
+    results,
+    permissions: readBack.ok ? readBack.value : null,
+    ...(readBack.ok ? {} : { readBackError: readBack.reason }),
   };
 }
