@@ -65,7 +65,7 @@ const WRITE_TOOLS = [
   'create_filter', 'delete_filter', 'set_vacation',
   // Chat, Drive, Docs, Calendar
   'post_chat_message',
-  'upload_drive_file',
+  'upload_drive_file', 'share_drive_file',
   'create_google_doc', 'update_google_doc',
   'create_calendar_event',
   // Sheets (2026-09-01)
@@ -90,8 +90,8 @@ const READ_TOOLS = [
 ];
 
 describe('registerAllTools', () => {
-  it('registers 70 tools', () => {
-    expect(roster()).toHaveLength(70);
+  it('registers 71 tools', () => {
+    expect(roster()).toHaveLength(71);
   });
 
   it('can actually be LISTED — every parameter shape survives JSON Schema', async () => {
@@ -99,7 +99,7 @@ describe('registerAllTools', () => {
     // cannot be converted, the whole call throws and the server appears to
     // offer nothing at all.
     const tools = await listedTools();
-    expect(tools).toHaveLength(70);
+    expect(tools).toHaveLength(71);
     expect(tools.map(t => t.name).sort()).toEqual(roster().sort());
     for (const tool of tools) {
       expect(tool.inputSchema, `${tool.name} produced no input schema`).toBeTruthy();
@@ -157,5 +157,11 @@ describe('registerAllTools', () => {
       expect(WRITE_TOOLS).toContain(name);
       expect(READ_TOOLS).not.toContain(name);
     }
+  });
+
+  it('registers the Drive sharing tool, on the WRITE side', () => {
+    expect(roster()).toContain('share_drive_file');
+    expect(WRITE_TOOLS).toContain('share_drive_file');
+    expect(READ_TOOLS).not.toContain('share_drive_file');
   });
 });
