@@ -376,5 +376,6 @@ describe('share_drive_file — what it records and returns', () => {
     expect(description).toMatch(/never turns on link or domain sharing/i);
     expect(description).toMatch(/no Google notification/i);
     expect(description).toMatch(/read-back/i);
+    expect(description).toMatch(/undone with unshare_drive_file/);
   });
 });
