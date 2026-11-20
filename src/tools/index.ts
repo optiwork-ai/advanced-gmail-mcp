@@ -43,6 +43,7 @@ import { registerSearchDriveFiles } from './drive-search-files.js';
 import { registerReadDriveFile } from './drive-read-file.js';
 import { registerUploadDriveFile } from './drive-upload-file.js';
 import { registerShareDriveFile } from './drive-share-file.js';
+import { registerUnshareDriveFile } from './drive-unshare-file.js';
 import { registerGetGoogleDoc } from './docs-get-document.js';
 import { registerCreateGoogleDoc } from './docs-create-document.js';
 import { registerUpdateGoogleDoc } from './docs-update-document.js';
@@ -144,6 +145,7 @@ export function registerAllTools(server: McpServer): void {
   registerReadDriveFile(server);
   registerUploadDriveFile(server);
   registerShareDriveFile(server);
+  registerUnshareDriveFile(server);
   registerGetGoogleDoc(server);
   registerCreateGoogleDoc(server);
   registerUpdateGoogleDoc(server);

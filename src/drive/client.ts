@@ -15,11 +15,11 @@ import { errorStatus, googleErrorMessage, isMissingScopeError } from '../scope-e
 // Mirrors the caching idiom in src/gmail/client.ts.
 //
 // Everything in this module is READ-ONLY except `uploadFile`, which creates a
-// new file, and `shareFile`, which gives named people access to one. Drive
-// writes run under `drive.file` — the scope that grants access to files THIS
-// APP creates and to nothing else in the user's Drive — so no code path here
-// can update or delete a document the user already had, or change who can
-// reach one.
+// new file, and `shareFile` / `unshareFile`, which give a named person access
+// to one or take that person's own access away. Drive writes run under
+// `drive.file` — the scope that grants access to files THIS APP creates and to
+// nothing else in the user's Drive — so no code path here can update or delete
+// a document the user already had, or change who can reach one.
 //
 // One other tool writes through this client rather than through this module:
 // `create_google_doc` (src/tools/docs-create-document.ts) issues its own
@@ -360,7 +360,7 @@ export async function uploadFile(opts: UploadFileOptions): Promise<UploadFileRes
 }
 
 // ---------------------------------------------------------------------------
-// Sharing with named people — share_drive_file
+// Sharing with named people — share_drive_file (and, below, unshare_drive_file)
 //
 // Every piece below is shared by both permission tools (the address rule, the
 // list read with paging, the "file not reachable" words and the result shape),
@@ -665,5 +665,162 @@ export async function shareFile(opts: ShareFileOptions): Promise<PermissionChang
     results,
     permissions: readBack.ok ? readBack.value : null,
     ...(readBack.ok ? {} : { readBackError: readBack.reason }),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Removing a named person's access — unshare_drive_file
+// ---------------------------------------------------------------------------
+
+export interface UnshareFileOptions {
+  fileId: unknown;
+  recipients: unknown;
+  account?: string | AccountConfig;
+}
+
+const UNSHARE_TOOL = 'unshare_drive_file';
+
+/** Fixed words for each outcome that involves no call to Google. */
+const NOT_FOUND_NOTE =
+  'No person\'s own access on this file carries exactly this address, so nothing was removed for it. '
+  + 'Google may list a person under another form of their address: compare against "permissions" '
+  + 'and call again with the address exactly as shown there.';
+const NOT_REMOVABLE_REASON =
+  'This tool never removes an owner or a manager; nothing was removed for this address.';
+const AMBIGUOUS_REASON =
+  'More than one user permission on this file carries this address, so this tool cannot tell which '
+  + 'one to remove; nothing was removed for it.';
+
+/** Validate the removal request in full before anything is sent. */
+function checkUnshareRecipients(raw: unknown): string[] {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error(`${UNSHARE_TOOL}: recipients must name at least one person.`);
+  }
+  const emails = raw.map((item: unknown, i) => checkAddress(UNSHARE_TOOL, item, `recipients[${i}]`));
+  checkDistinct(UNSHARE_TOOL, emails);
+  return emails;
+}
+
+/**
+ * The frozen matching rule: a person's own `type: "user"` entry, not marked
+ * deleted, whose address equals the named one after trimming and lower-casing
+ * and nothing else. It can miss a match; it cannot match the wrong person.
+ */
+function matchesAddress(entry: DrivePermission, email: string): boolean {
+  return entry.type === 'user'
+    && entry.deleted !== true
+    && typeof entry.emailAddress === 'string'
+    && entry.emailAddress.trim().toLowerCase() === email.trim().toLowerCase();
+}
+
+/**
+ * Remove named people's own access from a file this server created.
+ *
+ * Reads the file's list, deletes only the matched person's `type: "user"`
+ * permission at reader/commenter/writer (by the id from that list, never from
+ * input), then reads the list back. A person is `removed` only when the
+ * read-back no longer shows that id, whatever the delete itself answered. A
+ * failure on the first list is thrown, so the tool answers with an error and
+ * nothing is attempted.
+ */
+export async function unshareFile(opts: UnshareFileOptions): Promise<PermissionChangeResult> {
+  const resolved = resolve(opts.account);
+  const fileId = checkFileId(UNSHARE_TOOL, opts.fileId);
+  const emails = checkUnshareRecipients(opts.recipients);
+
+  const drive = await getDriveClient(resolved);
+  const ctx = { tool: UNSHARE_TOOL, alias: resolved.alias, fileId };
+
+  const before = await listPermissions(drive, ctx);
+  if (!before.ok) throw new Error(before.reason);
+
+  const results: PermissionResult[] = [];
+  /** Why each attempted delete was refused, by its place in `results`. */
+  const refused = new Map<number, string>();
+  const attempted = new Set<number>();
+  let stop: string | undefined;
+
+  for (const email of emails) {
+    if (stop) {
+      results.push({ email, status: 'failed', reason: stop });
+      continue;
+    }
+    const matches = before.value.filter(entry => matchesAddress(entry, email));
+    if (matches.length === 0) {
+      results.push({ email, status: 'not_found', reason: NOT_FOUND_NOTE });
+      continue;
+    }
+    if (matches.length > 1) {
+      results.push({ email, status: 'failed', reason: AMBIGUOUS_REASON });
+      continue;
+    }
+    const [match] = matches;
+    const role = match.role ?? undefined;
+    const permissionId = match.id ?? undefined;
+    const held = { email, ...(role ? { role } : {}), ...(permissionId ? { permissionId } : {}) };
+    if (!role || !(SHARE_ROLES as readonly string[]).includes(role)) {
+      results.push({ ...held, status: 'failed', reason: NOT_REMOVABLE_REASON });
+      continue;
+    }
+    if (!permissionId) {
+      results.push({ ...held, status: 'failed', reason: 'Google listed this person with no permission id, so there is nothing to remove by.' });
+      continue;
+    }
+
+    const index = results.push({ ...held, status: 'unconfirmed' }) - 1;
+    attempted.add(index);
+    const outcome = await permissionCall({ ...ctx, notFound: 'person' }, () =>
+      drive.permissions.delete({ fileId, permissionId, supportsAllDrives: true }),
+    );
+    if (!outcome.ok) {
+      refused.set(index, outcome.reason);
+      if (outcome.fileLevel) stop = outcome.reason;
+    }
+  }
+
+  const readBack = await listPermissions(drive, ctx);
+  for (const index of attempted) {
+    const result = results[index];
+    const deleteError = refused.get(index);
+    if (readBack.ok && !readBack.value.some(entry => entry.id === result.permissionId)) {
+      result.status = 'removed';
+    } else if (deleteError) {
+      result.status = 'failed';
+      result.reason = deleteError;
+    } else if (readBack.ok) {
+      result.status = 'unconfirmed';
+      result.reason = `Google accepted the removal, but the read-back still shows permission ${result.permissionId}; `
+        + 'a read straight after a change can lag, so read the file\'s permissions again after a moment.';
+    } else {
+      result.status = 'unconfirmed';
+      result.reason = `Google accepted the removal, but the read-back of the file's permissions failed: ${readBack.reason}`;
+    }
+  }
+
+  // Mutating path, logged like upload_drive_file: alias, file id, counts,
+  // statuses, roles and permission ids. Never an address.
+  const count = (status: PermissionResult['status']) => results.filter(r => r.status === status).length;
+  log('info', UNSHARE_TOOL, {
+    account: resolved.alias,
+    file_id: fileId,
+    recipients: results.length,
+    removed: count('removed'),
+    unconfirmed: count('unconfirmed'),
+    failed: count('failed'),
+    not_found: count('not_found'),
+    statuses: results.map(r => r.status),
+    roles: results.map(r => r.role ?? null),
+    permission_ids: results.map(r => r.permissionId ?? null),
+    read_back: readBack.ok,
+  });
+
+  return {
+    success: readBack.ok && results.every(r => r.status === 'removed'),
+    fileId,
+    account: resolved.alias,
+    results,
+    ...(readBack.ok
+      ? { permissions: readBack.value }
+      : { permissions: before.value, readBackError: readBack.reason, permissionsTakenBeforeRemovals: true as const }),
   };
 }

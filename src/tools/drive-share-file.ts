@@ -25,7 +25,8 @@ export function registerShareDriveFile(server: McpServer): void {
     + 'any other file answers that it is out of reach, and re-authenticating will not change that. '
     + 'Named people only: it never turns on link or domain sharing, never shares with a group, and never transfers ownership. '
     + 'It sends no Google notification email, so the caller sends its own message with the file\'s link. '
-    + 'The returned "permissions" list is Google\'s read-back after the share, owner included; a person is "granted" only when that read-back shows them at the role asked for.',
+    + 'The returned "permissions" list is Google\'s read-back after the share, owner included; a person is "granted" only when that read-back shows them at the role asked for. '
+    + 'A share made in error is undone with unshare_drive_file.',
     shareDriveFileParams,
     async ({ file_id, recipients, account }) => {
       try {
