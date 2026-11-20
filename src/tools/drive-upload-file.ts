@@ -13,7 +13,8 @@ export const uploadDriveFileParams = {
 };
 
 /**
- * Upload a local file to Google Drive. The only Drive tool that writes.
+ * Upload a local file to Google Drive. The only Drive tool that creates a file;
+ * share_drive_file and unshare_drive_file change who can reach one this server created.
  */
 export function registerUploadDriveFile(server: McpServer): void {
   server.tool(

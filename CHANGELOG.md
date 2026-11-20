@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Email a session handles is filed automatically.** After `reply_email`, `forward_email`, or `send_draft` of a draft that replies in an existing conversation succeeds, the conversation it answered is marked read, taken out of the inbox and labeled **Handled by Claude**. The label is created the first time an account needs it and found by name after that, so every account behaves the same with no setup. Drafts that are only created (`draft_email`, `draft_reply`) change nothing.
 - **`mark_handled`** does the same for an email a session finished without replying. It is not for an email that was only read or looked up.
+- **`share_drive_file`** gives named people access to a Drive file this server created, as a viewer, commenter or editor. It never turns on link or domain sharing and sends no Google notification email, so you send your own message with the link. The result shows Google's own list of who can reach the file afterwards.
+- **`unshare_drive_file`** removes a named person's own access to a Drive file this server created. It never removes the owner, a group, a domain or link sharing. The result shows Google's own list of who can reach the file afterwards, and keeps the role the person held so a mistaken removal can be shared back.
 
 ### Changed
 - **The send result says whether the filing worked.** `cleanup` is `"ok"` or `"cleanup failed: <reason>"`, and a failure is logged. A cleanup failure never makes a delivered send report an error, because a retry would send the mail twice.

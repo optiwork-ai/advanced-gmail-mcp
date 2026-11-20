@@ -130,10 +130,12 @@ export function registerAllTools(server: McpServer): void {
   // Chat / Drive / Docs. Chat was strictly read-only until 2026-08-28, when
   // the owner withdrew that posture; post_chat_message is the one Chat call
   // other people can see, and nothing here edits or deletes a message.
-  // Everything else that writes
-  // here creates rather than overwrites: upload_drive_file and
-  // create_google_doc both run under the narrow drive.file scope, which reaches
-  // only the files this server itself created. The one exception is
+  // Every Drive write here runs under the narrow drive.file scope, which
+  // reaches only the files this server itself created: upload_drive_file and
+  // create_google_doc create rather than overwrite, and share_drive_file /
+  // unshare_drive_file (2026-11-20) give a named person access to such a file
+  // or take that person's own access away, never link, domain or group
+  // sharing and never the owner. The one write outside drive.file is
   // update_google_doc (2026-08-28), which edits an existing document under the
   // `documents` scope that replaced `documents.readonly`; its surface is
   // append-text and find-replace only, so it cannot rewrite by miscounting.
